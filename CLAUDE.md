@@ -28,9 +28,9 @@
 | В репозитории | Где на самом деле | Как выкладывать |
 |---|---|---|
 | `web/index.html` | сервер `/var/www/fspirat.online/router/index.html` | push в main → GitHub Actions (`deploy-web.yml`) |
-| `router/bin/fspirat-ping` | роутер `/usr/bin/fspirat-ping` (cron */5) | `bash scripts/deploy-router.sh` |
-| `router/www/cgi-bin/fspirat` | роутер `/www/cgi-bin/fspirat` | `bash scripts/deploy-router.sh` |
-| `router/etc/init.d/fstunnel` | роутер `/etc/init.d/fstunnel` | `bash scripts/deploy-router.sh` |
+| `router/bin/fspirat-ping` | роутер `/usr/bin/fspirat-ping` (cron */5) | workflow `Deploy router` (или `bash scripts/deploy-router.sh` из дома) |
+| `router/www/cgi-bin/fspirat` | роутер `/www/cgi-bin/fspirat` | workflow `Deploy router` |
+| `router/etc/init.d/fstunnel` | роутер `/etc/init.d/fstunnel` | workflow `Deploy router` (перезапуск туннеля — только с разрешения) |
 | `router/passwall/*.txt` | вставлены вручную в правила PassWall (Rule Manage) | вручную через LuCI |
 | `server/bin/fspirat-watch` | сервер `/usr/local/bin/fspirat-watch` | `bash scripts/deploy-server.sh` |
 | `server/fail2ban/fspirat.local` | сервер `/etc/fail2ban/jail.d/fspirat.local` | `bash scripts/deploy-server.sh` |
@@ -47,6 +47,21 @@
 (репозиторий приватный). Секреты: `OPS_SSH_KEY` (root), `SSH_KEY` (deploy), `SSH_HOST`.
 Правила те же: перед `nginx reload` — `nginx -t`; не печатать в лог файлы с секретами
 (`snippets/fspirat-router.conf`, `/etc/fspirat-watch.conf`, `/etc/fspirat.token`).
+
+## Доступ к роутеру с сервера
+
+Туннель fstunnel пробрасывает ещё `127.0.0.1:8022` на сервере → SSH роутера (dropbear). Ключ сервера
+`/root/.ssh/router_key` (`fspirat-vps`) — в `/etc/dropbear/authorized_keys` роутера; у пользователя `tunnel`
+на сервере `permitlisten` для 8081 и 8022. Команда на роутер из ops: `ssh -p 8022 -i /root/.ssh/router_key root@127.0.0.1 '...'`.
+Время на роутере — Europe/Samara (+04).
+
+## История, журнал, имена (server/auth/data.php)
+
+fspirat-watch раз в минуту пишет в `/var/lib/fspirat/`: `history.tsv` (время, отклик ms: 0 — VPN не прошёл,
+-1 — роутер не на связи; 35 дней), `events.tsv` (журнал: смены сервера, перезапуски, пропадания связи,
+перезагрузки), `offline_since`, `last_ok`. `GET /router/data?range=day|week|month` отдаёт это странице
+(работает и без туннеля), `POST /router/data mac=&name=` — свои имена устройств
+(`/var/lib/fspirat-router-auth/names.json`). Манифест и иконки PWA (`web/manifest.webmanifest`, `icon-*.png`) — без входа.
 
 ## Вход в панель (server/auth)
 
@@ -83,7 +98,9 @@ nginx перед каждым запросом спрашивает `check.php` 
 - `ping` — запустить fspirat-ping (~20 с) и вернуть status
 - `switch&id=XXXX` — сменить сервер (default_node в Split) + перезапуск PassWall
 - `restart` / `update` (подписка) / `reboot`
-- `speedtest&via=vpn|direct` — тест через Cloudflare (~25 с)
+- `speedtest&via=vpn|direct` — 4 потока ~35 с: загрузка напрямую с Selectel (РФ), через VPN с Hetzner (DE),
+  отдача на Cloudflare (на частые замеры отвечает 429 → `up_limited`)
+- в `devices` у Wi-Fi клиентов `band` (2g/5g), `signal` dBm, `rate` Мбит/с (iwinfo assoclist), у остальных онлайн — `wired`
 
 ## Правила работы
 
@@ -116,15 +133,15 @@ nginx перед каждым запросом спрашивает `check.php` 
 
 1. ~~Защитить папку router/ от деплоя основного сайта~~ — сделано 06.10: в `project_hex` deploy.yml
    rsync идёт с `--exclude '/router/'`.
-2. **Wi-Fi клиенты по диапазонам**: для каждого устройства 2,4 ГГц / 5 ГГц / кабель,
+2. ~~Wi-Fi клиенты по диапазонам~~ — сделано 06.10. Было: **Wi-Fi клиенты по диапазонам**: для каждого устройства 2,4 ГГц / 5 ГГц / кабель,
    сигнал dBm, скорость соединения. Данные: `iwinfo <iface> info` (частота) +
    `iwinfo <iface> assoclist`. Сначала посмотреть вывод `iwinfo` на роутере.
-3. **Тест скорости точнее**: 4 параллельных потока; для «напрямую» — российский сервер
+3. ~~Тест скорости точнее~~ — сделано 06.10. Было: **Тест скорости точнее**: 4 параллельных потока; для «напрямую» — российский сервер
    (Cloudflare в РФ замедляют). Сравнить с тарифом пользователя.
-4. **История и журнал переживают перезагрузку**: раз в час копировать
+4. ~~История и журнал переживают перезагрузку~~ — сделано 06.10 (хранит сервер). Было: **История и журнал переживают перезагрузку**: раз в час копировать
    `/tmp/fspirat/{history,switch.log}` в `/etc/fspirat/`, при старте восстанавливать.
 5. Сменить токен CGI (`/etc/fspirat.token` + nginx snippet) — старый засветился в чате.
 6. Удалить с сервера `/var/www/fspirat.online/router/setup/` (больше не нужна).
-7. Идеи: включение/выключение гостевой Wi-Fi со страницы; PWA-иконка для телефона.
+7. ~~PWA-иконка~~ — сделано 06.10. Гостевой Wi-Fi пользователю не нужен.
 
 Подробности по всей инфраструктуре — `docs/infrastructure.md`, история решений — `docs/history.md`.
