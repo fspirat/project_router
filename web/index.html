@@ -223,6 +223,26 @@
   .band.g5{color:var(--lime);border-color:#2f4a1d} .band.g2{color:var(--amber);border-color:#4a3a12}
   .band-info{display:block;color:var(--dim);font-size:11px;margin-top:2px}
 
+  .fold-panel{padding:12px 18px}
+  .fold-panel details{margin-top:0}
+  .fold-panel summary{border:0;padding:6px 0;font-family:var(--pixel);font-size:11px;color:var(--green);letter-spacing:1px}
+  .fold-panel summary span{font-family:var(--body);font-size:13px;letter-spacing:0;color:var(--dim)}
+  .fold-panel summary span.up{color:var(--lime)} .fold-panel summary span.down{color:var(--red)}
+  .fold-body{padding:10px 0 4px}
+
+  /* Устройства: 5 ГГц и 2,4 ГГц — два столбца, ниже кабель и «не в сети» */
+  .bands{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+  .bcol{border:2px solid var(--edge);background:#0a0f08;min-width:0}
+  .bcol h3,.bwide h3{margin:0;padding:10px 12px;font-family:var(--pixel);font-size:10px;font-weight:400;letter-spacing:1px;border-bottom:2px solid var(--edge)}
+  .bcol.g5 h3{color:var(--lime)} .bcol.g2 h3{color:var(--amber)} .bwide h3{color:var(--dim)}
+  .bcol h3 small,.bwide h3 small{font-family:var(--body);font-size:12px;color:var(--dim);letter-spacing:0;margin-left:6px}
+  .bcol .dev{grid-template-columns:auto 1fr;padding:9px 12px}
+  .bcol .dev-ip{grid-column:2;text-align:left;margin-top:-6px}
+  .bcol .dev-ip small{display:inline;margin-left:8px}
+  .bcol .empty{padding:12px;color:var(--dim);font-size:13px;margin:0}
+  .bwide{border:2px solid var(--edge);background:#0a0f08;margin-bottom:14px}
+  #devices details{margin-top:0}
+
   .mtg{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .mtg b{font-family:var(--pixel);font-size:11px;font-weight:400}
   .mtg.up b{color:var(--lime)} .mtg.down b{color:var(--red)}
@@ -233,7 +253,7 @@
   .toast.err{border-color:var(--red);background:#22100b}
 
   @media (max-width:560px){
-    .meters,.speed,.st-grid,.down-cols{grid-template-columns:1fr}
+    .meters,.speed,.st-grid,.down-cols,.bands{grid-template-columns:1fr}
     .tab{flex:1;text-align:center;padding:12px 8px}
     .srv{grid-template-columns:1fr auto auto;gap:8px 12px}
     .srv .btn,.srv .tag{grid-column:1/-1;justify-self:start}
@@ -336,10 +356,14 @@
       </div>
     </section>
 
-    <section class="panel" id="mtg-box" hidden>
-      <h2>Telegram-прокси</h2>
-      <div class="mtg"><span class="dot" id="mtg-dot"></span><b id="mtg-state">—</b><span class="muted" id="mtg-info"></span></div>
-      <p class="note">Свой прокси на сервере в Нидерландах (tg.fspirat.online, порт 443). Ссылка для подключения — в сообщении бота @FSRouter_bot.</p>
+    <section class="panel fold-panel" id="mtg-box" hidden>
+      <details id="mtg-fold">
+        <summary>Telegram-прокси · <span id="mtg-sum">—</span></summary>
+        <div class="fold-body">
+          <div class="mtg"><span class="dot" id="mtg-dot"></span><b id="mtg-state">—</b><span class="muted" id="mtg-info"></span></div>
+          <p class="note">Свой прокси на сервере в Нидерландах (tg.fspirat.online, порт 443). Ссылка для подключения — в сообщении бота @FSRouter_bot.</p>
+        </div>
+      </details>
     </section>
 
     <section class="panel">
@@ -384,7 +408,7 @@
 
     <section class="panel">
       <h2>Устройства</h2>
-      <ul class="list" id="devices"><li class="empty">Загружаю…</li></ul>
+      <div id="devices"><p class="empty">Загружаю…</p></div>
     </section>
   </div>
 </div>
@@ -547,7 +571,7 @@ function renderDevices(list){
   if(editing) return;                      // не мешать, пока пользователь вводит имя
   const nm = d => names[(d.mac || '').toLowerCase()] || d.name || '';
   list = (list || []).slice().sort((a,b) => (b.online - a.online) || (nm(a) || 'я').localeCompare(nm(b) || 'я'));
-  $('#devices').innerHTML = list.map(d => {
+  const row = (d, tag) => {
     const own = names[(d.mac || '').toLowerCase()];
     const band = BANDS[d.band];
     const info = [d.signal ? d.signal + ' dBm' : '', d.rate ? d.rate + ' Мбит/с' : ''].filter(Boolean).join(' · ');
@@ -555,14 +579,28 @@ function renderDevices(list){
       <span class="dot${d.online ? ' on' : ''}" title="${d.online ? 'в сети' : 'не в сети'}"></span>
       <span class="dev-name" data-mac="${esc(d.mac)}">
         <span>${esc(nm(d) || 'Без имени')}</span>
-        ${band ? `<span class="band ${band[0]}" title="${esc(info)}">${band[1]}</span>` : ''}
+        ${tag && band ? `<span class="band ${band[0]}">${band[1]}</span>` : ''}
         <button class="ed" data-edit="${esc(d.mac)}" title="Переименовать" aria-label="Переименовать">✎</button>
         ${own && d.name ? `<small>в сети называется ${esc(d.name)}</small>` : ''}
         ${info ? `<small class="band-info">${esc(info)}</small>` : ''}
       </span>
       <span class="dev-ip">${esc(d.ip)}<small>${esc(d.mac)}</small></span>
     </li>`;
-  }).join('') || '<li class="empty">Нет устройств с выданным адресом.</li>';
+  };
+  const g5 = list.filter(d => d.online && (d.band === '5g' || d.band === '6g'));
+  const g2 = list.filter(d => d.online && d.band === '2g');
+  const wired = list.filter(d => d.online && d.band === 'wired');
+  const other = list.filter(d => d.online && !['5g', '6g', '2g', 'wired'].includes(d.band));
+  const off = list.filter(d => !d.online);
+  const col = (cls, title, arr) => `<div class="bcol ${cls}"><h3>${title}<small>${arr.length}</small></h3>
+      ${arr.length ? `<ul class="list">${arr.map(d => row(d, false)).join('')}</ul>` : '<p class="empty">Никого</p>'}</div>`;
+  let html = `<div class="bands">${col('g5', 'Wi-Fi 5 ГГц', g5)}${col('g2', 'Wi-Fi 2,4 ГГц', g2)}</div>`;
+  if(wired.length || other.length)
+    html += `<div class="bwide"><h3>По кабелю${other.length ? ' и прочие' : ''}<small>${wired.length + other.length}</small></h3>
+      <ul class="list">${wired.concat(other).map(d => row(d, d.band !== 'wired')).join('')}</ul></div>`;
+  if(off.length)
+    html += `<details><summary>Не в сети: ${off.length}</summary><ul class="list">${off.map(d => row(d, true)).join('')}</ul></details>`;
+  $('#devices').innerHTML = list.length ? html : '<p class="empty">Нет устройств с выданным адресом.</p>';
 }
 
 function srvRow(n, cur){
@@ -666,6 +704,10 @@ function renderMtg(m){
   box.className = 'mtg ' + (up ? 'up' : 'down');
   $('#mtg-dot').className = 'dot' + (up ? ' on' : '');
   $('#mtg-state').textContent = stale ? 'нет данных' : m.active ? 'работает' : 'не работает';
+  const sum = $('#mtg-sum');
+  sum.textContent = $('#mtg-state').textContent + (up ? ` · подключений: ${m.conns}` : '');
+  sum.className = up ? 'up' : 'down';
+  if(!up) $('#mtg-fold').open = true;                  // упал — раскрыть, чтобы было видно
   const n = m.conns, word = n % 10 === 1 && n % 100 !== 11 ? 'подключение' : [2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100) ? 'подключения' : 'подключений';
   $('#mtg-info').textContent = up ? `сейчас ${n} ${word}` + (m.since ? ` · без перезапуска ${minutes(Math.round((Date.now()/1000 - m.since) / 60))}` : '')
     : stale ? `последние данные ${when(m.ts)}` : 'служба mtg остановлена — бот уже прислал сообщение';
