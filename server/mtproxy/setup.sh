@@ -55,12 +55,15 @@ prefer-ip = "prefer-ipv4"
 
 [domain-fronting]                   # кто пришёл без секрета — на сайт-обложку (nginx 127.0.0.1:10443)
 host = "127.0.0.1"
+ip = "127.0.0.1"                    # mtg 2.2.x понимает только ip (host — в новых версиях)
 port = 10443
 proxy-protocol = true
 EOF
   )
   chgrp mtg /etc/mtg.toml; chmod 640 /etc/mtg.toml
 fi
+# исправление первой установки: mtg 2.2.x не знает «host» и шёл на внешний IP:10443
+grep -q '^ip = "127.0.0.1"' /etc/mtg.toml || sed -i '/^host = "127.0.0.1"/a ip = "127.0.0.1"                    # mtg 2.2.x понимает только ip' /etc/mtg.toml
 install -m 644 "$D/mtg.service" /etc/systemd/system/mtg.service
 systemctl daemon-reload
 echo "✅ mtg: $(/usr/local/bin/mtg --version | head -1)"
@@ -89,6 +92,7 @@ for f in ['/etc/nginx/sites-available/fspirat.online', '/etc/nginx/sites-availab
     open(f, 'w').write(s); print(f, '→ 127.0.0.1:10443')
 PY
 install -m 644 "$D/realip-proxy-protocol.conf" /etc/nginx/conf.d/realip-proxy-protocol.conf
+install -m 644 "$D/no-port-in-redirect.conf" /etc/nginx/conf.d/no-port-in-redirect.conf
 install -d /etc/nginx/stream.d
 install -m 644 "$D/sni-443.conf" /etc/nginx/stream.d/sni-443.conf
 grep -q 'stream.d/\*.conf' /etc/nginx/nginx.conf || \
@@ -107,7 +111,14 @@ for u in https://fspirat.online/ https://fspirat.ru/ https://fspirat.online/rout
   c=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$u" || true); echo "  $u → $c"
   case $c in 200|301|302) ;; *) ok=0 ;; esac
 done
-echo "  https://$DOMAIN/ без секрета (как сканер) → $(curl -s -o /dev/null -m 10 -w '%{http_code} %{redirect_url}' https://$DOMAIN/ || true)"
+# перенаправления — без внутреннего порта
+for u in https://fspirat.online/fstweak https://fspirat.online/router/ https://fspirat.ru/fstweak; do
+  r=$(curl -s -o /dev/null -m 10 -w '%{redirect_url}' "$u" || true); echo "  $u → $r"
+  case $r in *:10443*) ok=0 ;; esac
+done
+f=$(curl -s -o /dev/null -m 10 -w '%{http_code} %{redirect_url}' https://$DOMAIN/ || true)
+echo "  https://$DOMAIN/ без секрета (как сканер) → $f"
+case $f in 301*fspirat.online*) ;; *) echo "  ⚠️ сайт-обложка не отвечает (прокси работает, но маскировка слабее)"; journalctl -u mtg -n 5 --no-pager | cut -c1-200 ;; esac
 if systemctl is-active --quiet mtg; then echo "  mtg: работает"; else ok=0; echo "  mtg: НЕ работает"; journalctl -u mtg -n 15 --no-pager; fi
 [ $ok = 1 ] || restore "что-то не отвечает после переключения"
 echo "  IP в логе сайтов (должны быть настоящие, не 127.0.0.1): $(tail -n 5 /var/log/nginx/access.log | awk '{print $1}' | sort -u | tr '\n' ' ')"
