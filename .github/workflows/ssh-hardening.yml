@@ -1,0 +1,42 @@
+name: SSH hardening
+
+# Выключает вход на сервер по паролю: только ключи (server/ssh/00-fspirat-hardening.conf).
+# Перед применением проверяет, что у root есть ключ пользователя (vadim-pc) — иначе ничего не меняет.
+# Уже открытые SSH-сессии не рвутся. Запуск вручную: Actions → SSH hardening → Run workflow.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+      - name: Apply
+        run: |
+          ssh vps 'cat > /tmp/00-fspirat-hardening.conf' < server/ssh/00-fspirat-hardening.conf
+          ssh vps 'set -e
+            grep -q "vadim-pc" /root/.ssh/authorized_keys || { echo "❌ у root нет ключа vadim-pc — пароль не выключаю"; exit 1; }
+            install -m 644 /tmp/00-fspirat-hardening.conf /etc/ssh/sshd_config.d/00-fspirat-hardening.conf
+            if ! sshd -t; then rm -f /etc/ssh/sshd_config.d/00-fspirat-hardening.conf; echo "❌ sshd -t не прошёл — откатил"; exit 1; fi
+            systemctl reload ssh
+            echo "✅ применено:"; sshd -T | grep -E "^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|x11forwarding|maxauthtries) "'
+      - name: Verify
+        run: |
+          ssh vps 'echo "✅ вход по ключу работает: $(whoami)@$(hostname)"'
+          out=$(ssh -o BatchMode=yes -o PubkeyAuthentication=no -o PreferredAuthentications=password -o ConnectTimeout=10 root@${{ secrets.SSH_HOST }} true 2>&1 || true)
+          echo "попытка входа по паролю: $out"
+          echo "$out" | grep -q "Permission denied (publickey)" && echo "✅ пароль больше не принимается"
