@@ -13,6 +13,9 @@ header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' h
 $next = fsr_next((string)($_POST['next'] ?? $_GET['next'] ?? '/router/'));
 $error = '';
 $wait = 0;
+$step = 'password';          // password → (новое устройство) code
+
+$go = function (string $to): never { header('Location: ' . fsr_next($to)); http_response_code(303); exit; };
 
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
@@ -21,12 +24,38 @@ try {
         if ($wait = fsr_locked()) {
             fsr_log('LOCKED');
             $error = 'Слишком много неверных попыток. Вход с этого адреса закрыт ещё на ' . (int)ceil($wait / 60) . ' мин.';
+        } elseif (isset($_POST['code'])) {
+            // второй шаг: код из Telegram
+            if ($ok = fsr_code_check(preg_replace('/\D/', '', (string)$_POST['code']))) {
+                fsr_session_start($ok['remember']);
+                fsr_device_add();
+                fsr_log('OK');
+                $go($ok['next']);
+            }
+            if (fsr_code_pending()) {
+                $left = fsr_fail();
+                fsr_log('FAIL');
+                $step = 'code';
+                $error = $left > 0 ? "Неверный код. Осталось попыток: $left." : 'Слишком много неверных попыток. Вход закрыт на ' . (FSR_LOCK_SEC / 60) . ' мин.';
+                http_response_code(403);
+            } else {
+                $error = 'Код истёк или попытки закончились — введи пароль ещё раз, придёт новый код.';
+            }
         } elseif (fsr_password_ok((string)($_POST['password'] ?? ''))) {
-            fsr_session_start(!empty($_POST['remember']));
-            fsr_log('OK');
-            header('Location: ' . $next);
-            http_response_code(303);
-            exit;
+            $remember = !empty($_POST['remember']);
+            if (!fsr_tg() || fsr_device_ok()) {          // знакомое устройство (или бот не настроен) — сразу внутрь
+                fsr_session_start($remember);
+                fsr_log('OK');
+                $go($next);
+            }
+            if (fsr_code_start($remember, $next)) {
+                fsr_log('CODE');
+                $step = 'code';
+            } else {
+                fsr_log('CODEFAIL');
+                $error = 'Пароль верный, но код в Telegram отправить не удалось. Попробуй через минуту.';
+                http_response_code(503);
+            }
         } else {
             usleep(random_int(300000, 700000));   // замедляем подбор
             $left = fsr_fail();
@@ -36,9 +65,9 @@ try {
             http_response_code(403);
         }
     } elseif (fsr_session_valid()) {
-        header('Location: ' . $next);
-        http_response_code(303);
-        exit;
+        $go($next);
+    } elseif (empty($_GET['restart']) && fsr_code_pending()) {
+        $step = 'code';
     }
 } catch (Throwable $e) {
     error_log('fspirat-router-auth: ' . $e->getMessage());
@@ -90,6 +119,11 @@ $h = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
   .err{margin:0 0 16px;padding:10px 12px;border:2px solid #5a2216;background:#1c0b06;color:#f08a73;font-size:14px}
   .hint{margin:16px 0 0;color:var(--dim);font-size:12px;text-align:center}
   .user{position:absolute;left:-9999px}
+  .sent{margin:0 0 14px;color:var(--text);font-size:14px}
+  input.code{width:100%;font:inherit;font-family:var(--pixel);font-size:22px;letter-spacing:8px;text-align:center;color:var(--lime);
+       background:#0a0f08;border:2px solid #000;box-shadow:inset 0 0 0 1px #1f2c17;padding:12px;outline:none;margin-bottom:18px}
+  input.code:focus{box-shadow:inset 0 0 0 1px var(--lime),0 0 0 2px rgba(155,224,82,.18)}
+  .hint a{color:var(--green)}
 </style>
 </head>
 <body>
@@ -101,6 +135,14 @@ $h = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
       <div><b>ВХОД В ПАНЕЛЬ</b><span>Роутер, VPN и LuCI — один пароль</span></div>
     </div>
     <?php if ($error): ?><p class="err" role="alert"><?= $h($error) ?></p><?php endif; ?>
+    <?php if ($step === 'code'): ?>
+    <p class="sent">📨 Это новое устройство — бот прислал в Telegram код из 6 цифр.</p>
+    <label class="f" for="code">Код из Telegram</label>
+    <input class="code" type="text" id="code" name="code" required autofocus inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7"
+           autocomplete="one-time-code" placeholder="000000" <?= $wait ? 'disabled' : '' ?>>
+    <button type="submit" <?= $wait ? 'disabled' : '' ?>>ПОДТВЕРДИТЬ</button>
+    <p class="hint">После подтверждения это устройство запомнится на 30 дней. <a href="/router/login?restart=1&amp;next=<?= $h(rawurlencode($next)) ?>">Ввести пароль заново</a></p>
+    <?php else: ?>
     <input class="user" type="text" name="username" value="<?= FSR_USER ?>" autocomplete="username" tabindex="-1" aria-hidden="true">
     <label class="f" for="pw">Пароль</label>
     <input type="password" id="pw" name="password" required autofocus autocomplete="current-password" <?= $wait ? 'disabled' : '' ?>>
@@ -108,6 +150,7 @@ $h = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
     <input type="hidden" name="next" value="<?= $h($next) ?>">
     <button type="submit" <?= $wait ? 'disabled' : '' ?>>ВОЙТИ</button>
     <p class="hint">Все входы и неудачные попытки записываются.</p>
+    <?php endif; ?>
   </form>
 </main>
 </body>

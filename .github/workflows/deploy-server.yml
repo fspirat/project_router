@@ -52,6 +52,9 @@ jobs:
             install -m 644 $D/auth/*.php /var/www/router-auth/
             install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
             [ -f /var/log/fspirat-router-auth.log ] || install -m 640 -o www-data -g adm /dev/null /var/log/fspirat-router-auth.log
+            # бот для кода входа (подтверждение с нового устройства) — тот же, что у fspirat-watch; файл читает только www-data
+            ( . /etc/fspirat-watch.conf; umask 077; printf "{\"token\":\"%s\",\"chat\":\"%s\"}" "$TG_TOKEN" "$TG_CHAT" > /var/lib/fspirat-router-auth/telegram.json )
+            chown www-data:www-data /var/lib/fspirat-router-auth/telegram.json
             install -m 644 $D/logrotate/fspirat-router-auth /etc/logrotate.d/fspirat-router-auth
             # наблюдатель и cron
             tr -d "\r" < $D/bin/fspirat-watch > /usr/local/bin/fspirat-watch && chmod 755 /usr/local/bin/fspirat-watch

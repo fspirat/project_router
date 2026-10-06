@@ -43,6 +43,9 @@ function fsr_db(): PDO
     return $db;
 }
 
+/** Домен cookie (для локальных тестов — FSR_COOKIE_DOMAIN="" — без домена). */
+function fsr_cookie_domain(): string { $d = getenv('FSR_COOKIE_DOMAIN'); return $d === false ? FSR_COOKIE_DOMAIN : $d; }
+
 function fsr_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? ''; }
 
 function fsr_log(string $what): void
@@ -125,7 +128,7 @@ function fsr_fail(): int
 function fsr_cookie(string $value, int $expires): void
 {
     setcookie(FSR_COOKIE, $value, [
-        'expires' => $expires, 'path' => '/', 'domain' => FSR_COOKIE_DOMAIN,
+        'expires' => $expires, 'path' => '/', 'domain' => fsr_cookie_domain(),
         'secure' => true, 'httponly' => true, 'samesite' => 'Lax',
     ]);
 }
@@ -169,4 +172,119 @@ function fsr_next(string $next): string
     if (preg_match('~^/router/[A-Za-z0-9/._?=&%-]*$~', $next) && !str_starts_with($next, '/router/login')) return $next;
     if (preg_match('~^https://router\.fspirat\.online/[A-Za-z0-9/._?=&%;:+-]*$~', $next)) return $next;
     return '/router/';
+}
+
+// ---------- подтверждение входа кодом из Telegram (вторая защита после пароля) ----------
+// Код спрашивается только на новом устройстве; после подтверждения устройство помнится 30 дней (cookie fsr_dev).
+// Бот и чат — /var/lib/fspirat-router-auth/telegram.json (его пишет выкладка из /etc/fspirat-watch.conf).
+// Нет файла — вход без кода, как раньше.
+
+const FSR_DEV_COOKIE = 'fsr_dev';
+const FSR_DEV_TTL = 30 * 86400;
+const FSR_CODE_COOKIE = 'fsr_2fa';
+const FSR_CODE_TTL = 300;          // код живёт 5 минут
+const FSR_CODE_TRIES = 5;
+
+function fsr_db2(): PDO
+{
+    $db = fsr_db();
+    $db->exec('CREATE TABLE IF NOT EXISTS devices(hash TEXT PRIMARY KEY, created INTEGER NOT NULL, seen INTEGER NOT NULL, ip TEXT, ua TEXT)');
+    $db->exec('CREATE TABLE IF NOT EXISTS codes(hash TEXT PRIMARY KEY, code TEXT NOT NULL, created INTEGER NOT NULL,
+                 tries INTEGER NOT NULL DEFAULT 0, remember INTEGER NOT NULL, next TEXT NOT NULL)');
+    return $db;
+}
+
+function fsr_tg(): ?array
+{
+    $c = json_decode((string)@file_get_contents(fsr_dir() . '/telegram.json'), true);
+    return is_array($c) && !empty($c['token']) && !empty($c['chat']) ? $c : null;
+}
+
+function fsr_tg_send(string $text): bool
+{
+    $c = fsr_tg();
+    if (!$c) return false;
+    $raw = @file_get_contents((getenv('FSR_TG_API') ?: 'https://api.telegram.org') . '/bot' . $c['token'] . '/sendMessage', false, stream_context_create(['http' => [
+        'method' => 'POST', 'header' => 'Content-Type: application/x-www-form-urlencoded', 'timeout' => 8, 'ignore_errors' => true,
+        'content' => http_build_query(['chat_id' => $c['chat'], 'text' => $text, 'disable_web_page_preview' => 'true'])]]));
+    return (bool)(json_decode((string)$raw, true)['ok'] ?? false);
+}
+
+function fsr_aux_cookie(string $name, string $value, int $expires): void
+{
+    setcookie($name, $value, ['expires' => $expires, 'path' => '/router/', 'domain' => fsr_cookie_domain(),
+        'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+}
+
+/** Устройство уже подтверждено кодом (и не дольше 30 дней назад пользовались). */
+function fsr_device_ok(): bool
+{
+    $tok = $_COOKIE[FSR_DEV_COOKIE] ?? '';
+    if (!preg_match('/^[a-f0-9]{64}$/', $tok)) return false;
+    $db = fsr_db2();
+    $st = $db->prepare('SELECT seen FROM devices WHERE hash = ?');
+    $st->execute([hash('sha256', $tok)]);
+    $seen = $st->fetchColumn();
+    if ($seen === false || (int)$seen + FSR_DEV_TTL < time()) return false;
+    $db->prepare('UPDATE devices SET seen = ? WHERE hash = ?')->execute([time(), hash('sha256', $tok)]);
+    fsr_aux_cookie(FSR_DEV_COOKIE, $tok, time() + FSR_DEV_TTL);
+    return true;
+}
+
+function fsr_device_add(): void
+{
+    $tok = bin2hex(random_bytes(32));
+    $db = fsr_db2();
+    $db->prepare('DELETE FROM devices WHERE seen < ?')->execute([time() - FSR_DEV_TTL]);
+    $db->prepare('INSERT INTO devices(hash, created, seen, ip, ua) VALUES(?,?,?,?,?)')
+       ->execute([hash('sha256', $tok), time(), time(), fsr_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 200)]);
+    fsr_aux_cookie(FSR_DEV_COOKIE, $tok, time() + FSR_DEV_TTL);
+}
+
+/** Пароль верный, устройство новое: отправить код в Telegram. false — не удалось отправить. */
+function fsr_code_start(bool $remember, string $next): bool
+{
+    $code = sprintf('%06d', random_int(0, 999999));
+    $tok = bin2hex(random_bytes(32));
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    $what = preg_match('~(Edg|OPR|YaBrowser|Firefox|Chrome|Safari)/~', $ua, $m) ? $m[1] : 'браузер';
+    $os = preg_match('~(Windows|Android|iPhone|iPad|Mac OS X|Linux)~', $ua, $o) ? $o[1] : '';
+    if (!fsr_tg_send("🔐 Код входа в панель роутера: $code\n\nВход с нового устройства: $what" . ($os ? " · $os" : '') . ' · IP ' . fsr_ip()
+        . "\nКод действует 5 минут. Если это не ты — никому его не сообщай и смени пароль.")) return false;
+    $db = fsr_db2();
+    $db->prepare('DELETE FROM codes WHERE created < ?')->execute([time() - FSR_CODE_TTL]);
+    $db->prepare('INSERT INTO codes(hash, code, created, remember, next) VALUES(?,?,?,?,?)')
+       ->execute([hash('sha256', $tok), password_hash($code, PASSWORD_DEFAULT), time(), $remember ? 1 : 0, $next]);
+    fsr_aux_cookie(FSR_CODE_COOKIE, $tok, time() + FSR_CODE_TTL);
+    return true;
+}
+
+/** Ожидается ли код с этого браузера. */
+function fsr_code_pending(): bool
+{
+    $tok = $_COOKIE[FSR_CODE_COOKIE] ?? '';
+    if (!preg_match('/^[a-f0-9]{64}$/', $tok)) return false;
+    $st = fsr_db2()->prepare('SELECT 1 FROM codes WHERE hash = ? AND created >= ? AND tries < ?');
+    $st->execute([hash('sha256', $tok), time() - FSR_CODE_TTL, FSR_CODE_TRIES]);
+    return $st->fetchColumn() !== false;
+}
+
+/** Проверить код. Верный — ['remember'=>…, 'next'=>…]; неверный — null (попытка засчитана). */
+function fsr_code_check(string $code): ?array
+{
+    $tok = $_COOKIE[FSR_CODE_COOKIE] ?? '';
+    if (!preg_match('/^[a-f0-9]{64}$/', $tok)) return null;
+    $db = fsr_db2();
+    $h = hash('sha256', $tok);
+    $st = $db->prepare('SELECT code, remember, next FROM codes WHERE hash = ? AND created >= ? AND tries < ?');
+    $st->execute([$h, time() - FSR_CODE_TTL, FSR_CODE_TRIES]);
+    $r = $st->fetch();
+    if (!$r) return null;
+    if (!preg_match('/^\d{6}$/', $code) || !password_verify($code, $r['code'])) {
+        $db->prepare('UPDATE codes SET tries = tries + 1 WHERE hash = ?')->execute([$h]);
+        return null;
+    }
+    $db->prepare('DELETE FROM codes WHERE hash = ?')->execute([$h]);
+    fsr_aux_cookie(FSR_CODE_COOKIE, '', 1);
+    return ['remember' => (bool)$r['remember'], 'next' => (string)$r['next']];
 }
