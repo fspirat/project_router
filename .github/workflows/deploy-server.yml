@@ -1,0 +1,79 @@
+name: Deploy server
+
+# Выкладка серверной части на VPS (root, ключ OPS_SSH_KEY). Запускается вручную:
+# Actions → Deploy server → Run workflow. Секреты (токены, пароли) не трогает.
+#   — страница входа server/auth → /var/www/router-auth/, данные /var/lib/fspirat-router-auth/
+#   — fspirat-watch + cron, fail2ban (jail + фильтр), logrotate
+#   — nginx: /router/ и router.fspirat.online — со своей страницей входа (nginx-apply.py: копии, nginx -t, откат)
+on:
+  workflow_dispatch:
+    inputs:
+      nginx:
+        description: "Переключить nginx на страницу входа (nginx-apply.py)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+
+      - name: Checks
+        run: |
+          for f in server/auth/*.php; do php -l "$f"; done
+          bash -n server/bin/fspirat-watch
+          python3 -m py_compile server/auth/nginx-apply.py
+
+      - name: Upload files
+        run: |
+          tar -C server -czf - auth bin/fspirat-watch cron.d fail2ban logrotate | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
+
+      - name: Install
+        run: |
+          ssh vps 'set -e; D=/tmp/fsr-deploy
+            # страница входа
+            install -d -m 755 /var/www/router-auth
+            install -m 644 $D/auth/lib.php $D/auth/check.php $D/auth/login.php $D/auth/logout.php /var/www/router-auth/
+            install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
+            [ -f /var/log/fspirat-router-auth.log ] || install -m 640 -o www-data -g adm /dev/null /var/log/fspirat-router-auth.log
+            install -m 644 $D/logrotate/fspirat-router-auth /etc/logrotate.d/fspirat-router-auth
+            # наблюдатель и cron
+            tr -d "\r" < $D/bin/fspirat-watch > /usr/local/bin/fspirat-watch && chmod 755 /usr/local/bin/fspirat-watch
+            tr -d "\r" < $D/cron.d/fspirat-watch > /etc/cron.d/fspirat-watch
+            # fail2ban (без лога jail 3x-ipl он не стартует целиком)
+            mkdir -p /var/log/x-ui && touch /var/log/x-ui/3xipl.log
+            install -m 644 $D/fail2ban/fspirat.local /etc/fail2ban/jail.d/fspirat.local
+            install -m 644 $D/fail2ban/filter.d/fspirat-router-auth.conf /etc/fail2ban/filter.d/fspirat-router-auth.conf
+            systemctl restart fail2ban && sleep 2 && fail2ban-client status | tail -n 1
+            echo "файлы установлены"'
+
+      - name: nginx
+        if: inputs.nginx
+        run: |
+          ssh vps 'python3 /tmp/fsr-deploy/auth/nginx-apply.py'
+
+      - name: Verify
+        run: |
+          ssh vps 'set -e
+            echo "login page: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/router/login)"
+            echo "/router/ без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://fspirat.online/router/)"
+            echo "/router/api без входа: $(curl -s -o /dev/null -w %{http_code} "https://fspirat.online/router/api?action=net")"
+            echo "router.fspirat.online без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://router.fspirat.online/)"
+            echo "сайт: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/)"
+            rm -rf /tmp/fsr-deploy'

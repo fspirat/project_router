@@ -16,8 +16,8 @@
 Сервер NL Aeza 193.39.143.202 (Ubuntu 24.04)
    127.0.0.1:8081 ─► LuCI роутера (через туннель)
    nginx:
-     router.fspirat.online  → весь LuCI (basic auth + пароль роутера)
-     fspirat.online/router/ → страница web/index.html (basic auth)
+     router.fspirat.online  → весь LuCI (вход через страницу fspirat.online/router/login + пароль роутера)
+     fspirat.online/router/ → страница web/index.html (вход через свою страницу, см. ниже)
      fspirat.online/router/api → CGI /cgi-bin/fspirat на роутере (nginx добавляет токен cookie)
    cron: fspirat-watch раз в минуту → уведомления в Telegram (@FSRouter_bot)
    fail2ban: sshd, nginx-http-auth, 3x-ipl
@@ -47,6 +47,19 @@
 (репозиторий приватный). Секреты: `OPS_SSH_KEY` (root), `SSH_KEY` (deploy), `SSH_HOST`.
 Правила те же: перед `nginx reload` — `nginx -t`; не печатать в лог файлы с секретами
 (`snippets/fspirat-router.conf`, `/etc/fspirat-watch.conf`, `/etc/fspirat.token`).
+
+## Вход в панель (server/auth)
+
+Вместо окна браузера (auth_basic) — своя страница `fspirat.online/router/login` (PHP в `/var/www/router-auth/`).
+nginx перед каждым запросом спрашивает `check.php` (`auth_request /_fsr_auth`); cookie `fsr_session` на домен
+`fspirat.online` — один вход и для `/router/`, и для `router.fspirat.online`.
+- Пароль: пока нет `/var/lib/fspirat-router-auth/password`, проверяется по `/etc/nginx/.htpasswd_router` (apr1),
+  после первого входа сохраняется там же в bcrypt. Сменить пароль: удалить этот файл и обновить .htpasswd_router
+  (`htpasswd /etc/nginx/.htpasswd_router bob`).
+- 5 неверных паролей — блокировка IP на 15 минут + fail2ban (jail `fspirat-router-auth`) + сообщение в Telegram.
+- Журнал: `/var/log/fspirat-router-auth.log` (OK / FAIL / LOCKED / LOGOUT). fspirat-watch шлёт «🔑 Вход в панель».
+- Выкладка: workflow `Deploy server` (deploy-server.yml); nginx правит `server/auth/nginx-apply.py`
+  (копии `*.bak-auth-*`, `nginx -t`, откат при ошибке).
 
 ## Важные константы
 

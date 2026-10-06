@@ -14,6 +14,23 @@ send() {
 get()  { cat "$S/$1" 2>/dev/null; }
 put()  { echo "$2" > "$S/$1"; }
 
+# Входы в панель роутера (журнал страницы входа server/auth): сообщить о входе и о подборе пароля
+AUTHLOG=/var/log/fspirat-router-auth.log
+if [ -f "$AUTHLOG" ]; then
+  size=$(stat -c %s "$AUTHLOG"); pos=$(get authpos || echo 0)
+  [ "$size" -lt "${pos:-0}" ] && pos=0                      # журнал повернули (logrotate)
+  if [ "$size" -gt "${pos:-0}" ]; then
+    tail -c +$((pos + 1)) "$AUTHLOG" | while read -r d t what ipkv rest; do
+      ip=${ipkv#ip=}
+      case "$what" in
+        OK)     send "🔑 Вход в панель роутера: $ip ($d $t)" ;;
+        LOCKED) [ "$(get "lock_$ip")" = "$d" ] || { send "⚠️ Подбор пароля к панели роутера с $ip — вход с этого адреса закрыт на 15 минут."; put "lock_$ip" "$d"; } ;;
+      esac
+    done
+    put authpos "$size"
+  fi
+fi
+
 J=$(curl -s -m 20 -b "$COOKIE" "http://127.0.0.1:8081/cgi-bin/fspirat?action=status")
 
 # Роутер не отвечает

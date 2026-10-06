@@ -191,6 +191,7 @@
       <button class="btn" data-act="restart">Перезапустить VPN</button>
       <button class="btn" data-act="update">Обновить подписку</button>
       <button class="btn danger" data-act="reboot">Перезагрузить роутер</button>
+      <a class="btn small" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
     </div>
   </section>
 
@@ -339,6 +340,7 @@ async function api(action, extra=''){
   let r;
   try { r = await fetch(`${API}?action=${action}${extra}`, {cache:'no-store'}); }
   catch { throw new Error('Нет связи с сайтом. Проверь интернет.'); }
+  if(r.status === 401){ location.href = '/router/login?next=' + encodeURIComponent(location.pathname); throw new Error('Вход истёк — открываю страницу входа.'); }
   if(r.status === 502 || r.status === 504) throw new Error('Роутер не на связи: туннель до сервера не поднят.');
   if(r.status === 409) throw new Error('Тест скорости уже идёт, дождись результата.');
   if(r.status === 403) throw new Error('Роутер отклонил запрос: токен в nginx не совпадает с /etc/fspirat.token.');

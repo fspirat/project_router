@@ -13,3 +13,13 @@ logpath = /var/log/nginx/error.log
 maxretry = 5
 findtime = 10m
 bantime = 1h
+
+# Страница входа в панель роутера (server/auth): 5 неверных паролей за 10 минут — бан на час.
+[fspirat-router-auth]
+enabled = true
+port = http,https
+filter = fspirat-router-auth
+logpath = /var/log/fspirat-router-auth.log
+maxretry = 5
+findtime = 10m
+bantime = 1h
