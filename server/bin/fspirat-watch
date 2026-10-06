@@ -13,6 +13,16 @@ send() {
 }
 get()  { cat "$S/$1" 2>/dev/null; }
 put()  { echo "$2" > "$S/$1"; }
+# История и журнал для страницы (читает /router/data, server/auth/data.php). Переживают перезагрузку роутера.
+#   history.tsv: "время отклик_ms узел"  (отклик 0 — VPN не прошёл, -1 — роутер не на связи)
+#   events.tsv:  "время<TAB>вид<TAB>текст"
+hist()  { echo "$1" >> "$S/history.tsv"; }
+event() { printf '%s\t%s\t%s\n' "$1" "$2" "${3//$'\t'/ }" >> "$S/events.tsv"; }
+NOW=$(date +%s)
+if [ "$(date +%M)" = 00 ]; then              # раз в час: история за 35 дней, журнал — 2000 строк
+  [ -f $S/history.tsv ] && awk -v t=$((NOW - 35*86400)) '$1 >= t' $S/history.tsv > $S/history.tmp && mv $S/history.tmp $S/history.tsv
+  [ -f $S/events.tsv ] && tail -n 2000 $S/events.tsv > $S/events.tmp && mv $S/events.tmp $S/events.tsv
+fi
 
 # Входы в панель роутера (журнал страницы входа server/auth): сообщить о входе и о подборе пароля
 AUTHLOG=/var/log/fspirat-router-auth.log
@@ -36,24 +46,74 @@ J=$(curl -s -m 20 -b "$COOKIE" "http://127.0.0.1:8081/cgi-bin/fspirat?action=sta
 # Роутер не отвечает
 if ! jq -e '.running != null' >/dev/null 2>&1 <<<"$J"; then
   n=$(( $(get offcount || echo 0) + 1 )); put offcount $n
+  [ -n "$(get offline_since)" ] || put offline_since "$NOW"
+  hist "$NOW -1 -"
   if [ "$n" -eq 3 ] && [ "$(get offline)" != 1 ]; then
     send "🔴 Роутер не на связи уже 3 минуты (нет туннеля или нет интернета дома)."
+    event "$(get offline_since)" offline "Роутер пропал со связи"
     put offline 1
   fi
   exit 0
 fi
 put offcount 0
-if [ "$(get offline)" = 1 ]; then send "🟢 Роутер снова на связи."; put offline 0; fi
+if [ "$(get offline)" = 1 ]; then
+  send "🟢 Роутер снова на связи."
+  event "$NOW" online "Роутер снова на связи (не было $(( (NOW - $(get offline_since || echo $NOW)) / 60 )) мин)"
+  put offline 0
+fi
+rm -f $S/offline_since
+put last_ok "$NOW"
+
+# Перезагрузка роутера: время работы стало меньше прежнего
+up=$(jq -r '.sys.uptime // 0' <<<"$J")
+[ -n "$(get uptime)" ] && [ "$up" -lt "$(get uptime)" ] && event "$((NOW - up))" reboot "Роутер перезагрузился"
+put uptime "$up"
+
+# История отклика: точки роутера (раз в 5 минут), которых у нас ещё нет
+cur=$(jq -r .current <<<"$J")
+last=$(get histlast || echo 0)
+while read -r ts ms; do
+  [ "${ts:-0}" -gt "${last:-0}" ] 2>/dev/null || continue
+  hist "$ts $ms $cur"; last=$ts
+done < <(jq -r '.history[]? | "\(.[0]) \(.[1])"' <<<"$J")
+put histlast "$last"
+
+# Журнал роутера (последние 8 строк switch.log): новые строки — в наш журнал, id узлов заменяем именами
+[ -s $S/routerlog ] && first=0 || first=1     # первый запуск: время берём из строк, дальше — время, когда заметили
+touch $S/routerlog
+jq -r '.log[]?' <<<"$J" | while IFS= read -r line; do
+  grep -qxF -- "$line" $S/routerlog && continue
+  echo "$line" >> $S/routerlog
+  # "06.10 17:30 авто ID -> ID 85ms"
+  d=${line:0:5}; t=${line:6:5}; rest=${line:12}; ts=$NOW
+  if [ $first = 1 ]; then
+    ts=$(date -d "$(date +%Y)-${d:3:2}-${d:0:2} $t" +%s 2>/dev/null || echo $NOW)
+    [ "$ts" -gt "$NOW" ] && ts=$NOW
+  fi
+  for id in $(grep -oE '\b[A-Za-z0-9]{8}\b' <<<"$rest"); do
+    nm=$(jq -r --arg c "$id" '[.ping.nodes[]? | select(.id==$c) | .name][0] // empty' <<<"$J")
+    [ -n "$nm" ] && rest=${rest//$id/$nm}
+  done
+  case "$rest" in
+    авто*) kind=auto; rest="Автопереключение: ${rest#авто }" ;;
+    вручную*) kind=manual; rest="Сервер выбран вручную: ${rest#вручную -> }" ;;
+    перезапуск*) kind=restart; rest="Перезапуск VPN" ;;
+    обновление*) kind=update; rest="Обновление подписки" ;;
+    *) kind=router ;;
+  esac
+  event "$ts" "$kind" "$rest"
+done
+tail -n 50 $S/routerlog > $S/routerlog.tmp && mv $S/routerlog.tmp $S/routerlog
 
 # VPN (Xray) остановлен / запущен
 run=$(jq -r .running <<<"$J")
 if [ "$run" != "$(get running)" ] && [ -n "$(get running)" ]; then
-  [ "$run" = true ] && send "🟢 VPN снова работает." || send "⚠️ VPN на роутере остановлен (Xray не запущен)."
+  if [ "$run" = true ]; then send "🟢 VPN снова работает."; event "$NOW" vpn_up "VPN снова работает"
+  else send "⚠️ VPN на роутере остановлен (Xray не запущен)."; event "$NOW" vpn_down "VPN остановлен (Xray не запущен)"; fi
 fi
 put running "$run"
 
 # Смена сервера
-cur=$(jq -r .current <<<"$J")
 name=$(jq -r --arg c "$cur" '[.ping.nodes[]? | select(.id==$c) | .name][0] // $c' <<<"$J")
 prev=$(get current)
 if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then

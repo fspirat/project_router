@@ -20,9 +20,16 @@ def fcgi(script, extra=''):
 AUTH_LOC = ('location = /_fsr_auth {\n    internal;\n'
             + fcgi('check.php', '    fastcgi_pass_request_body off;\n    fastcgi_param CONTENT_LENGTH "";\n') + '}\n')
 
+# Этап 2: данные страницы на сервере (data.php) и открытые файлы PWA (браузер берёт манифест и иконки без cookie).
+EXTRA = ('\n# --- данные страницы и иконки (server/auth/data.php, web/manifest.webmanifest) ---\n'
+         'location = /router/data {\n    auth_request /_fsr_auth;\n    error_page 401 = @fsr_api_401;\n'
+         '    client_max_body_size 4k;\n' + fcgi('data.php') + '}\n'
+         'location ~ ^/router/(manifest\\.webmanifest|icon-[0-9]+\\.png|apple-touch-icon\\.png)$ {\n'
+         '    expires 7d;\n}\n')
+
 def snippet(s):
     if 'auth_request /_fsr_auth' in s:
-        return s
+        return s if 'location = /router/data' in s else s.rstrip('\n') + '\n' + EXTRA
     blocks = re.split(r'(?=location )', s)
     out = []
     for b in blocks:
@@ -38,7 +45,7 @@ def snippet(s):
             + 'location = /router/login {\n' + fcgi('login.php') + '}\n'
             + 'location = /router/logout {\n' + fcgi('logout.php') + '}\n'
             + 'location @fsr_login {\n    return 302 /router/login?next=$uri;\n}\n'
-            + 'location @fsr_api_401 {\n    default_type application/json;\n    return 401 \'{"error":"auth"}\';\n}\n')
+            + 'location @fsr_api_401 {\n    default_type application/json;\n    return 401 \'{"error":"auth"}\';\n}\n' + EXTRA)
 
 def router_site(s):
     if 'auth_request /_fsr_auth' in s:

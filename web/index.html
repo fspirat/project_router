@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>FSPIRAT Router</title>
+<meta name="theme-color" content="#050605">
+<link rel="manifest" href="/router/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/router/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Роутер">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
@@ -163,12 +169,61 @@
   .log{margin:0;padding:0;list-style:none;color:var(--dim);font-size:13px}
   .log li{padding:4px 0;border-bottom:1px dashed #1a2513}
 
+  /* Роутер не на связи */
+  .down{border-color:#5a2216;background:#140906}
+  .down h2{color:var(--red);display:flex;align-items:center;gap:10px}
+  .down h2::before{content:"";width:12px;height:12px;background:var(--red);box-shadow:0 0 10px rgba(224,86,60,.6);animation:blink 1.2s steps(2) infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .down-since{font-size:20px;font-weight:600;margin:0 0 12px}
+  .down-since small{display:block;font-size:13px;font-weight:400;color:var(--dim);margin-top:2px}
+  .down-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;font-size:14px}
+  .down-cols b{display:block;color:var(--dim);font-weight:400;font-size:12px;margin-bottom:4px}
+  .down-cols ul{margin:0;padding-left:18px}
+  .down-cols li{margin:2px 0}
+  .down .note{margin-top:14px}
+  body.is-down .controls button{opacity:.45;pointer-events:none}
+  body.is-down.no-state .needs-router{display:none}
+
+  /* Переключатель периода графика */
+  .h2row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
+  .h2row h2{margin:0}
+  .seg{display:flex}
+  .seg button{white-space:nowrap}
+  .h2row{flex-wrap:wrap}
+  .seg button{font:inherit;font-size:12px;color:var(--dim);cursor:pointer;padding:5px 10px;background:#0a0f08;border:2px solid var(--edge)}
+  .seg button+button{border-left:0}
+  .seg button[aria-pressed="true"]{color:var(--lime);border-color:var(--green);background:#122009}
+  .seg button[aria-pressed="true"]+button{border-left:2px solid var(--green)}
+  .chart .offline{fill:rgba(127,142,116,.16)}
+  .lg{display:inline-flex;align-items:center;gap:5px;margin-right:12px}
+  .lg i{width:10px;height:10px;display:inline-block}
+  .chart-keys{color:var(--dim);font-size:12px;margin-top:8px}
+
+  /* Журнал */
+  .log li{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:baseline}
+  .log time{font-family:var(--pixel);font-size:9px;color:var(--dim);white-space:nowrap;min-width:92px}
+  .log .k-auto,.log .k-offline,.log .k-vpn_down{color:var(--amber)}
+  .log .k-offline,.log .k-vpn_down{color:#f08a73}
+  .log .k-online,.log .k-vpn_up{color:var(--lime)}
+  .log span{color:var(--text)}
+
+  /* Устройства: свои имена, Wi-Fi */
+  .dev-name{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+  .dev-name > span{overflow-wrap:anywhere}
+  .dev-name small{display:block;color:var(--dim);font-size:11px;width:100%}
+  .ed{font:inherit;font-size:12px;color:var(--dim);background:none;border:0;cursor:pointer;padding:2px 4px;opacity:.6}
+  .dev:hover .ed,.ed:focus-visible{opacity:1;color:var(--lime)}
+  .dev input{font:inherit;font-size:15px;color:var(--text);background:#0a0f08;border:2px solid #000;box-shadow:inset 0 0 0 1px var(--lime);padding:4px 8px;width:min(240px,100%)}
+  .band{font-family:var(--pixel);font-size:8px;padding:4px 6px;border:2px solid var(--edge);color:var(--dim);white-space:nowrap}
+  .band.g5{color:var(--lime);border-color:#2f4a1d} .band.g2{color:var(--amber);border-color:#4a3a12}
+  .band-info{display:block;color:var(--dim);font-size:11px;margin-top:2px}
+
   .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:92vw;background:#16220f;
          border:2px solid var(--green);padding:12px 16px;box-shadow:4px 4px 0 #000;font-size:14px;z-index:5}
   .toast.err{border-color:var(--red);background:#22100b}
 
   @media (max-width:560px){
-    .meters,.speed,.st-grid{grid-template-columns:1fr}
+    .meters,.speed,.st-grid,.down-cols{grid-template-columns:1fr}
     .tab{flex:1;text-align:center;padding:12px 8px}
     .srv{grid-template-columns:1fr auto;gap:8px 12px}
     .srv .btn,.srv .tag{grid-column:1/-1;justify-self:start}
@@ -195,6 +250,22 @@
     </div>
   </section>
 
+  <section class="panel down" id="down" role="alert" hidden>
+    <h2>Роутер не на связи</h2>
+    <p class="down-since" id="down-since">Сервер не получает ответа от роутера<small></small></p>
+    <div class="down-cols">
+      <div><b>Почему так бывает</b><ul>
+        <li>дома пропал интернет или свет;</li>
+        <li>роутер перезагружается (1–2 минуты);</li>
+        <li>оборвался туннель от роутера до сервера.</li></ul></div>
+      <div><b>Что сделать</b><ul>
+        <li>подождать 2–3 минуты: туннель поднимается сам;</li>
+        <li>проверить, есть ли дома интернет без VPN;</li>
+        <li>если не помогло — выключить роутер из розетки на 10 секунд.</li></ul></div>
+    </div>
+    <p class="note" id="down-note">Кнопки на странице не работают, пока роутер не на связи. История и журнал ниже — с сервера.</p>
+  </section>
+
   <nav class="tabs" role="tablist">
     <a class="tab" role="tab" href="#vpn" data-tab="vpn">VPN</a>
     <a class="tab" role="tab" href="#net" data-tab="net">Роутер и сеть</a>
@@ -202,7 +273,7 @@
 
   <!-- ===== Вкладка VPN ===== -->
   <div data-page="vpn">
-    <section class="panel" aria-live="polite">
+    <section class="panel needs-router" aria-live="polite">
       <div class="status vpn" id="vpn">
         <div class="lamp"></div>
         <div id="vpn-text">Связываюсь с роутером…</div>
@@ -214,18 +285,23 @@
     </section>
 
     <section class="panel">
-      <h2>Связь за 24 часа</h2>
+      <div class="h2row"><h2 id="chart-title">Связь за 24 часа</h2>
+        <div class="seg" id="range" role="group" aria-label="Период">
+          <button data-range="day" aria-pressed="true">24 ч</button><button data-range="week" aria-pressed="false">7 дней</button><button data-range="month" aria-pressed="false">30 дней</button>
+        </div></div>
       <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График отклика VPN за сутки"></svg>
-      <div class="chart-legend"><span>24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
+      <div class="chart-legend"><span id="chart-from">24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
       <div class="stats facts">
         <div class="fact"><span>Средний отклик</span><b id="st-avg">—</b></div>
         <div class="fact"><span>Лучший</span><b id="st-min">—</b></div>
         <div class="fact"><span>Худший</span><b id="st-max">—</b></div>
-        <div class="fact"><span>Сбоев</span><b id="st-fail">—</b></div>
+        <div class="fact"><span>Сбоев VPN</span><b id="st-fail">—</b></div>
+        <div class="fact"><span>Роутер без связи</span><b id="st-off">—</b></div>
       </div>
+      <div class="chart-keys"><span class="lg"><i style="background:var(--lime)"></i>отклик через VPN</span><span class="lg"><i style="background:var(--red)"></i>VPN не прошёл</span><span class="lg"><i style="background:rgba(127,142,116,.35)"></i>роутер не на связи</span></div>
     </section>
 
-    <section class="panel">
+    <section class="panel needs-router">
       <h2>Серверы</h2>
       <ul class="list" id="list"><li class="empty">Загружаю список серверов…</li></ul>
       <details id="dead-box" hidden>
@@ -242,7 +318,7 @@
 
   <!-- ===== Вкладка Роутер и сеть ===== -->
   <div data-page="net" hidden>
-    <section class="panel">
+    <section class="panel needs-router">
       <h2>Интернет сейчас</h2>
       <div class="speed">
         <div class="spd"><span>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
@@ -299,7 +375,7 @@
 
 <script>
 const API = '/router/api';
-let state = null, toastTimer, quietUntil = 0;
+let state = null, hist = null, names = {}, range = 'day', toastTimer, quietUntil = 0, editing = null;
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -341,7 +417,7 @@ async function api(action, extra=''){
   try { r = await fetch(`${API}?action=${action}${extra}`, {cache:'no-store'}); }
   catch { throw new Error('Нет связи с сайтом. Проверь интернет.'); }
   if(r.status === 401){ location.href = '/router/login?next=' + encodeURIComponent(location.pathname); throw new Error('Вход истёк — открываю страницу входа.'); }
-  if(r.status === 502 || r.status === 504) throw new Error('Роутер не на связи: туннель до сервера не поднят.');
+  if(r.status === 502 || r.status === 504){ const e = new Error('Роутер не на связи: туннель до сервера не поднят.'); e.down = true; throw e; }
   if(r.status === 409) throw new Error('Тест скорости уже идёт, дождись результата.');
   if(r.status === 403) throw new Error('Роутер отклонил запрос: токен в nginx не совпадает с /etc/fspirat.token.');
   if(!r.ok){ let m = ''; try { m = (await r.json()).error || ''; } catch {} throw new Error(`Ошибка ${r.status} при запросе к роутеру. ${m}`); }
@@ -364,17 +440,27 @@ function renderStatus(s){
   $('#warn').hidden = s.split_active;
 }
 
-function renderChart(hist){
-  const svg = $('#chart'), W = 600, H = 150, now = Date.now()/1000, from = now - 86400;
-  const pts = (hist || []).filter(p => p[0] >= from);
+const RANGES = {day: [86400, '24 часа', '24 ч назад'], week: [7*86400, '7 дней', '7 дней назад'], month: [30*86400, '30 дней', '30 дней назад']};
+const minutes = m => m < 60 ? m + ' мин' : m < 1440 ? Math.floor(m/60) + ' ч ' + (m%60 ? m%60 + ' мин' : '') : Math.floor(m/1440) + ' д ' + Math.floor(m%1440/60) + ' ч';
+
+/* Точки: [время, отклик] (0 — сбой VPN, -1 — роутер не на связи). Берём с сервера; если его нет — из роутера (24 ч). */
+function renderChart(){
+  const [span, title, fromTxt] = RANGES[range];
+  $('#chart-title').textContent = 'Связь за ' + title;
+  $('#chart-from').textContent = fromTxt;
+  const svg = $('#chart'), W = 600, H = 150, now = Date.now()/1000, from = now - span;
+  const src = hist && hist.range === range ? hist.points : (range === 'day' && state ? state.history || [] : []);
+  const pts = src.filter(p => p[0] >= from);
   const ok = pts.filter(p => p[1] > 0).map(p => p[1]);
   const max = Math.max(200, ...ok) * 1.15;
-  const x = t => ((t - from) / 86400) * W, y = v => H - (v / max) * (H - 8);
+  const x = t => ((t - from) / span) * W, y = v => H - (v / max) * (H - 8);
+  const slot = hist && hist.step ? hist.step / span * W : 300 / span * W;   // ширина одной точки
   let g = '';
   for(let i=1;i<4;i++) g += `<line class="grid" x1="0" x2="${W}" y1="${H*i/4}" y2="${H*i/4}"/>`;
-  for(let i=1;i<6;i++) g += `<line class="grid" y1="0" y2="${H}" x1="${W*i/6}" x2="${W*i/6}"/>`;
-  // линии рвутся на сбоях
-  let seg = [], lines = '', areas = '';
+  const cols = range === 'week' ? 7 : 6;
+  for(let i=1;i<cols;i++) g += `<line class="grid" y1="0" y2="${H}" x1="${W*i/cols}" x2="${W*i/cols}"/>`;
+  // линии рвутся на сбоях и на «нет связи»
+  let seg = [], lines = '', areas = '', fails = '', off = '';
   const flush = () => {
     if(seg.length > 1){
       const d = seg.map(p => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
@@ -385,16 +471,24 @@ function renderChart(hist){
     }
     seg = [];
   };
-  let fails = '';
-  pts.forEach(p => { if(p[1] > 0) seg.push(p); else { flush(); fails += `<rect class="fail" x="${x(p[0])-1.5}" y="${H-14}" width="3" height="14"/>`; } });
+  pts.forEach(p => {
+    if(p[1] > 0){ seg.push(p); if(p[2]) fails += `<rect class="fail" x="${x(p[0])-1.5}" y="${H-8}" width="3" height="8"/>`; return; }
+    flush();
+    if(p[1] < 0) off += `<rect class="offline" x="${(x(p[0]) - Math.max(slot, 2)/2).toFixed(1)}" y="0" width="${Math.max(slot, 2).toFixed(1)}" height="${H}"/>`;
+    else fails += `<rect class="fail" x="${x(p[0])-1.5}" y="${H-14}" width="3" height="14"/>`;
+  });
   flush();
-  svg.innerHTML = g + areas + lines + fails;
-  $('#chart-max').textContent = pts.length ? `шкала до ${Math.round(max)} ms` : 'данных пока нет, первая точка появится через 5 минут';
-  const avg = ok.length ? Math.round(ok.reduce((a,b) => a+b, 0) / ok.length) : null;
-  $('#st-avg').textContent = avg ? avg + ' ms' : '—';
-  $('#st-min').textContent = ok.length ? Math.min(...ok) + ' ms' : '—';
-  $('#st-max').textContent = ok.length ? Math.max(...ok) + ' ms' : '—';
-  $('#st-fail').textContent = pts.length - ok.length;
+  svg.innerHTML = g + off + areas + lines + fails;
+  $('#chart-max').textContent = pts.length ? `шкала до ${Math.round(max)} ms` : 'данных за этот период пока нет';
+  const st = hist && hist.range === range ? hist.stats : {
+    avg: ok.length ? Math.round(ok.reduce((a,b) => a+b, 0) / ok.length) : null,
+    min: ok.length ? Math.min(...ok) : null, max: ok.length ? Math.max(...ok) : null,
+    fails: pts.filter(p => p[1] === 0).length, offline_min: null};
+  $('#st-avg').textContent = st.avg ? st.avg + ' ms' : '—';
+  $('#st-min').textContent = st.min ? st.min + ' ms' : '—';
+  $('#st-max').textContent = st.max ? st.max + ' ms' : '—';
+  $('#st-fail').textContent = st.fails;
+  $('#st-off').textContent = st.offline_min == null ? '—' : st.offline_min ? minutes(st.offline_min) : 'ни разу';
 }
 
 function renderNet(n){
@@ -426,14 +520,27 @@ function renderSys(y){
   renderNet(y.net);
 }
 
+const BANDS = {'5g': ['g5', '5 ГГц'], '2g': ['g2', '2,4 ГГц'], wired: ['', 'кабель']};
 function renderDevices(list){
-  list = (list || []).slice().sort((a,b) => (b.online - a.online) || (a.name || 'я').localeCompare(b.name || 'я'));
-  $('#devices').innerHTML = list.map(d => `
-    <li class="dev">
+  if(editing) return;                      // не мешать, пока пользователь вводит имя
+  const nm = d => names[(d.mac || '').toLowerCase()] || d.name || '';
+  list = (list || []).slice().sort((a,b) => (b.online - a.online) || (nm(a) || 'я').localeCompare(nm(b) || 'я'));
+  $('#devices').innerHTML = list.map(d => {
+    const own = names[(d.mac || '').toLowerCase()];
+    const band = BANDS[d.band];
+    const info = [d.signal ? d.signal + ' dBm' : '', d.rate ? d.rate + ' Мбит/с' : ''].filter(Boolean).join(' · ');
+    return `<li class="dev">
       <span class="dot${d.online ? ' on' : ''}" title="${d.online ? 'в сети' : 'не в сети'}"></span>
-      <span>${esc(d.name || 'Без имени')}</span>
+      <span class="dev-name" data-mac="${esc(d.mac)}">
+        <span>${esc(nm(d) || 'Без имени')}</span>
+        ${band ? `<span class="band ${band[0]}" title="${esc(info)}">${band[1]}</span>` : ''}
+        <button class="ed" data-edit="${esc(d.mac)}" title="Переименовать" aria-label="Переименовать">✎</button>
+        ${own && d.name ? `<small>в сети называется ${esc(d.name)}</small>` : ''}
+        ${info ? `<small class="band-info">${esc(info)}</small>` : ''}
+      </span>
       <span class="dev-ip">${esc(d.ip)}<small>${esc(d.mac)}</small></span>
-    </li>`).join('') || '<li class="empty">Нет устройств с выданным адресом.</li>';
+    </li>`;
+  }).join('') || '<li class="empty">Нет устройств с выданным адресом.</li>';
 }
 
 function srvRow(n, cur){
@@ -454,10 +561,25 @@ function renderServers(s){
   $('#dead').innerHTML = dead.map(n => srvRow(n, s.current)).join('');
 }
 
+const two = n => String(n).padStart(2, '0');
+function when(ts){
+  const d = new Date(ts * 1000), t = new Date();
+  const hm = two(d.getHours()) + ':' + two(d.getMinutes());
+  if(d.toDateString() === t.toDateString()) return 'сегодня ' + hm;
+  t.setDate(t.getDate() - 1);
+  if(d.toDateString() === t.toDateString()) return 'вчера ' + hm;
+  return two(d.getDate()) + '.' + two(d.getMonth() + 1) + ' ' + hm;
+}
 function renderLog(s){
-  const names = Object.fromEntries(((s.ping && s.ping.nodes) || []).map(n => [n.id, n.name]));
-  const log = (s.log || []).slice().reverse().map(l => `<li>${esc(l.replace(/\b[A-Za-z0-9]{8}\b/g, id => names[id] || id))}</li>`);
-  $('#log').innerHTML = log.join('') || '<li>Пока пусто.</li>';
+  if(hist && hist.events && hist.events.length){
+    $('#log').innerHTML = hist.events.slice(0, 40).map(e =>
+      `<li class="k-${esc(e[1])}"><time>${when(e[0])}</time><span>${esc(e[2])}</span></li>`).join('');
+    return;
+  }
+  const nodes = ((s && s.ping && s.ping.nodes) || []);
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n.name]));
+  const log = ((s && s.log) || []).slice().reverse().map(l => `<li><span>${esc(l.replace(/\b[A-Za-z0-9]{8}\b/g, id => byId[id] || id))}</span></li>`);
+  $('#log').innerHTML = log.join('') || '<li><span>Пока пусто.</span></li>';
 }
 
 const flag = cc => /^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' : '';
@@ -472,7 +594,7 @@ function renderSpeedCard(via, r){
 function renderSpeedtest(sp){ if(!sp) return; renderSpeedCard('vpn', sp.vpn); renderSpeedCard('direct', sp.direct); }
 
 function render(){
-  renderStatus(state); renderChart(state.history); renderSys(state.sys); renderSpeedtest(state.speed);
+  renderStatus(state); renderChart(); renderSys(state.sys); renderSpeedtest(state.speed);
   renderDevices(state.devices); renderServers(state); renderLog(state);
 }
 
@@ -488,12 +610,75 @@ window.addEventListener('hashchange', showTab);
 
 /* ---------- загрузка ---------- */
 async function load(){
-  try { state = await api('status'); render(); }
+  try { state = await api('status'); showDown(false); render(); }
   catch(e){
     if(Date.now() < quietUntil) return;
-    $('#vpn-text').textContent = 'Роутер не отвечает'; $('#vpn').className = 'status vpn down'; toast(e.message, true);
+    $('#vpn-text').textContent = 'Роутер не отвечает'; $('#vpn').className = 'status vpn down';
+    if(e.down) showDown(true); else toast(e.message, true);
   }
 }
+
+/* История, журнал и имена устройств — с сервера: есть даже когда роутер не на связи */
+async function loadData(){
+  try {
+    const r = await fetch('/router/data?range=' + range, {cache: 'no-store'});
+    if(r.status === 401){ location.href = '/router/login?next=' + encodeURIComponent(location.pathname); return; }
+    if(!r.ok) return;
+    hist = await r.json(); names = hist.names || {};
+    renderChart(); renderLog(state);
+    if(state) renderDevices(state.devices);
+    if(!$('#down').hidden) showDown(true);
+  } catch {}
+}
+
+function showDown(on){
+  $('#down').hidden = !on;
+  document.body.classList.toggle('is-down', on);
+  document.body.classList.toggle('no-state', !state);
+  if(!on) return;
+  const since = hist && (hist.offline_since || hist.last_ok);
+  const sm = $('#down-since small');
+  if(since){
+    const m = Math.max(1, Math.round((Date.now()/1000 - since) / 60));
+    $('#down-since').firstChild.textContent = `Не на связи с ${when(since)}`;
+    sm.textContent = `уже ${minutes(m)}` + (hist.last_ok ? ` · последний ответ ${when(hist.last_ok)}` : '');
+  } else {
+    $('#down-since').firstChild.textContent = 'Сервер не получает ответа от роутера';
+    sm.textContent = '';
+  }
+}
+
+$('#range').addEventListener('click', e => {
+  const b = e.target.closest('button[data-range]'); if(!b) return;
+  range = b.dataset.range;
+  document.querySelectorAll('#range button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderChart(); loadData();
+});
+
+/* Свои имена устройств (хранятся на сервере, по MAC) */
+document.addEventListener('click', e => {
+  const b = e.target.closest('button[data-edit]'); if(!b) return;
+  const mac = b.dataset.edit, box = b.closest('.dev-name');
+  const d = (state.devices || []).find(x => x.mac === mac) || {};
+  editing = mac;
+  box.innerHTML = `<input maxlength="40" value="${esc(names[mac.toLowerCase()] || d.name || '')}" placeholder="${esc(d.name || 'Имя устройства')}" aria-label="Имя устройства">
+    <small>Enter — сохранить, Esc — отмена. Пустое имя — как называет себя устройство.</small>`;
+  const inp = box.querySelector('input'); inp.focus(); inp.select();
+  const done = async save => {
+    if(editing !== mac) return;
+    editing = null;
+    if(save){
+      try {
+        const r = await fetch('/router/data', {method: 'POST', body: new URLSearchParams({mac, name: inp.value})});
+        if(!r.ok) throw new Error();
+        names = (await r.json()).names || {};
+      } catch { toast('Не удалось сохранить имя.', true); }
+    }
+    renderDevices(state.devices);
+  };
+  inp.addEventListener('keydown', ev => { if(ev.key === 'Enter') done(true); if(ev.key === 'Escape') done(false); });
+  inp.addEventListener('blur', () => done(true));
+});
 async function loadNet(){
   if(document.hidden || currentTab() !== 'net' || Date.now() < quietUntil) return;
   try { renderNet(await api('net')); } catch {}
@@ -553,7 +738,9 @@ document.querySelector('.controls').addEventListener('click', async e => {
 
 showTab();
 load();
+loadData();
 setInterval(load, 30000);
+setInterval(loadData, 60000);
 setInterval(loadNet, 3000);
 </script>
 </body>
