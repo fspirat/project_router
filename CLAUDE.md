@@ -115,6 +115,14 @@ nginx перед каждым запросом спрашивает `check.php` 
 5. Перед правкой nginx: `nginx -t` и только потом `systemctl reload nginx`.
 6. После изменений — проверить: `bash scripts/check.sh` и страницу в браузере.
 
+## ⚠️ Напоминание при смене VPN / протокола
+
+06.10.2026 с роутера удалены пакеты для Shadowsocks/SSR (в подписке nosok только VLESS и Hysteria2), освобождено 18 МБ флеша:
+`v2ray-plugin shadowsocks-rust-sslocal shadowsocks-rust-ssserver shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server simple-obfs-client`
+(с ними ушли зависимости libsodium, libudns, libev, libpcre2). **Если пользователь ставит другой VPN / подписку
+с Shadowsocks или SSR — напомнить ему и вернуть:** `apk update && apk add` + список выше.
+Переустановка PassWall скриптом enxy0 тоже вернёт их сама.
+
 ## Грабли, на которые уже наступили (не повторять)
 
 - **uhttpd не передаёт в CGI свои заголовки** (X-Fspirat-Token терялся) → токен идёт cookie.

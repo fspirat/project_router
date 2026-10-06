@@ -72,6 +72,8 @@
   менеджер пакетов apk. Вход `ssh root@192.168.7.1` (после перепрошивки `ssh-keygen -R 192.168.7.1`).
 - Wi-Fi: `bob_vless_2G`, `bob_vless_5G`, WPA2/WPA3, страна RU. WAN: DHCP.
 - PassWall 2 26.10.1, Xray 26.9.30, Geoview 0.2.6, без sing-box (поэтому узлы Hysteria2 не работают).
+- 06.10.2026 удалены ненужные плагины Shadowsocks/SSR (v2ray-plugin, shadowsocks-rust-*, shadowsocksr-libev-*,
+  simple-obfs-client): флеш 82% → 50%. При переходе на другой VPN с Shadowsocks — поставить обратно (см. CLAUDE.md).
   Обновить ядро: `apk update && apk add --upgrade xray-core`.
 
 ### PassWall 2
