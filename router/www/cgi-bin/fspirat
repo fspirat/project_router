@@ -1,0 +1,148 @@
+#!/bin/sh
+# FSPIRAT: CGI для страницы fspirat.online/router/
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+SHUNT=9DxG2j8l
+GROUP=nosok
+DIR=/tmp/fspirat
+mkdir -p $DIR
+TOKEN=$(cat /etc/fspirat.token 2>/dev/null)
+REQ_TOKEN=${HTTP_COOKIE#*fspirat_token=}; REQ_TOKEN=${REQ_TOKEN%%;*}
+
+reply() { echo "Status: $1"; echo "Content-Type: application/json"; echo "Cache-Control: no-store"; echo; echo "$2"; exit 0; }
+jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
+bg() { ( setsid sh -c "$1" </dev/null >/dev/null 2>&1 & ); }
+
+[ -n "$TOKEN" ] && [ "$REQ_TOKEN" = "$TOKEN" ] || reply "403 Forbidden" '{"error":"forbidden"}'
+
+action=$(echo "$QUERY_STRING" | sed -n 's/^.*action=\([a-z]*\).*$/\1/p')
+id=$(echo "$QUERY_STRING" | sed -n 's/^.*id=\([A-Za-z0-9]*\).*$/\1/p')
+
+cpu_sample() { awk '/^cpu /{t=0; for(i=2;i<=NF;i++) t+=$i; print t, $5+$6}' /proc/stat; }
+wan_dev() { d=$(ifstatus wan 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null); echo "${d:-wan}"; }
+net_sample() { sed 's/:/ /' /proc/net/dev | awk -v d="$1" '$1==d{print $2, $10}'; }
+
+net_json() { # $1 dev, $2 r1, $3 x1, $4 r2, $5 x2
+  echo "{\"dev\":\"$1\",\"rx\":$((($4-$2)*8)),\"tx\":$((($5-$3)*8)),\"rx_total\":$4,\"tx_total\":$5}"
+}
+
+net_only() {
+  dev=$(wan_dev)
+  set -- $(net_sample $dev); r1=${1:-0}; x1=${2:-0}
+  sleep 1
+  set -- $(net_sample $dev); r2=${1:-0}; x2=${2:-0}
+  net_json "$dev" $r1 $x1 $r2 $x2
+}
+
+devices_json() {
+  printf '['
+  first=1
+  [ -f /tmp/dhcp.leases ] && while read -r exp mac ip name cid; do
+    flags=$(awk -v ip="$ip" '$1==ip{print $3}' /proc/net/arp)
+    [ "$flags" = "0x2" ] && on=true || on=false
+    [ "$name" = "*" ] && name=""
+    n=$(echo "$name" | jesc)
+    [ $first -eq 1 ] || printf ','
+    first=0
+    printf '{"name":"%s","ip":"%s","mac":"%s","online":%s}' "$n" "$ip" "$mac" "$on"
+  done < /tmp/dhcp.leases
+  printf ']'
+}
+
+sys_json() {
+  dev=$(wan_dev)
+  set -- $(cpu_sample); t1=$1; i1=$2
+  set -- $(net_sample $dev); r1=${1:-0}; x1=${2:-0}
+  sleep 1
+  set -- $(cpu_sample); t2=$1; i2=$2
+  set -- $(net_sample $dev); r2=${1:-0}; x2=${2:-0}
+  dt=$((t2 - t1)); [ $dt -gt 0 ] && cpu=$(( 100 * (dt - (i2 - i1)) / dt )) || cpu=0
+  cores=$(grep -c ^processor /proc/cpuinfo)
+  load=$(cut -d' ' -f1-3 /proc/loadavg)
+  mt=$(awk '/^MemTotal/{print $2}' /proc/meminfo)
+  ma=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
+  set -- $(df -k /overlay 2>/dev/null | awk 'NR==2{print $2, $3}'); dtot=${1:-0}; dused=${2:-0}
+  set -- $(df -k /tmp | awk 'NR==2{print $2, $3}'); ttot=${1:-0}; tused=${2:-0}
+  t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+  [ -n "$t" ] && temp=$((t / 1000)) || temp=null
+  up=$(cut -d. -f1 /proc/uptime)
+  model=$(cat /tmp/sysinfo/model 2>/dev/null | jesc)
+  fw=$(. /etc/openwrt_release; echo "$DISTRIB_DESCRIPTION" | jesc)
+  echo "{\"cpu\":$cpu,\"cores\":$cores,\"load\":\"$load\",\"mem_total\":$mt,\"mem_avail\":$ma,\"disk_total\":$dtot,\"disk_used\":$dused,\"tmp_total\":$ttot,\"tmp_used\":$tused,\"temp\":$temp,\"uptime\":$up,\"model\":\"$model\",\"fw\":\"$fw\",\"net\":$(net_json "$dev" $r1 $x1 $r2 $x2)}"
+}
+
+SOCKS=127.0.0.1:1070
+CF=https://speed.cloudflare.com
+
+speed_run() { # $1 = vpn | direct
+  if [ "$1" = vpn ]; then P="-x socks5h://$SOCKS"; else P=""; fi
+  trace=$(curl -s -m 8 $P "$CF/cdn-cgi/trace")
+  ip=$(echo "$trace" | sed -n 's/^ip=//p')
+  cc=$(echo "$trace" | sed -n 's/^loc=//p')
+  lat=$(curl -s -m 8 $P -w '%{time_starttransfer}\n' -o /dev/null -o /dev/null -o /dev/null -o /dev/null \
+        "$CF/__down?bytes=0" "$CF/__down?bytes=0" "$CF/__down?bytes=0" "$CF/__down?bytes=0" | sort -n | head -1)
+  # загрузка: до 8 файлов по 25 МБ подряд, не дольше 10 секунд
+  D="$CF/__down?bytes=25000000"
+  dl=$(curl -s -m 10 $P -w '%{http_code} %{size_download} %{time_total}\n' \
+        -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null \
+        "$D" "$D" "$D" "$D" "$D" "$D" "$D" "$D" \
+       | awk '$1=="200"||$1=="000"{b+=$2;t+=$3} END{if(t>0) printf "%d", b*8/t; else print 0}')
+  # отдача: до 5 отправок по 10 МБ подряд, не дольше 10 секунд
+  head -c 10000000 /dev/zero > $DIR/up.bin
+  U="$CF/__up"
+  ul=$(curl -s -m 10 $P -w '%{http_code} %{size_upload} %{time_total}\n' --data-binary @$DIR/up.bin \
+        -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null \
+        "$U" "$U" "$U" "$U" "$U" \
+       | awk '$1=="200"||$1=="000"{b+=$2;t+=$3} END{if(t>0) printf "%d", b*8/t; else print 0}')
+  rm -f $DIR/up.bin
+  awk -v d="${dl:-0}" -v u="${ul:-0}" -v l="${lat:-0}" -v ip="$ip" -v cc="$cc" -v via="$1" -v ts="$(date +%s)" \
+    'BEGIN{printf "{\"via\":\"%s\",\"ts\":%s,\"down\":%d,\"up\":%d,\"latency\":%d,\"ip\":\"%s\",\"country\":\"%s\"}", via, ts, d, u, l*1000, ip, cc}'
+}
+
+status_json() {
+  cur=$(uci -q get passwall2.$SHUNT.default_node)
+  glob=$(uci -q get passwall2.@global[0].node)
+  pidof xray >/dev/null && run=true || run=false
+  [ "$glob" = "$SHUNT" ] && split=true || split=false
+  ping=$(cat $DIR/ping.json 2>/dev/null); [ -n "$ping" ] || ping=null
+  log=$(tail -n 8 $DIR/switch.log 2>/dev/null | jesc | sed 's/.*/"&"/' | tr '\n' ',' | sed 's/,$//')
+  sv=$(cat $DIR/speed_vpn.json 2>/dev/null); [ -n "$sv" ] || sv=null
+  sd=$(cat $DIR/speed_direct.json 2>/dev/null); [ -n "$sd" ] || sd=null
+  hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+}
+
+case "$action" in
+  status) reply "200 OK" "$(status_json)" ;;
+  net) reply "200 OK" "$(net_only)" ;;
+  ping) /usr/bin/fspirat-ping >/dev/null 2>&1; reply "200 OK" "$(status_json)" ;;
+  switch)
+    [ -n "$id" ] && [ "$(uci -q get passwall2.$id.group)" = "$GROUP" ] || reply "400 Bad Request" '{"error":"bad node"}'
+    uci set passwall2.$SHUNT.default_node="$id"
+    uci commit passwall2
+    echo 0 > $DIR/fails
+    echo "$(date '+%d.%m %H:%M') вручную -> $id" >> $DIR/switch.log
+    bg "/etc/init.d/passwall2 restart"
+    reply "200 OK" '{"ok":true}' ;;
+  restart)
+    echo "$(date '+%d.%m %H:%M') перезапуск VPN" >> $DIR/switch.log
+    bg "/etc/init.d/passwall2 restart"
+    reply "200 OK" '{"ok":true}' ;;
+  update)
+    [ -f /usr/share/passwall2/subscribe.lua ] || reply "500 Internal Server Error" '{"error":"subscribe.lua not found"}'
+    echo "$(date '+%d.%m %H:%M') обновление подписки" >> $DIR/switch.log
+    bg "lua /usr/share/passwall2/subscribe.lua start; sleep 5; /usr/bin/fspirat-ping"
+    reply "200 OK" '{"ok":true}' ;;
+  speedtest)
+    via=$(echo "$QUERY_STRING" | sed -n 's/^.*via=\([a-z]*\).*$/\1/p')
+    [ "$via" = vpn ] || [ "$via" = direct ] || reply "400 Bad Request" '{"error":"bad via"}'
+    if [ -f $DIR/speed.lock ] && kill -0 "$(cat $DIR/speed.lock)" 2>/dev/null; then reply "409 Conflict" '{"error":"busy"}'; fi
+    echo $$ > $DIR/speed.lock
+    res=$(speed_run $via)
+    rm -f $DIR/speed.lock
+    echo "$res" > $DIR/speed_$via.json
+    reply "200 OK" "$res" ;;
+  reboot)
+    bg "sleep 2; reboot"
+    reply "200 OK" '{"ok":true}' ;;
+  *) reply "400 Bad Request" '{"error":"unknown action"}' ;;
+esac

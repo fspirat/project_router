@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>FSPIRAT Router</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  /* Флаги стран для Windows (там нет эмодзи-флагов) */
+  @font-face{
+    font-family:"Twemoji Country Flags";
+    unicode-range:U+1F1E6-1F1FF,U+1F3F4,U+E0062-E0063,U+E0065,U+E0067,U+E006C,U+E006E,U+E0073-E0074,U+E0077,U+E007F;
+    src:url("https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1/dist/TwemojiCountryFlags.woff2") format("woff2");
+    font-display:swap;
+  }
+  /* Если на главной подключён свой Minecraft-шрифт, вставь сюда его @font-face с font-family: "Minecraft" */
+  :root{
+    --bg:#050605; --panel:#0c110a; --edge:#1d2b15;
+    --green:#7fbf3a; --lime:#9be052; --text:#d9e7cd; --dim:#7f8e74;
+    --red:#e0563c; --amber:#e3b542;
+    --pixel:"Minecraft","Press Start 2P",monospace;
+    --body:"Twemoji Country Flags",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    min-height:100vh;color:var(--text);font:15px/1.5 var(--body);
+    background:
+      linear-gradient(rgba(127,191,58,.035) 1px,transparent 1px) 0 0/32px 32px,
+      linear-gradient(90deg,rgba(127,191,58,.035) 1px,transparent 1px) 0 0/32px 32px,
+      radial-gradient(ellipse at 50% -10%,#10200b 0%,var(--bg) 60%);
+    background-color:var(--bg);
+  }
+  .wrap{max-width:780px;margin:0 auto;padding:28px 16px 64px}
+  a{color:var(--lime)}
+  :focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+  .logo{font-family:var(--pixel);font-size:22px;color:var(--lime);text-decoration:none;text-shadow:3px 3px 0 #1f3a10;letter-spacing:1px}
+  .logo small{display:block;font-size:10px;color:var(--dim);text-shadow:none;margin-top:8px;letter-spacing:3px}
+
+  .panel{background:var(--panel);border:2px solid var(--edge);
+         box-shadow:inset 3px 3px 0 rgba(255,255,255,.035),inset -3px -3px 0 rgba(0,0,0,.5),4px 4px 0 #000;
+         padding:18px;margin-bottom:18px}
+  h2{font-family:var(--pixel);font-size:11px;color:var(--green);font-weight:400;margin:0 0 14px;letter-spacing:1px}
+  .muted{color:var(--dim);font-size:13px}
+
+  .btn{font:inherit;font-size:14px;color:#eaf5df;cursor:pointer;padding:9px 14px;background:#2a3d1d;border:2px solid #000;
+       box-shadow:inset 2px 2px 0 #4a6a33,inset -2px -2px 0 #16220f;text-decoration:none;display:inline-block}
+  .btn:hover:not(:disabled){background:#35501f}
+  .btn:active:not(:disabled){box-shadow:inset -2px -2px 0 #4a6a33,inset 2px 2px 0 #16220f}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn.primary{background:#4f8a22;box-shadow:inset 2px 2px 0 #8fcf55,inset -2px -2px 0 #2c5212}
+  .btn.primary:hover:not(:disabled){background:#5c9c29}
+  .btn.danger{background:#5a2216;box-shadow:inset 2px 2px 0 #8a3d2c,inset -2px -2px 0 #2e0f08}
+  .btn.danger:hover:not(:disabled){background:#6d2a1b}
+  .btn.small{padding:6px 10px;font-size:13px}
+
+  /* Статус */
+  .status{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;align-items:center}
+  .lamp{width:18px;height:18px;background:#333;box-shadow:inset -3px -3px 0 rgba(0,0,0,.4);grid-row:span 3}
+  .vpn.up .lamp{background:var(--lime);box-shadow:inset -3px -3px 0 #4f8a22,0 0 14px rgba(155,224,82,.5)}
+  .vpn.down .lamp{background:var(--red);box-shadow:inset -3px -3px 0 #8a2a17,0 0 14px rgba(224,86,60,.4)}
+  #vpn-text{font-family:var(--pixel);font-size:12px;color:var(--dim)}
+  .vpn.up #vpn-text{color:var(--lime)} .vpn.down #vpn-text{color:var(--red)}
+  .current{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  #cur-name{font-size:22px;font-weight:600}
+  #real{font-size:14px;color:var(--dim)}
+  #real b{font-family:var(--pixel);font-size:10px;font-weight:400;color:var(--text)}
+  #real.bad,#real.bad b{color:var(--red)}
+  .ping{display:inline-flex;align-items:center;gap:8px;color:var(--dim);font-size:13px;white-space:nowrap}
+  .ping b{font-family:var(--pixel);font-size:10px;color:var(--text);font-weight:400}
+  .meta{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+        margin-top:16px;padding-top:14px;border-top:2px solid var(--edge);color:var(--dim);font-size:13px}
+  .warn{margin-top:14px;padding:10px 12px;border:2px solid #5a4410;background:#1c1606;color:var(--amber);font-size:14px}
+
+  .bars{width:20px;height:16px;flex:none;shape-rendering:crispEdges}
+  .bars rect{fill:#26321f} .bars rect.on{fill:var(--lime)}
+  .bars.off path{stroke:var(--red);stroke-width:3;fill:none;stroke-linecap:square}
+
+  /* График */
+  .chart{width:100%;height:150px;display:block;background:#0a0f08;border:2px solid #000;box-shadow:inset 0 0 0 1px #1f2c17}
+  .chart .grid{stroke:#16210f;stroke-width:1}
+  .chart .line{fill:none;stroke:var(--lime);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:bevel}
+  .chart .area{fill:rgba(155,224,82,.08)}
+  .chart .fail{fill:var(--red)}
+  .chart-legend{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-top:6px}
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+
+  /* Карточки с цифрами */
+  .fact{flex:1 1 130px;padding:8px 10px;border:2px solid var(--edge);background:#0a0f08}
+  .fact span{display:block;color:var(--dim);font-size:12px}
+  .fact b{font-family:var(--pixel);font-size:11px;font-weight:400;line-height:2.2}
+  .facts{display:flex;gap:10px;flex-wrap:wrap}
+
+  /* Скорость */
+  .speed{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .spd{padding:12px;border:2px solid var(--edge);background:#0a0f08}
+  .spd span{color:var(--dim);font-size:13px}
+  .spd b{display:block;font-family:var(--pixel);font-size:18px;font-weight:400;color:var(--lime);line-height:2}
+  .spd small{color:var(--dim);font-size:12px}
+
+  /* Ресурсы */
+  .sys-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--dim);font-size:13px;margin:-4px 0 16px}
+  #sys-model{color:var(--text);font-weight:600;font-size:15px}
+  .meters{display:grid;grid-template-columns:1fr 1fr;gap:18px 24px;margin-bottom:18px}
+  .m-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .m-top b{font-family:var(--pixel);font-size:11px;font-weight:400}
+  .xp{height:14px;background:#0a0f08;border:2px solid #000;box-shadow:inset 0 0 0 1px #1f2c17;position:relative;overflow:hidden}
+  .xp i{position:absolute;top:0;bottom:0;left:0;width:0;background:var(--lime);
+        box-shadow:inset 0 -3px 0 rgba(0,0,0,.25),inset 0 2px 0 rgba(255,255,255,.25);transition:width .4s steps(8)}
+  .xp::after{content:"";position:absolute;inset:0;pointer-events:none;
+             background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 2px),#000 calc(10% - 2px) 10%)}
+  .xp.warn i{background:var(--amber)} .xp.crit i{background:var(--red)}
+  .meter small{display:block;color:var(--dim);font-size:12px;margin-top:5px}
+
+  /* Списки */
+  .list{list-style:none;margin:0;padding:0}
+  .srv{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:10px 12px;
+       border:2px solid transparent;border-bottom-color:#111a0c}
+  .srv:hover{background:#0f170b}
+  .srv.is-cur{border-color:var(--green);background:#122009}
+  .srv.is-off .srv-name{color:var(--dim)}
+  .srv-name{overflow-wrap:anywhere}
+  .srv .ping{min-width:118px;justify-content:flex-end}
+  .tag{font-family:var(--pixel);font-size:9px;color:var(--lime);padding:6px 8px;border:2px solid var(--green)}
+  .empty{padding:14px 12px;color:var(--dim)}
+  details{margin-top:12px}
+  summary{cursor:pointer;color:var(--dim);padding:8px 12px;border:2px dashed var(--edge);list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"+ ";font-family:var(--pixel);font-size:10px}
+  details[open] summary::before{content:"− "}
+
+  .dev{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:9px 12px;border-bottom:2px solid #111a0c}
+  .dot{width:10px;height:10px;background:#2a3522}
+  .dot.on{background:var(--lime);box-shadow:0 0 8px rgba(155,224,82,.6)}
+  .dev-ip{color:var(--dim);font-size:13px;text-align:right}
+  .dev-ip small{display:block;font-size:11px;opacity:.7}
+
+  .controls{display:flex;gap:10px;flex-wrap:wrap}
+  .topbar{padding:12px}
+
+  /* Вкладки страниц */
+  .tabs{display:flex;gap:6px;margin:0 0 18px}
+  .tab{font-family:var(--pixel);font-size:11px;color:var(--dim);text-decoration:none;padding:12px 16px;
+       border:2px solid var(--edge);background:#0a0f08}
+  .tab:hover{color:var(--text)}
+  .tab[aria-selected="true"]{color:var(--lime);background:var(--panel);border-color:var(--green);box-shadow:3px 3px 0 #000}
+  [data-page][hidden]{display:none}
+
+  /* Тест скорости */
+  .st-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .st{padding:12px;border:2px solid var(--edge);background:#0a0f08}
+  .st-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+  .st-head span{font-weight:600}
+  .st-nums{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .st-nums span{display:block;color:var(--dim);font-size:12px}
+  .st-nums b{font-family:var(--pixel);font-size:12px;font-weight:400;color:var(--lime);line-height:2.2}
+  .st-meta{display:block;color:var(--dim);font-size:12px;margin-top:6px}
+  .note{color:var(--dim);font-size:13px;margin:12px 0 0;max-width:68ch}
+  .log{margin:0;padding:0;list-style:none;color:var(--dim);font-size:13px}
+  .log li{padding:4px 0;border-bottom:1px dashed #1a2513}
+
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:92vw;background:#16220f;
+         border:2px solid var(--green);padding:12px 16px;box-shadow:4px 4px 0 #000;font-size:14px;z-index:5}
+  .toast.err{border-color:var(--red);background:#22100b}
+
+  @media (max-width:560px){
+    .meters,.speed,.st-grid{grid-template-columns:1fr}
+    .tab{flex:1;text-align:center;padding:12px 8px}
+    .srv{grid-template-columns:1fr auto;gap:8px 12px}
+    .srv .btn,.srv .tag{grid-column:1/-1;justify-self:start}
+    .srv .ping{min-width:0}
+    #cur-name{font-size:18px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="/">FSPIRAT<small>ROUTER</small></a>
+    <a class="btn" href="https://router.fspirat.online" target="_blank" rel="noopener">Открыть LuCI</a>
+  </header>
+
+  <section class="panel topbar">
+    <div class="controls">
+      <button class="btn primary" id="ping-btn">Проверить серверы</button>
+      <button class="btn" data-act="restart">Перезапустить VPN</button>
+      <button class="btn" data-act="update">Обновить подписку</button>
+      <button class="btn danger" data-act="reboot">Перезагрузить роутер</button>
+    </div>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <a class="tab" role="tab" href="#vpn" data-tab="vpn">VPN</a>
+    <a class="tab" role="tab" href="#net" data-tab="net">Роутер и сеть</a>
+  </nav>
+
+  <!-- ===== Вкладка VPN ===== -->
+  <div data-page="vpn">
+    <section class="panel" aria-live="polite">
+      <div class="status vpn" id="vpn">
+        <div class="lamp"></div>
+        <div id="vpn-text">Связываюсь с роутером…</div>
+        <div class="current"><span id="cur-name">—</span><span class="ping" id="cur-ping"></span></div>
+        <div id="real"></div>
+      </div>
+      <div class="warn" id="warn" hidden>В PassWall выбран не узел Split: правило прямых сайтов не работает, а смена сервера здесь ни на что не повлияет. Выбери Split в Basic Settings → Node.</div>
+      <div class="meta"><span id="updated"></span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Связь за 24 часа</h2>
+      <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График отклика VPN за сутки"></svg>
+      <div class="chart-legend"><span>24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
+      <div class="stats facts">
+        <div class="fact"><span>Средний отклик</span><b id="st-avg">—</b></div>
+        <div class="fact"><span>Лучший</span><b id="st-min">—</b></div>
+        <div class="fact"><span>Худший</span><b id="st-max">—</b></div>
+        <div class="fact"><span>Сбоев</span><b id="st-fail">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Серверы</h2>
+      <ul class="list" id="list"><li class="empty">Загружаю список серверов…</li></ul>
+      <details id="dead-box" hidden>
+        <summary id="dead-sum"></summary>
+        <ul class="list" id="dead"></ul>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Журнал</h2>
+      <ul class="log" id="log"><li>Пока пусто.</li></ul>
+    </section>
+  </div>
+
+  <!-- ===== Вкладка Роутер и сеть ===== -->
+  <div data-page="net" hidden>
+    <section class="panel">
+      <h2>Интернет сейчас</h2>
+      <div class="speed">
+        <div class="spd"><span>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
+        <div class="spd"><span>Отдача</span><b id="sp-tx">—</b><small id="tot-tx"></small></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Тест скорости</h2>
+      <div class="st-grid">
+        <div class="st" id="st-vpn">
+          <div class="st-head"><span>Через VPN</span><button class="btn small" data-speed="vpn">Запустить</button></div>
+          <div class="st-nums">
+            <div><span>Загрузка</span><b class="st-down">—</b></div>
+            <div><span>Отдача</span><b class="st-up">—</b></div>
+            <div><span>Задержка</span><b class="st-lat">—</b></div>
+          </div>
+          <small class="st-meta">Ещё не запускали.</small>
+        </div>
+        <div class="st" id="st-direct">
+          <div class="st-head"><span>Напрямую, без VPN</span><button class="btn small" data-speed="direct">Запустить</button></div>
+          <div class="st-nums">
+            <div><span>Загрузка</span><b class="st-down">—</b></div>
+            <div><span>Отдача</span><b class="st-up">—</b></div>
+            <div><span>Задержка</span><b class="st-lat">—</b></div>
+          </div>
+          <small class="st-meta">Ещё не запускали.</small>
+        </div>
+      </div>
+      <p class="note">Тест идёт с самого роутера через серверы Cloudflare и длится около 25 секунд. Шифрование VPN считает процессор роутера, поэтому «через VPN» показывает потолок именно роутера: на быстром тарифе компьютер напрямую покажет больше.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Роутер</h2>
+      <div class="sys-head"><span id="sys-model">—</span><span id="sys-fw"></span></div>
+      <div class="meters">
+        <div class="meter"><div class="m-top"><span>Процессор</span><b id="m-cpu">—</b></div><div class="xp"><i id="x-cpu"></i></div><small id="s-cpu"></small></div>
+        <div class="meter"><div class="m-top"><span>Оперативная память</span><b id="m-ram">—</b></div><div class="xp"><i id="x-ram"></i></div><small id="s-ram"></small></div>
+        <div class="meter"><div class="m-top"><span>Флеш-память</span><b id="m-disk">—</b></div><div class="xp"><i id="x-disk"></i></div><small id="s-disk"></small></div>
+        <div class="meter"><div class="m-top"><span>Временные файлы</span><b id="m-tmp">—</b></div><div class="xp"><i id="x-tmp"></i></div><small id="s-tmp"></small></div>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>Температура</span><b id="f-temp">—</b></div>
+        <div class="fact"><span>Работает без перезагрузки</span><b id="f-up">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Устройства</h2>
+      <ul class="list" id="devices"><li class="empty">Загружаю…</li></ul>
+    </section>
+  </div>
+</div>
+
+<script>
+const API = '/router/api';
+let state = null, toastTimer, quietUntil = 0;
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- помощники ---------- */
+function level(ms){ if(!ms) return 0; if(ms<60) return 5; if(ms<100) return 4; if(ms<160) return 3; if(ms<250) return 2; return 1; }
+function bars(ms){
+  const l = level(ms);
+  if(!l) return '<svg class="bars off" viewBox="0 0 20 16" aria-hidden="true"><path d="M4 3 16 13M16 3 4 13"/></svg>';
+  let r = '';
+  for(let i=0;i<5;i++){ const h = 4+i*3; r += `<rect x="${i*4}" y="${16-h}" width="3" height="${h}" class="${i<l?'on':''}"/>`; }
+  return `<svg class="bars" viewBox="0 0 20 16" aria-hidden="true">${r}</svg>`;
+}
+const pingHtml = ms => bars(ms) + (ms ? `<b>${ms}</b> ms` : 'нет ответа');
+const mb = kb => kb >= 1048576 ? (kb/1048576).toFixed(1)+' ГБ' : kb < 10240 ? (kb/1024).toFixed(1)+' МБ' : Math.round(kb/1024)+' МБ';
+const bytes = b => mb(b/1024);
+function speed(bps){
+  if(bps >= 1e6) return (bps/1e6).toFixed(bps >= 1e8 ? 0 : 1) + ' Мбит/с';
+  return Math.round(bps/1e3) + ' кбит/с';
+}
+function ago(ts){
+  const s = Math.max(0, Math.round(Date.now()/1000 - ts));
+  if(s < 60) return 'только что';
+  if(s < 3600) return Math.round(s/60) + ' мин назад';
+  return Math.round(s/3600) + ' ч назад';
+}
+function upt(s){
+  const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+function toast(msg, err){
+  let t = $('.toast');
+  if(!t){ t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role','status'); document.body.append(t); }
+  t.textContent = msg; t.classList.toggle('err', !!err); t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, err ? 9000 : 6000);
+}
+
+async function api(action, extra=''){
+  let r;
+  try { r = await fetch(`${API}?action=${action}${extra}`, {cache:'no-store'}); }
+  catch { throw new Error('Нет связи с сайтом. Проверь интернет.'); }
+  if(r.status === 502 || r.status === 504) throw new Error('Роутер не на связи: туннель до сервера не поднят.');
+  if(r.status === 409) throw new Error('Тест скорости уже идёт, дождись результата.');
+  if(r.status === 403) throw new Error('Роутер отклонил запрос: токен в nginx не совпадает с /etc/fspirat.token.');
+  if(!r.ok){ let m = ''; try { m = (await r.json()).error || ''; } catch {} throw new Error(`Ошибка ${r.status} при запросе к роутеру. ${m}`); }
+  return r.json();
+}
+
+/* ---------- блоки ---------- */
+function renderStatus(s){
+  const nodes = (s.ping && s.ping.nodes) || [];
+  const cur = nodes.find(n => n.id === s.current);
+  $('#vpn').className = 'status vpn ' + (s.running ? 'up' : 'down');
+  $('#vpn-text').textContent = s.running ? 'VPN работает' : 'VPN остановлен';
+  $('#cur-name').textContent = cur ? cur.name : (s.current || '—');
+  $('#cur-ping').innerHTML = cur ? pingHtml(cur.ms) : '';
+  const real = $('#real');
+  if(!s.ping || !s.ping.socks){ real.className = ''; real.textContent = 'Проверка через VPN не настроена: нужен SOCKS на порту 1080.'; }
+  else if(s.ping.real > 0){ real.className = ''; real.innerHTML = `Отклик через VPN: <b>${s.ping.real}</b> ms`; }
+  else { real.className = 'bad'; real.innerHTML = 'Отклик через VPN: <b>не проходит</b>'; }
+  $('#updated').textContent = s.ping ? 'Проверено ' + ago(s.ping.updated) + ', автопроверка раз в 5 минут' : 'Проверок ещё не было.';
+  $('#warn').hidden = s.split_active;
+}
+
+function renderChart(hist){
+  const svg = $('#chart'), W = 600, H = 150, now = Date.now()/1000, from = now - 86400;
+  const pts = (hist || []).filter(p => p[0] >= from);
+  const ok = pts.filter(p => p[1] > 0).map(p => p[1]);
+  const max = Math.max(200, ...ok) * 1.15;
+  const x = t => ((t - from) / 86400) * W, y = v => H - (v / max) * (H - 8);
+  let g = '';
+  for(let i=1;i<4;i++) g += `<line class="grid" x1="0" x2="${W}" y1="${H*i/4}" y2="${H*i/4}"/>`;
+  for(let i=1;i<6;i++) g += `<line class="grid" y1="0" y2="${H}" x1="${W*i/6}" x2="${W*i/6}"/>`;
+  // линии рвутся на сбоях
+  let seg = [], lines = '', areas = '';
+  const flush = () => {
+    if(seg.length > 1){
+      const d = seg.map(p => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
+      lines += `<polyline class="line" points="${d}"/>`;
+      areas += `<polygon class="area" points="${x(seg[0][0]).toFixed(1)},${H} ${d} ${x(seg[seg.length-1][0]).toFixed(1)},${H}"/>`;
+    } else if(seg.length === 1){
+      lines += `<rect x="${x(seg[0][0])-1}" y="${y(seg[0][1])-1}" width="3" height="3" fill="var(--lime)"/>`;
+    }
+    seg = [];
+  };
+  let fails = '';
+  pts.forEach(p => { if(p[1] > 0) seg.push(p); else { flush(); fails += `<rect class="fail" x="${x(p[0])-1.5}" y="${H-14}" width="3" height="14"/>`; } });
+  flush();
+  svg.innerHTML = g + areas + lines + fails;
+  $('#chart-max').textContent = pts.length ? `шкала до ${Math.round(max)} ms` : 'данных пока нет, первая точка появится через 5 минут';
+  const avg = ok.length ? Math.round(ok.reduce((a,b) => a+b, 0) / ok.length) : null;
+  $('#st-avg').textContent = avg ? avg + ' ms' : '—';
+  $('#st-min').textContent = ok.length ? Math.min(...ok) + ' ms' : '—';
+  $('#st-max').textContent = ok.length ? Math.max(...ok) + ' ms' : '—';
+  $('#st-fail').textContent = pts.length - ok.length;
+}
+
+function renderNet(n){
+  if(!n) return;
+  $('#sp-rx').textContent = speed(n.rx);
+  $('#sp-tx').textContent = speed(n.tx);
+  $('#tot-rx').textContent = 'С момента включения: ' + bytes(n.rx_total);
+  $('#tot-tx').textContent = 'С момента включения: ' + bytes(n.tx_total);
+}
+
+function setMeter(key, pct, sub){
+  pct = Math.min(100, Math.max(0, pct || 0));
+  $('#x-'+key).style.width = pct + '%';
+  $('#x-'+key).parentElement.className = 'xp' + (pct >= 85 ? ' crit' : pct >= 65 ? ' warn' : '');
+  $('#m-'+key).textContent = pct + '%';
+  $('#s-'+key).textContent = sub;
+}
+function renderSys(y){
+  if(!y) return;
+  $('#sys-model').textContent = y.model || 'Роутер';
+  $('#sys-fw').textContent = y.fw || '';
+  setMeter('cpu', y.cpu, `Средняя нагрузка ${y.load}, ядер: ${y.cores}`);
+  const used = y.mem_total - y.mem_avail;
+  setMeter('ram', Math.round(used / y.mem_total * 100), `${mb(used)} из ${mb(y.mem_total)}`);
+  setMeter('disk', y.disk_total ? Math.round(y.disk_used / y.disk_total * 100) : 0, `${mb(y.disk_used)} из ${mb(y.disk_total)}: пакеты и настройки`);
+  setMeter('tmp', y.tmp_total ? Math.round(y.tmp_used / y.tmp_total * 100) : 0, `${mb(y.tmp_used)} из ${mb(y.tmp_total)}: логи, кэш, данные в RAM`);
+  $('#f-temp').textContent = y.temp != null ? y.temp + '°C' : 'нет датчика';
+  $('#f-up').textContent = upt(y.uptime);
+  renderNet(y.net);
+}
+
+function renderDevices(list){
+  list = (list || []).slice().sort((a,b) => (b.online - a.online) || (a.name || 'я').localeCompare(b.name || 'я'));
+  $('#devices').innerHTML = list.map(d => `
+    <li class="dev">
+      <span class="dot${d.online ? ' on' : ''}" title="${d.online ? 'в сети' : 'не в сети'}"></span>
+      <span>${esc(d.name || 'Без имени')}</span>
+      <span class="dev-ip">${esc(d.ip)}<small>${esc(d.mac)}</small></span>
+    </li>`).join('') || '<li class="empty">Нет устройств с выданным адресом.</li>';
+}
+
+function srvRow(n, cur){
+  return `<li class="srv${n.id === cur ? ' is-cur' : ''}${n.ms ? '' : ' is-off'}">
+    <span class="srv-name">${esc(n.name)}</span>
+    <span class="ping">${pingHtml(n.ms)}</span>
+    ${n.id === cur ? '<span class="tag">Сейчас</span>'
+      : `<button class="btn small" data-id="${esc(n.id)}"${n.ms ? '' : ' disabled'}>Подключить</button>`}
+  </li>`;
+}
+function renderServers(s){
+  const nodes = (s.ping && s.ping.nodes) || [];
+  const alive = nodes.filter(n => n.ms > 0).sort((a,b) => a.ms - b.ms);
+  const dead = nodes.filter(n => !n.ms);
+  $('#list').innerHTML = alive.map(n => srvRow(n, s.current)).join('') || '<li class="empty">Ни один сервер не ответил. Нажми «Проверить серверы».</li>';
+  $('#dead-box').hidden = !dead.length;
+  $('#dead-sum').textContent = `Не отвечают: ${dead.length}`;
+  $('#dead').innerHTML = dead.map(n => srvRow(n, s.current)).join('');
+}
+
+function renderLog(s){
+  const names = Object.fromEntries(((s.ping && s.ping.nodes) || []).map(n => [n.id, n.name]));
+  const log = (s.log || []).slice().reverse().map(l => `<li>${esc(l.replace(/\b[A-Za-z0-9]{8}\b/g, id => names[id] || id))}</li>`);
+  $('#log').innerHTML = log.join('') || '<li>Пока пусто.</li>';
+}
+
+const flag = cc => /^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' : '';
+function renderSpeedCard(via, r){
+  const box = $('#st-' + via);
+  if(!r) return;
+  box.querySelector('.st-down').textContent = speed(r.down);
+  box.querySelector('.st-up').textContent = speed(r.up);
+  box.querySelector('.st-lat').textContent = r.latency ? r.latency + ' ms' : '—';
+  box.querySelector('.st-meta').textContent = (r.ip ? `Выход: ${flag(r.country)}${r.ip}, ` : '') + 'проверено ' + ago(r.ts);
+}
+function renderSpeedtest(sp){ if(!sp) return; renderSpeedCard('vpn', sp.vpn); renderSpeedCard('direct', sp.direct); }
+
+function render(){
+  renderStatus(state); renderChart(state.history); renderSys(state.sys); renderSpeedtest(state.speed);
+  renderDevices(state.devices); renderServers(state); renderLog(state);
+}
+
+/* ---------- вкладки ---------- */
+const currentTab = () => location.hash === '#net' ? 'net' : 'vpn';
+function showTab(){
+  const t = currentTab();
+  document.querySelectorAll('[data-page]').forEach(p => p.hidden = p.dataset.page !== t);
+  document.querySelectorAll('.tab').forEach(a => a.setAttribute('aria-selected', a.dataset.tab === t));
+  if(t === 'net') loadNet();
+}
+window.addEventListener('hashchange', showTab);
+
+/* ---------- загрузка ---------- */
+async function load(){
+  try { state = await api('status'); render(); }
+  catch(e){
+    if(Date.now() < quietUntil) return;
+    $('#vpn-text').textContent = 'Роутер не отвечает'; $('#vpn').className = 'status vpn down'; toast(e.message, true);
+  }
+}
+async function loadNet(){
+  if(document.hidden || currentTab() !== 'net' || Date.now() < quietUntil) return;
+  try { renderNet(await api('net')); } catch {}
+}
+
+/* ---------- действия ---------- */
+$('#ping-btn').addEventListener('click', async e => {
+  const b = e.currentTarget; b.disabled = true; b.textContent = 'Проверяю, ~20 сек…';
+  try { state = await api('ping'); render(); toast('Проверка серверов завершена.'); }
+  catch(err){ toast(err.message, true); }
+  finally { b.disabled = false; b.textContent = 'Проверить серверы'; }
+});
+
+document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', async () => {
+  const via = btn.dataset.speed, all = document.querySelectorAll('[data-speed]');
+  all.forEach(x => x.disabled = true); btn.textContent = 'Идёт тест, ~25 сек…';
+  $('#st-' + via).querySelector('.st-meta').textContent = 'Измеряю загрузку, потом отдачу…';
+  try {
+    const r = await api('speedtest', '&via=' + via);
+    if(state){ state.speed = state.speed || {}; state.speed[via] = r; }
+    renderSpeedCard(via, r);
+    toast(`Тест ${via === 'vpn' ? 'через VPN' : 'напрямую'}: ${speed(r.down)} загрузка, ${speed(r.up)} отдача.`);
+  } catch(err){ toast(err.message, true); }
+  finally { all.forEach(x => x.disabled = false); btn.textContent = 'Запустить'; }
+}));
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button[data-id]'); if(!b) return;
+  const n = state.ping.nodes.find(x => x.id === b.dataset.id);
+  if(!confirm(`Подключить «${n.name}»? Связь пропадёт на несколько секунд.`)) return;
+  b.disabled = true; b.textContent = 'Подключаю…';
+  try {
+    await api('switch', '&id=' + encodeURIComponent(n.id));
+    state.current = n.id; render(); quietUntil = Date.now() + 15000;
+    toast(`Подключаю «${n.name}». VPN перезапускается, статус обновится через 10 секунд.`);
+    setTimeout(load, 10000);
+  } catch(err){ toast(err.message, true); b.disabled = false; b.textContent = 'Подключить'; }
+});
+
+const ACTIONS = {
+  restart: { ask: 'Перезапустить VPN? Связь пропадёт на несколько секунд.', done: 'VPN перезапускается.', quiet: 15000 },
+  update:  { ask: 'Обновить подписку nosok? Список серверов скачается заново, это займёт до минуты.', done: 'Подписка обновляется, список серверов обновится примерно через минуту.', quiet: 0 },
+  reboot:  { ask: 'Перезагрузить роутер? Интернет дома пропадёт на 1–2 минуты.', done: 'Роутер перезагружается. Страница сама обновится, когда он вернётся.', quiet: 150000 },
+};
+document.querySelector('.controls').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-act]'); if(!b) return;
+  const a = ACTIONS[b.dataset.act];
+  if(!confirm(a.ask)) return;
+  b.disabled = true;
+  try {
+    await api(b.dataset.act);
+    toast(a.done); quietUntil = Date.now() + a.quiet;
+    setTimeout(load, b.dataset.act === 'update' ? 60000 : Math.max(10000, a.quiet));
+  } catch(err){ toast(err.message, true); }
+  finally { setTimeout(() => b.disabled = false, 5000); }
+});
+
+showTab();
+load();
+setInterval(load, 30000);
+setInterval(loadNet, 3000);
+</script>
+</body>
+</html>

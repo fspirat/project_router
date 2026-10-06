@@ -1,0 +1,54 @@
+#!/bin/bash
+# FSPIRAT: следит за роутером через туннель и пишет в Telegram.
+# Запускается cron'ом раз в минуту. Настройки — в /etc/fspirat-watch.conf
+
+source /etc/fspirat-watch.conf     # TG_TOKEN=...  TG_CHAT=...
+S=/var/lib/fspirat
+mkdir -p $S
+COOKIE=$(grep -o 'fspirat_token=[A-Za-z0-9]*' /etc/nginx/snippets/fspirat-router.conf)
+
+send() {
+  curl -s -m 15 "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+    --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=$1" >/dev/null
+}
+get()  { cat "$S/$1" 2>/dev/null; }
+put()  { echo "$2" > "$S/$1"; }
+
+J=$(curl -s -m 20 -b "$COOKIE" "http://127.0.0.1:8081/cgi-bin/fspirat?action=status")
+
+# Роутер не отвечает
+if ! jq -e '.running != null' >/dev/null 2>&1 <<<"$J"; then
+  n=$(( $(get offcount || echo 0) + 1 )); put offcount $n
+  if [ "$n" -eq 3 ] && [ "$(get offline)" != 1 ]; then
+    send "🔴 Роутер не на связи уже 3 минуты (нет туннеля или нет интернета дома)."
+    put offline 1
+  fi
+  exit 0
+fi
+put offcount 0
+if [ "$(get offline)" = 1 ]; then send "🟢 Роутер снова на связи."; put offline 0; fi
+
+# VPN (Xray) остановлен / запущен
+run=$(jq -r .running <<<"$J")
+if [ "$run" != "$(get running)" ] && [ -n "$(get running)" ]; then
+  [ "$run" = true ] && send "🟢 VPN снова работает." || send "⚠️ VPN на роутере остановлен (Xray не запущен)."
+fi
+put running "$run"
+
+# Смена сервера
+cur=$(jq -r .current <<<"$J")
+name=$(jq -r --arg c "$cur" '[.ping.nodes[]? | select(.id==$c) | .name][0] // $c' <<<"$J")
+prev=$(get current)
+if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then
+  last=$(jq -r '.log[-1] // ""' <<<"$J")
+  how="автоматически, текущий перестал отвечать"
+  [[ $last == *вручную* ]] && how="вручную"
+  send "🔁 VPN-сервер сменён ($how): $(get current_name) → $name"
+fi
+put current "$cur"; put current_name "$name"
+
+# Флеш-память
+pct=$(jq -r '.sys | if .disk_total > 0 then (.disk_used * 100 / .disk_total | floor) else 0 end' <<<"$J")
+if [ "$pct" -ge 90 ] && [ "$(get flash)" != 1 ]; then
+  send "💾 Флеш-память роутера заполнена на $pct%. Новые пакеты скоро перестанут ставиться."; put flash 1
+elif [ "$pct" -lt 85 ]; then put flash 0; fi

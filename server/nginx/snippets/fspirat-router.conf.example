@@ -1,0 +1,16 @@
+# Копия: /etc/nginx/snippets/fspirat-router.conf (на сервере лежит с настоящим токеном).
+# Подключается строкой `include snippets/fspirat-router.conf;` в блоке listen 443
+# файла /etc/nginx/sites-available/fspirat.online.
+# Токен передаётся cookie: uhttpd на роутере не пропускает в CGI нестандартные заголовки.
+location /router/ {
+    auth_basic "FSPIRAT Router";
+    auth_basic_user_file /etc/nginx/.htpasswd_router;
+}
+location = /router/api {
+    auth_basic "FSPIRAT Router";
+    auth_basic_user_file /etc/nginx/.htpasswd_router;
+    proxy_pass http://127.0.0.1:8081/cgi-bin/fspirat$is_args$args;
+    proxy_set_header Cookie "fspirat_token=ТОКЕН_ИЗ_/etc/fspirat.token_НА_РОУТЕРЕ";
+    proxy_set_header Authorization "";
+    proxy_read_timeout 60s;
+}

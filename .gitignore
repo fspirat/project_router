@@ -1,0 +1,8 @@
+# Секреты не коммитим никогда
+*.token
+.env
+*.key
+*.pem
+fspirat-watch.conf
+fspirat-router.conf
+!*.example

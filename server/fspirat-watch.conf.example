@@ -1,0 +1,3 @@
+# Копия: /etc/fspirat-watch.conf (chmod 600). Настоящие значения только на сервере.
+TG_TOKEN="токен_бота_от_BotFather"
+TG_CHAT="chat_id"

@@ -1,0 +1,2 @@
+# /etc/cron.d/fspirat-watch
+* * * * * root /usr/local/bin/fspirat-watch

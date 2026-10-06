@@ -1,0 +1,106 @@
+#!/bin/sh
+# FSPIRAT: TCP-пинг узлов, настоящая проверка текущего сервера через SOCKS
+# и автопереключение «По умолчанию» в Split, если текущий перестал работать.
+
+GROUP="nosok"
+SHUNT="9DxG2j8l"
+EXCLUDE="LTE|Россия|Обход"
+SOCKS="127.0.0.1:1070"
+TEST_URL="http://www.gstatic.com/generate_204"
+FAILS_TO_SWITCH=2
+HIST_MAX=288            # 288 точек * 5 минут = 24 часа
+DIR=/tmp/fspirat
+mkdir -p $DIR/res
+
+# не запускаться дважды одновременно
+if [ -f $DIR/lock ] && kill -0 "$(cat $DIR/lock)" 2>/dev/null; then exit 0; fi
+echo $$ > $DIR/lock
+trap 'rm -f $DIR/lock' EXIT INT TERM
+rm -f $DIR/res/*
+
+ping_node() {
+  ms=$(tcping -q -c 1 -i 1 -t 2 -p "$3" "$2" 2>&1 | grep -o 'time=[0-9]*' | head -1 | cut -d= -f2)
+  echo "${ms:-0}" > $DIR/res/$1
+}
+
+CUR=$(uci -q get passwall2.$SHUNT.default_node)
+
+# 1. TCP-пинг всех подходящих узлов (по 10 одновременно)
+n=0
+for id in $(uci show passwall2 | grep "\.group='$GROUP'" | cut -d. -f2); do
+  if [ "$id" != "$CUR" ]; then
+    [ "$(uci -q get passwall2.$id.protocol)" = "vless" ] || continue
+    uci -q get passwall2.$id.remarks | grep -qE "$EXCLUDE" && continue
+  fi
+  addr=$(uci -q get passwall2.$id.address); port=$(uci -q get passwall2.$id.port)
+  [ -n "$addr" ] && [ -n "$port" ] || continue
+  ping_node "$id" "$addr" "$port" &
+  n=$((n+1)); [ $((n % 10)) -eq 0 ] && wait
+done
+wait
+
+# 2. Настоящая проверка: реальный запрос в интернет через текущий сервер
+REAL=0; SOCKS_OK=1
+for try in 1 2; do
+  out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 8 -x "socks5h://$SOCKS" "$TEST_URL"); rc=$?
+  if [ $rc -eq 7 ]; then SOCKS_OK=0; break; fi
+  set -- $out
+  if [ "$1" = "204" ]; then
+    ms=$(awk -v t="$2" 'BEGIN{printf "%d", t*1000}')
+    { [ $REAL -eq 0 ] || [ $ms -lt $REAL ]; } && REAL=$ms
+  fi
+done
+
+if [ $SOCKS_OK -eq 1 ]; then
+  HEALTH=$REAL; REAL_JSON=$REAL; SOCKS_JSON=true
+else
+  HEALTH=$(cat $DIR/res/$CUR 2>/dev/null || echo 0); REAL_JSON=null; SOCKS_JSON=false
+fi
+
+echo "$(date +%s) $HEALTH" >> $DIR/history
+tail -n $HIST_MAX $DIR/history > $DIR/history.tmp && mv $DIR/history.tmp $DIR/history
+
+# 3. Результат для страницы
+{
+  printf '{"updated":%s,"current":"%s","socks":%s,"real":%s,"nodes":[' "$(date +%s)" "$CUR" "$SOCKS_JSON" "$REAL_JSON"
+  first=1
+  for f in $DIR/res/*; do
+    [ -f "$f" ] || continue
+    id=$(basename "$f"); ms=$(cat "$f")
+    name=$(uci -q get passwall2.$id.remarks | sed 's/^ *//;s/ *$//;s/\\/\\\\/g;s/"/\\"/g')
+    [ $first -eq 1 ] || printf ','
+    first=0
+    printf '{"id":"%s","name":"%s","ms":%s}' "$id" "$name" "$ms"
+  done
+  printf ']}'
+} > $DIR/ping.json.tmp && mv $DIR/ping.json.tmp $DIR/ping.json
+
+# 4. Автопереключение
+FAILS=$(cat $DIR/fails 2>/dev/null || echo 0)
+if [ -z "$(uci -q get passwall2.$CUR.address)" ]; then
+  FAILS=$FAILS_TO_SWITCH            # текущего узла больше нет (например, после обновления подписки)
+elif [ "$HEALTH" -gt 0 ]; then
+  FAILS=0
+else
+  FAILS=$((FAILS+1))
+fi
+echo $FAILS > $DIR/fails
+
+if [ $FAILS -ge $FAILS_TO_SWITCH ]; then
+  BEST=""; BEST_MS=999999
+  for f in $DIR/res/*; do
+    id=$(basename "$f"); ms=$(cat "$f")
+    [ "$id" = "$CUR" ] && continue
+    [ "$ms" -gt 0 ] || continue
+    uci -q get passwall2.$id.remarks | grep -qE "$EXCLUDE" && continue
+    [ "$ms" -lt "$BEST_MS" ] && { BEST=$id; BEST_MS=$ms; }
+  done
+  if [ -n "$BEST" ]; then
+    uci set passwall2.$SHUNT.default_node=$BEST
+    uci commit passwall2
+    /etc/init.d/passwall2 restart >/dev/null 2>&1
+    echo 0 > $DIR/fails
+    logger -t fspirat "switch $CUR -> $BEST (${BEST_MS} ms)"
+    echo "$(date '+%d.%m %H:%M') авто $CUR -> $BEST ${BEST_MS}ms" >> $DIR/switch.log
+  fi
+fi

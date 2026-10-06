@@ -1,0 +1,15 @@
+# /etc/fail2ban/jail.d/fspirat.local
+# Внимание: на сервере есть ещё jail 3x-ipl от 3x-ui. Ему нужен файл /var/log/x-ui/3xipl.log,
+# без него fail2ban не стартует целиком (лечится: touch /var/log/x-ui/3xipl.log).
+[sshd]
+enabled = true
+maxretry = 5
+bantime = 1h
+
+[nginx-http-auth]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+maxretry = 5
+findtime = 10m
+bantime = 1h
