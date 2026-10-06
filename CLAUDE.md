@@ -96,6 +96,7 @@ nginx перед каждым запросом спрашивает `check.php` 
   history, log, speed{vpn,direct}, devices, sys{cpu,ram,disk,tmp,temp,uptime,net}
 - `net` — только скорость WAN за 1 с
 - `ping` — запустить fspirat-ping (~20 с) и вернуть status
+- `pingone&id=XXXX` — TCP-пинг одного сервера (лучший из трёх, <1 с), обновляет его в ping.json
 - `switch&id=XXXX` — сменить сервер (default_node в Split) + перезапуск PassWall
 - `restart` / `update` (подписка) / `reboot`
 - `speedtest&via=vpn|direct` — 4 потока ~35 с: загрузка напрямую с Selectel (РФ), через VPN с Hetzner (DE),

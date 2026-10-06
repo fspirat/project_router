@@ -131,6 +131,11 @@
   .srv.is-off .srv-name{color:var(--dim)}
   .srv-name{overflow-wrap:anywhere}
   .srv .ping{min-width:118px;justify-content:flex-end}
+  .srv{grid-template-columns:1fr auto auto auto}
+  .rp{font:inherit;font-size:15px;line-height:1;color:var(--dim);background:none;border:2px solid transparent;cursor:pointer;padding:4px 6px}
+  .rp:hover:not(:disabled){color:var(--lime);border-color:var(--edge)}
+  .rp:disabled{cursor:default;animation:spin 1s steps(8) infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
   .tag{font-family:var(--pixel);font-size:9px;color:var(--lime);padding:6px 8px;border:2px solid var(--green)}
   .empty{padding:14px 12px;color:var(--dim)}
   details{margin-top:12px}
@@ -225,7 +230,7 @@
   @media (max-width:560px){
     .meters,.speed,.st-grid,.down-cols{grid-template-columns:1fr}
     .tab{flex:1;text-align:center;padding:12px 8px}
-    .srv{grid-template-columns:1fr auto;gap:8px 12px}
+    .srv{grid-template-columns:1fr auto auto;gap:8px 12px}
     .srv .btn,.srv .tag{grid-column:1/-1;justify-self:start}
     .srv .ping{min-width:0}
     #cur-name{font-size:18px}
@@ -302,7 +307,7 @@
     </section>
 
     <section class="panel needs-router">
-      <h2>Серверы</h2>
+      <div class="h2row"><h2>Серверы</h2><button class="btn small" id="ping-all" title="TCP-пинг всех серверов и проверка текущего через VPN">↻ Пинг всех</button></div>
       <ul class="list" id="list"><li class="empty">Загружаю список серверов…</li></ul>
       <details id="dead-box" hidden>
         <summary id="dead-sum"></summary>
@@ -547,6 +552,7 @@ function srvRow(n, cur){
   return `<li class="srv${n.id === cur ? ' is-cur' : ''}${n.ms ? '' : ' is-off'}">
     <span class="srv-name">${esc(n.name)}</span>
     <span class="ping">${pingHtml(n.ms)}</span>
+    <button class="rp" data-ping="${esc(n.id)}" title="Пингануть этот сервер" aria-label="Пингануть ${esc(n.name)}">↻</button>
     ${n.id === cur ? '<span class="tag">Сейчас</span>'
       : `<button class="btn small" data-id="${esc(n.id)}"${n.ms ? '' : ' disabled'}>Подключить</button>`}
   </li>`;
@@ -687,11 +693,26 @@ async function loadNet(){
 }
 
 /* ---------- действия ---------- */
-$('#ping-btn').addEventListener('click', async e => {
-  const b = e.currentTarget; b.disabled = true; b.textContent = 'Проверяю, ~20 сек…';
+async function pingAll(){
+  const bs = [$('#ping-btn'), $('#ping-all')], txt = bs.map(b => b.textContent);
+  bs.forEach(b => { b.disabled = true; b.textContent = 'Проверяю, ~20 сек…'; });
   try { state = await api('ping'); render(); toast('Проверка серверов завершена.'); }
   catch(err){ toast(err.message, true); }
-  finally { b.disabled = false; b.textContent = 'Проверить серверы'; }
+  finally { bs.forEach((b, i) => { b.disabled = false; b.textContent = txt[i]; }); }
+}
+$('#ping-btn').addEventListener('click', pingAll);
+$('#ping-all').addEventListener('click', pingAll);
+
+/* Пинг одного сервера: ↻ в строке */
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button[data-ping]'); if(!b) return;
+  b.disabled = true;
+  try {
+    const r = await api('pingone', '&id=' + encodeURIComponent(b.dataset.ping));
+    const n = state.ping.nodes.find(x => x.id === r.id);
+    if(n){ n.ms = r.ms; renderServers(state); renderStatus(state); }
+    toast(`${n ? n.name : r.id}: ${r.ms ? r.ms + ' ms' : 'не отвечает'}`, !r.ms);
+  } catch(err){ toast(err.message, true); b.disabled = false; }
 });
 
 document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', async () => {

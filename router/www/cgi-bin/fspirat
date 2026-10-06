@@ -145,6 +145,16 @@ case "$action" in
   status) reply "200 OK" "$(status_json)" ;;
   net) reply "200 OK" "$(net_only)" ;;
   ping) /usr/bin/fspirat-ping >/dev/null 2>&1; reply "200 OK" "$(status_json)" ;;
+  pingone)   # TCP-пинг одного сервера (лучший из трёх), заодно обновляет его в ping.json
+    [ -n "$id" ] && [ "$(uci -q get passwall2.$id.group)" = "$GROUP" ] || reply "400 Bad Request" '{"error":"bad node"}'
+    addr=$(uci -q get passwall2.$id.address); port=$(uci -q get passwall2.$id.port)
+    best=0
+    for k in 1 2 3; do
+      ms=$(tcping -q -c 1 -i 1 -t 2 -p "$port" "$addr" 2>&1 | grep -o 'time=[0-9]*' | head -1 | cut -d= -f2)
+      [ -n "$ms" ] && { [ $best -eq 0 ] || [ "$ms" -lt $best ]; } && best=$ms
+    done
+    [ -f $DIR/ping.json ] && sed -i "s/\(\"id\":\"$id\",\"name\":\"[^\"]*\",\"ms\":\)[0-9]*/\1$best/" $DIR/ping.json
+    reply "200 OK" "{\"id\":\"$id\",\"ms\":$best,\"ts\":$(date +%s)}" ;;
   switch)
     [ -n "$id" ] && [ "$(uci -q get passwall2.$id.group)" = "$GROUP" ] || reply "400 Bad Request" '{"error":"bad node"}'
     uci set passwall2.$SHUNT.default_node="$id"
