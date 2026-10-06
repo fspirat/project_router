@@ -4,13 +4,15 @@
 
 ## 1. Домены
 
-- `fspirat.ru` и `fspirat.online` куплены на Reg.ru.
-- **DNS `fspirat.online` обслуживает Cloudflare** (NS: laila / carter .ns.cloudflare.com).
+- `fspirat.ru` и `fspirat.online` куплены на Reg.ru (регистратор), хостинг Reg.ru больше не используется.
+- **DNS обоих доменов обслуживает Cloudflare** (NS: laila / carter .ns.cloudflare.com).
+  - `A fspirat.ru → 193.39.143.202`, `A www.fspirat.ru → 193.39.143.202` (DNS only) — с 06.10.2026.
   Записи меняются в панели Cloudflare, не в ispmanager Reg.ru.
   - `A fspirat.online → 193.39.143.202`
   - `A www.fspirat.online → 193.39.143.202`
   - `A router.fspirat.online → 193.39.143.202` (DNS only, серое облако)
-- Хостинг Reg.ru Host-0 для сайта больше не нужен (проверить автопродление).
+- Хостинг Reg.ru Host-0 больше не нужен: fspirat.ru перенесён на VPS 06.10.2026, почта не используется.
+  Его можно отключить (домены продлевать отдельно — они остаются у Reg.ru как у регистратора).
 
 ## 2. Сайт fspirat.online (основной, другой репозиторий)
 
@@ -18,7 +20,9 @@
   `/` главная, `/hex_generator/` HEX-генератор, `/fstweak/` страница мода FSTWEAK.
 - Стиль: фон `#050605`, зелёные `#7fbf3a` / `#9be052`, пиксельные панели, Minecraft-шрифт.
 - Выкладка: GitHub Actions `deploy.yml`, rsync `./sites/fspirat.ru/` → `/var/www/fspirat.online/`
-  пользователем `deploy`. Секреты `SSH_KEY` (base64 одной строкой), `SSH_HOST`.
+  пользователем `deploy` (с `--exclude '/router/'`). Секреты `SSH_KEY` (base64 одной строкой), `SSH_HOST`.
+- Эту же папку отдают оба домена: `fspirat.online` и `fspirat.ru` (nginx `sites-available/fspirat.ru`,
+  без `/router/`). FTP-выкладки на Reg.ru больше нет.
 - **Страница `/router/` теперь живёт в этом репозитории (fspirat-router)** — см. TODO в CLAUDE.md
   про `--exclude 'router/'` в project_hex.
 
@@ -34,7 +38,7 @@
 | Порт | Что |
 |---|---|
 | 22 | SSH (fail2ban) |
-| 80/443 | nginx: fspirat.online, router.fspirat.online (Let's Encrypt, автопродление certbot) |
+| 80/443 | nginx: fspirat.online, fspirat.ru, router.fspirat.online (Let's Encrypt, автопродление certbot) |
 | 12849 | панель 3x-ui |
 | 8443 | VLESS Reality (подключение "router", из РФ режется ТСПУ) |
 | 127.0.0.1:8081 | конец SSH-туннеля от роутера → LuCI |
@@ -44,6 +48,7 @@
   `include snippets/fspirat-router.conf;`
 - `/etc/nginx/snippets/fspirat-router.conf` — /router/ и /router/api (с токеном)
 - `/etc/nginx/sites-available/router.fspirat.online` — LuCI через туннель
+- `/etc/nginx/sites-available/fspirat.ru` — сайт fspirat.ru (копия в `server/nginx/`)
 - `/etc/nginx/.htpasswd_router` — логин `bob` для /router/ и router.fspirat.online
 - `/home/tunnel/.ssh/authorized_keys` — ключ туннеля с ограничениями:
   `restrict,port-forwarding,permitlisten="127.0.0.1:8081",command="/bin/false" ssh-ed25519 ... root@OpenWrt`

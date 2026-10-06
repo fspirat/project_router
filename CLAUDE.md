@@ -39,6 +39,15 @@
 
 Проверка, что всё живо: `bash scripts/check.sh`.
 
+## Управление сервером из Claude Code
+
+Прямого SSH из облачной сессии нет. Команды на VPS выполняет workflow **`.github/workflows/ops.yml`**
+(Actions → Server ops → Run workflow, поле `cmd`; или `workflow_dispatch` через API) — от root по ключу
+`OPS_SSH_KEY`. Без `cmd` только проверяет секреты и вход root/deploy. Вывод — в логе запуска
+(репозиторий приватный). Секреты: `OPS_SSH_KEY` (root), `SSH_KEY` (deploy), `SSH_HOST`.
+Правила те же: перед `nginx reload` — `nginx -t`; не печатать в лог файлы с секретами
+(`snippets/fspirat-router.conf`, `/etc/fspirat-watch.conf`, `/etc/fspirat.token`).
+
 ## Важные константы
 
 - ID узла Split в PassWall: **`9DxG2j8l`** (он же `passwall2.@global[0].node`).
@@ -92,10 +101,8 @@
 
 ## Ближайшие задачи (TODO)
 
-1. **Защитить папку router/ от деплоя основного сайта.** Репозиторий `fspirat/project_hex`
-   выкладывает `sites/fspirat.ru/` → `/var/www/fspirat.online/` через rsync. Если там `--delete`,
-   он сотрёт `/router/`. Добавить в `project_hex/.github/workflows/deploy.yml` к rsync
-   `--exclude 'router/'` (и убрать оттуда `sites/fspirat.ru/router/`, если он был добавлен).
+1. ~~Защитить папку router/ от деплоя основного сайта~~ — сделано 06.10: в `project_hex` deploy.yml
+   rsync идёт с `--exclude '/router/'`.
 2. **Wi-Fi клиенты по диапазонам**: для каждого устройства 2,4 ГГц / 5 ГГц / кабель,
    сигнал dBm, скорость соединения. Данные: `iwinfo <iface> info` (частота) +
    `iwinfo <iface> assoclist`. Сначала посмотреть вывод `iwinfo` на роутере.
