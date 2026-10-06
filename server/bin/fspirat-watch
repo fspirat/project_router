@@ -87,7 +87,7 @@ jq -r '.log[]?' <<<"$J" | while IFS= read -r line; do
   # "06.10 17:30 авто ID -> ID 85ms"
   d=${line:0:5}; t=${line:6:5}; rest=${line:12}; ts=$NOW
   if [ $first = 1 ]; then
-    ts=$(date -d "$(date +%Y)-${d:3:2}-${d:0:2} $t" +%s 2>/dev/null || echo $NOW)
+    ts=$(TZ=Europe/Samara date -d "$(date +%Y)-${d:3:2}-${d:0:2} $t" +%s 2>/dev/null || echo $NOW)   # время роутера — Самара
     [ "$ts" -gt "$NOW" ] && ts=$NOW
   fi
   for id in $(grep -oE '\b[A-Za-z0-9]{8}\b' <<<"$rest"); do

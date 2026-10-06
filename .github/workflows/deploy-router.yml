@@ -1,0 +1,50 @@
+name: Deploy router
+
+# Выкладка скриптов на роутер через сервер: VPS → обратный туннель (127.0.0.1:8022 → dropbear роутера).
+# Ключ сервера /root/.ssh/router_key добавлен в /etc/dropbear/authorized_keys роутера.
+# PassWall и туннель не перезапускает; cron fspirat-ping добавляет, если его нет.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checks
+        run: |
+          for f in router/bin/fspirat-ping router/www/cgi-bin/fspirat router/etc/init.d/fstunnel; do sh -n "$f"; done
+
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+
+      - name: Upload to router
+        run: |
+          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          ssh vps "$R 'cat /tmp/sysinfo/model; uptime'"
+          push() { # файл_в_репозитории путь_на_роутере
+            tr -d '\r' < "$1" | ssh vps "$R 'cat > $2.new && chmod 755 $2.new && mv $2.new $2'"
+            echo "  -> $2"
+          }
+          push router/bin/fspirat-ping    /usr/bin/fspirat-ping
+          push router/www/cgi-bin/fspirat /www/cgi-bin/fspirat
+          push router/etc/init.d/fstunnel /etc/init.d/fstunnel
+          ssh vps "$R 'grep -q fspirat-ping /etc/crontabs/root || { echo \"*/5 * * * * /usr/bin/fspirat-ping\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
+
+      - name: Verify
+        run: |
+          ssh vps 'C=$(grep -o "fspirat_token=[A-Za-z0-9]*" /etc/nginx/snippets/fspirat-router.conf)
+            curl -s -m 20 -b "$C" "http://127.0.0.1:8081/cgi-bin/fspirat?action=status" | jq -c "{running, current, devices: [.devices[] | {name, band, signal, rate}]}"'

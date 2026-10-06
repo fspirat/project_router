@@ -348,7 +348,7 @@
           <small class="st-meta">Ещё не запускали.</small>
         </div>
       </div>
-      <p class="note">Тест идёт с самого роутера через серверы Cloudflare и длится около 25 секунд. Шифрование VPN считает процессор роутера, поэтому «через VPN» показывает потолок именно роутера: на быстром тарифе компьютер напрямую покажет больше.</p>
+      <p class="note">Тест идёт с самого роутера в 4 потока и длится около 35 секунд. Загрузка «напрямую» — с сервера Selectel в России, «через VPN» — с сервера Hetzner в Германии; отдача — на Cloudflare. Шифрование VPN считает процессор роутера, поэтому «через VPN» показывает потолок именно роутера.</p>
     </section>
 
     <section class="panel">
@@ -587,9 +587,11 @@ function renderSpeedCard(via, r){
   const box = $('#st-' + via);
   if(!r) return;
   box.querySelector('.st-down').textContent = speed(r.down);
-  box.querySelector('.st-up').textContent = speed(r.up);
+  box.querySelector('.st-up').textContent = r.up ? speed(r.up) : (r.up_limited ? 'позже' : '—');
   box.querySelector('.st-lat').textContent = r.latency ? r.latency + ' ms' : '—';
-  box.querySelector('.st-meta').textContent = (r.ip ? `Выход: ${flag(r.country)}${r.ip}, ` : '') + 'проверено ' + ago(r.ts);
+  box.querySelector('.st-meta').textContent = (r.ip ? `Выход: ${flag(r.country)}${r.ip}, ` : '') + 'проверено ' + ago(r.ts)
+    + (r.server ? ` · сервер ${r.server}, ${r.streams || 1} потока` : '')
+    + (!r.up && r.up_limited ? ' · Cloudflare ограничил частые замеры отдачи, повтори через пару минут' : '');
 }
 function renderSpeedtest(sp){ if(!sp) return; renderSpeedCard('vpn', sp.vpn); renderSpeedCard('direct', sp.direct); }
 
@@ -694,7 +696,7 @@ $('#ping-btn').addEventListener('click', async e => {
 
 document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', async () => {
   const via = btn.dataset.speed, all = document.querySelectorAll('[data-speed]');
-  all.forEach(x => x.disabled = true); btn.textContent = 'Идёт тест, ~25 сек…';
+  all.forEach(x => x.disabled = true); btn.textContent = 'Идёт тест, ~35 сек…';
   $('#st-' + via).querySelector('.st-meta').textContent = 'Измеряю загрузку, потом отдачу…';
   try {
     const r = await api('speedtest', '&via=' + via);

@@ -33,17 +33,33 @@ net_only() {
   net_json "$dev" $r1 $x1 $r2 $x2
 }
 
+# Wi-Fi клиенты: "mac диапазон сигнал_dBm скорость_Мбит/с" (скорость — от роутера к устройству, TX)
+wifi_clients() {
+  for i in $(iwinfo 2>/dev/null | awk '/ESSID/{print $1}'); do
+    case "$(iwinfo $i info 2>/dev/null)" in *"(5."[0-9]*" GHz)"*) b=5g ;; *"(6."[0-9]*" GHz)"*) b=6g ;; *) b=2g ;; esac
+    iwinfo $i assoclist 2>/dev/null | awk -v b=$b '
+      /^[0-9A-Fa-f][0-9A-Fa-f]:/{ if(m) print m, b, s, r; m=tolower($1); s=$2; r=0; next }
+      /^[ \t]*TX:/{ r=int($2) }
+      END{ if(m) print m, b, s, r }'
+  done
+}
+
 devices_json() {
   printf '['
   first=1
+  wifi_clients > $DIR/wifi.txt
   [ -f /tmp/dhcp.leases ] && while read -r exp mac ip name cid; do
     flags=$(awk -v ip="$ip" '$1==ip{print $3}' /proc/net/arp)
     [ "$flags" = "0x2" ] && on=true || on=false
     [ "$name" = "*" ] && name=""
     n=$(echo "$name" | jesc)
+    set -- $(awk -v m="$mac" '$1==m{print $2, $3, $4; exit}' $DIR/wifi.txt)
+    if [ -n "$1" ]; then w=",\"band\":\"$1\",\"signal\":${2:-0},\"rate\":${3:-0}"; on=true
+    elif [ $on = true ]; then w=',"band":"wired"'
+    else w=''; fi
     [ $first -eq 1 ] || printf ','
     first=0
-    printf '{"name":"%s","ip":"%s","mac":"%s","online":%s}' "$n" "$ip" "$mac" "$on"
+    printf '{"name":"%s","ip":"%s","mac":"%s","online":%s%s}' "$n" "$ip" "$mac" "$on" "$w"
   done < /tmp/dhcp.leases
   printf ']'
 }
@@ -72,30 +88,44 @@ sys_json() {
 
 SOCKS=127.0.0.1:1070
 CF=https://speed.cloudflare.com
+RU=http://speedtest.selectel.ru                  # «напрямую» качаем из России: Cloudflare в РФ замедляют
+EU=https://fsn1-speed.hetzner.com                # «через VPN» — из Германии (Cloudflare на частые замеры отвечает 429)
+STREAMS=4
+SECS=10
+
+cs() { awk '{printf "%d", $1*100}' /proc/uptime; }    # сотые доли секунды (date +%N нет)
+
+# STREAMS потоков одновременно; $1 — команда одного потока, печатает число байт. Результат — бит/с.
+par_bits() {
+  rm -f $DIR/st.*
+  t1=$(cs)
+  i=0; while [ $i -lt $STREAMS ]; do sh -c "$1" > $DIR/st.$i 2>/dev/null & i=$((i+1)); done
+  wait
+  t2=$(cs)
+  cat $DIR/st.* 2>/dev/null | awk -v t=$((t2 - t1)) '{b+=$1} END{ if(t>0) printf "%d", b*8*100/t; else print 0 }'
+  rm -f $DIR/st.*
+}
 
 speed_run() { # $1 = vpn | direct
-  if [ "$1" = vpn ]; then P="-x socks5h://$SOCKS"; else P=""; fi
+  if [ "$1" = vpn ]; then P="-x socks5h://$SOCKS"; F="$EU/1GB.bin"; srv="Hetzner (Германия)"
+  else P=""; F="$RU/1GB"; srv="Selectel (Россия)"; fi
   trace=$(curl -s -m 8 $P "$CF/cdn-cgi/trace")
   ip=$(echo "$trace" | sed -n 's/^ip=//p')
   cc=$(echo "$trace" | sed -n 's/^loc=//p')
-  lat=$(curl -s -m 8 $P -w '%{time_starttransfer}\n' -o /dev/null -o /dev/null -o /dev/null -o /dev/null \
-        "$CF/__down?bytes=0" "$CF/__down?bytes=0" "$CF/__down?bytes=0" "$CF/__down?bytes=0" | sort -n | head -1)
-  # загрузка: до 8 файлов по 25 МБ подряд, не дольше 10 секунд
-  D="$CF/__down?bytes=25000000"
-  dl=$(curl -s -m 10 $P -w '%{http_code} %{size_download} %{time_total}\n' \
-        -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null \
-        "$D" "$D" "$D" "$D" "$D" "$D" "$D" "$D" \
-       | awk '$1=="200"||$1=="000"{b+=$2;t+=$3} END{if(t>0) printf "%d", b*8/t; else print 0}')
-  # отдача: до 5 отправок по 10 МБ подряд, не дольше 10 секунд
-  head -c 10000000 /dev/zero > $DIR/up.bin
-  U="$CF/__up"
-  ul=$(curl -s -m 10 $P -w '%{http_code} %{size_upload} %{time_total}\n' --data-binary @$DIR/up.bin \
-        -o /dev/null -o /dev/null -o /dev/null -o /dev/null -o /dev/null \
-        "$U" "$U" "$U" "$U" "$U" \
-       | awk '$1=="200"||$1=="000"{b+=$2;t+=$3} END{if(t>0) printf "%d", b*8/t; else print 0}')
-  rm -f $DIR/up.bin
-  awk -v d="${dl:-0}" -v u="${ul:-0}" -v l="${lat:-0}" -v ip="$ip" -v cc="$cc" -v via="$1" -v ts="$(date +%s)" \
-    'BEGIN{printf "{\"via\":\"%s\",\"ts\":%s,\"down\":%d,\"up\":%d,\"latency\":%d,\"ip\":\"%s\",\"country\":\"%s\"}", via, ts, d, u, l*1000, ip, cc}'
+  # задержка: время до первого байта, лучшее из трёх
+  lat=$(for k in 1 2 3; do curl -s -m 5 $P -r 0-0 -o /dev/null -w '%{time_starttransfer}\n' "$F"; done | sort -n | head -1)
+  # загрузка: каждый поток качает большой файл, curl обрывает через SECS секунд и сообщает, сколько успел
+  down=$(par_bits "curl -s -m $SECS $P -o /dev/null -w '%{size_download}\n' $F")
+  # отдача (только Cloudflare: Selectel и Hetzner приём не умеют): каждый поток шлёт по 8 МБ, пока не выйдет время
+  head -c 8000000 /dev/zero > $DIR/up.bin
+  up=$(par_bits "end=\$((\$(awk '{printf \"%d\", \$1*100}' /proc/uptime) + $SECS * 100))
+    while [ \$(awk '{printf \"%d\", \$1*100}' /proc/uptime) -lt \$end ]; do
+      curl -s -m 5 $P -o /dev/null -w '%{http_code} %{size_upload}\n' --data-binary @$DIR/up.bin $CF/__up || { echo \$? >> $DIR/uperr; sleep 1; }
+    done | awk '\$1==200{b+=\$2} \$1==429{print \"429\" > \"$DIR/limited\"} END{print b+0}'")
+  rm -f $DIR/up.bin $DIR/uperr.last; [ -f $DIR/uperr ] && mv $DIR/uperr $DIR/uperr.last   # коды ошибок curl — для разбора
+  [ -f $DIR/limited ] && limited=true || limited=false; rm -f $DIR/limited
+  awk -v d="${down:-0}" -v u="${up:-0}" -v l="${lat:-0}" -v ip="$ip" -v cc="$cc" -v via="$1" -v srv="$srv" -v n=$STREAMS -v lim=$limited -v ts="$(date +%s)" \
+    'BEGIN{printf "{\"via\":\"%s\",\"ts\":%s,\"down\":%d,\"up\":%d,\"latency\":%d,\"ip\":\"%s\",\"country\":\"%s\",\"server\":\"%s\",\"streams\":%d,\"up_limited\":%s}", via, ts, d, u, l*1000, ip, cc, srv, n, lim}'
 }
 
 status_json() {

@@ -1,11 +1,12 @@
 #!/bin/sh /etc/rc.common
-# Обратный SSH-туннель: порт 127.0.0.1:8081 на сервере NL -> LuCI роутера (192.168.7.1:80)
+# Обратный SSH-туннель на сервер NL: 127.0.0.1:8081 -> LuCI роутера (192.168.7.1:80),
+#   127.0.0.1:8022 -> SSH роутера (для выкладки с сервера: workflow Deploy router)
 START=99
 USE_PROCD=1
 start_service() {
   procd_open_instance
   procd_set_param env HOME=/root
-  procd_set_param command /usr/bin/dbclient -N -y -i /root/.ssh/tunnel_key -K 30 -I 90 -R 127.0.0.1:8081:192.168.7.1:80 tunnel@193.39.143.202
+  procd_set_param command /usr/bin/dbclient -N -y -i /root/.ssh/tunnel_key -K 30 -I 90 -R 127.0.0.1:8081:192.168.7.1:80 -R 127.0.0.1:8022:192.168.7.1:22 tunnel@193.39.143.202
   procd_set_param respawn 3600 10 0
   procd_set_param stdout 1
   procd_set_param stderr 1
