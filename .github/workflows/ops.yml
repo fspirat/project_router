@@ -1,0 +1,63 @@
+name: Server ops
+
+# Служебный сценарий для Claude: выполнить команду на VPS (root) и показать вывод в логе.
+# Запуск: Actions → Server ops → Run workflow, или через API (workflow_dispatch).
+# Репозиторий приватный — логи видит только владелец. Секреты в логах скрыты (***).
+#   OPS_SSH_KEY — закрытый ключ root (base64 одной строкой)
+#   SSH_KEY     — закрытый ключ пользователя deploy (base64) — для выкладки web/
+#   SSH_HOST    — адрес сервера
+on:
+  workflow_dispatch:
+    inputs:
+      cmd:
+        description: "Команда для выполнения на сервере (root). Пусто — только проверка ключей."
+        required: false
+        default: ""
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check secrets
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ok=1
+          for n in OPS_SSH_KEY SSH_KEY SSH_HOST; do
+            if [ -z "${!n}" ]; then echo "❌ секрет $n не задан"; ok=0; else echo "✅ секрет $n задан"; fi
+          done
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          for n in OPS_SSH_KEY SSH_KEY; do
+            [ -n "${!n}" ] || continue
+            f=~/.ssh/$n
+            if echo "${!n}" | base64 -d > "$f" 2>/dev/null && chmod 600 "$f" && ssh-keygen -y -f "$f" >/dev/null 2>&1; then
+              echo "✅ $n — правильный закрытый ключ ($(ssh-keygen -l -f "$f" | awk '{print $1, $4}'))"
+            else
+              echo "❌ $n — не похож на закрытый ключ в base64"; ok=0
+            fi
+          done
+          [ $ok = 1 ]
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Test logins
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/OPS_SSH_KEY root@"$SSH_HOST" 'echo "✅ вход root: $(whoami)@$(hostname)"'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/SSH_KEY deploy@"$SSH_HOST" 'echo "✅ вход deploy: $(whoami)@$(hostname); запись в /var/www/fspirat.online/router: $(test -w /var/www/fspirat.online/router && echo да || echo нет)"'
+
+      - name: Run command
+        if: inputs.cmd != ''
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          CMD: ${{ inputs.cmd }}
+        run: |
+          echo "▶ $CMD"
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/OPS_SSH_KEY root@"$SSH_HOST" "$CMD"
