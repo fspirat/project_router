@@ -37,10 +37,17 @@ jobs:
           for n in OPS_SSH_KEY SSH_KEY; do
             [ -n "${!n}" ] || continue
             f=~/.ssh/$n
-            if echo "${!n}" | base64 -d > "$f" 2>/dev/null && chmod 600 "$f" && ssh-keygen -y -f "$f" >/dev/null 2>&1; then
-              echo "✅ $n — правильный закрытый ключ ($(ssh-keygen -l -f "$f" | awk '{print $1, $4}'))"
+            v="${!n}"
+            case "$v" in
+              ssh-ed25519*|ssh-rsa*|ecdsa-*) echo "❌ $n — это ОТКРЫТЫЙ ключ (.pub), нужен закрытый"; ok=0; continue ;;
+              *"-----BEGIN"*) printf '%s\n' "$v" > "$f"; kind="как есть" ;;   # вставлен целиком
+              *) echo "$v" | tr -d ' \r\n' | base64 -d > "$f" 2>/dev/null; kind="base64" ;;
+            esac
+            chmod 600 "$f"
+            if ssh-keygen -y -f "$f" >/dev/null 2>&1; then
+              echo "✅ $n — правильный закрытый ключ, формат: $kind ($(ssh-keygen -l -f "$f" | awk '{print $1, $4}'))"
             else
-              echo "❌ $n — не похож на закрытый ключ в base64"; ok=0
+              echo "❌ $n — не удалось прочитать закрытый ключ (формат: $kind; первые символы: ${v:0:12}…)"; ok=0
             fi
           done
           [ $ok = 1 ]
