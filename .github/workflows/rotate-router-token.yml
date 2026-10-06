@@ -1,0 +1,46 @@
+name: Rotate router token
+
+# Новый токен CGI страницы роутера (старый засветился в чате): /etc/fspirat.token на роутере
+# и cookie в /etc/nginx/snippets/fspirat-router.conf на сервере. Токен в лог не печатается.
+# Если что-то пошло не так — вернёт старый. Запуск вручную: Actions → Rotate router token → Run workflow.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+      - name: Rotate
+        run: |
+          ssh vps 'set -e
+            S=/etc/nginx/snippets/fspirat-router.conf
+            R="ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1"
+            chk() { curl -s -o /dev/null -m 20 -w %{http_code} -b "fspirat_token=$1" "http://127.0.0.1:8081/cgi-bin/fspirat?action=net"; }
+            old=$(grep -o "fspirat_token=[A-Za-z0-9]*" $S | head -1 | cut -d= -f2)
+            [ -n "$old" ] || { echo "❌ не нашёл старый токен в $S"; exit 1; }
+            [ "$(chk "$old")" = 200 ] || { echo "❌ роутер не отвечает со старым токеном — ничего не меняю"; exit 1; }
+            new=$(openssl rand -hex 24)
+            cp -p $S $S.bak-token
+            $R "umask 077; cp -p /etc/fspirat.token /etc/fspirat.token.bak; echo $new > /etc/fspirat.token"
+            sed -i "s/fspirat_token=$old/fspirat_token=$new/g" $S
+            if nginx -t -q && systemctl reload nginx && [ "$(chk "$new")" = 200 ] && [ "$(chk "$old")" = 403 ]; then
+              $R "rm -f /etc/fspirat.token.bak"; rm -f $S.bak-token
+              echo "✅ токен сменён: новый работает, старый роутер больше не принимает"
+            else
+              echo "❌ проверка не прошла — возвращаю старый токен"
+              $R "mv /etc/fspirat.token.bak /etc/fspirat.token"; mv $S.bak-token $S; nginx -t -q && systemctl reload nginx; exit 1
+            fi'

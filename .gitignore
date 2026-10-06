@@ -6,3 +6,4 @@
 fspirat-watch.conf
 fspirat-router.conf
 !*.example
+__pycache__/

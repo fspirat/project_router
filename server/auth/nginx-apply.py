@@ -27,9 +27,34 @@ EXTRA = ('\n# --- данные страницы и иконки (server/auth/dat
          'location ~ ^/router/(manifest\\.webmanifest|icon-[0-9]+\\.png|apple-touch-icon\\.png)$ {\n'
          '    expires 7d;\n}\n')
 
+# Этап 3 (защита, 06.10.2026):
+#   — /router/api и /router/data только с заголовком X-FSR: 1 (его ставит страница) — защита от CSRF:
+#     ссылка «…/router/api?action=reboot» с чужого сайта больше не перезагрузит роутер;
+#   — /router/ как ^~: regex-локации сайта (например, *.php) не смогут обойти вход;
+#   — открытые файлы PWA — точными локациями (regex перестал бы работать из-за ^~).
+CSRF = '    if ($http_x_fsr != "1") { return 403 \'{"error":"csrf"}\'; }\n'
+PWA = ''.join(f'location = /router/{f} {{\n    expires 7d;\n}}\n'
+              for f in ('manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'))
+
+def harden(s):
+    if '$http_x_fsr' in s:
+        return s
+    for loc in ('location = /router/api {\n', 'location = /router/data {\n'):
+        if loc not in s:
+            sys.exit('snippet: нет ' + loc.strip())
+        s = s.replace(loc, loc + CSRF, 1)
+    s, n = re.subn(r'^location /router/ \{', 'location ^~ /router/ {', s, count=1, flags=re.M)
+    if n != 1:
+        sys.exit('snippet: нет «location /router/ {»')
+    s, n = re.subn(r'location ~ \^/router/\(manifest[^{]*\{[^}]*\}\n', PWA, s, count=1)
+    if n != 1:
+        sys.exit('snippet: нет regex-локации PWA')
+    return s
+
 def snippet(s):
     if 'auth_request /_fsr_auth' in s:
-        return s if 'location = /router/data' in s else s.rstrip('\n') + '\n' + EXTRA
+        s = s if 'location = /router/data' in s else s.rstrip('\n') + '\n' + EXTRA
+        return harden(s)
     blocks = re.split(r'(?=location )', s)
     out = []
     for b in blocks:
@@ -41,11 +66,12 @@ def snippet(s):
     s = ''.join(out)
     if 'auth_basic' in s:
         sys.exit('snippet: остался auth_basic — структура файла не та, что ожидалась')
-    return (s.rstrip('\n') + '\n\n# --- вход в панель (server/auth в project_router) ---\n' + AUTH_LOC
+    s = (s.rstrip('\n') + '\n\n# --- вход в панель (server/auth в project_router) ---\n' + AUTH_LOC
             + 'location = /router/login {\n' + fcgi('login.php') + '}\n'
             + 'location = /router/logout {\n' + fcgi('logout.php') + '}\n'
             + 'location @fsr_login {\n    return 302 /router/login?next=$uri;\n}\n'
             + 'location @fsr_api_401 {\n    default_type application/json;\n    return 401 \'{"error":"auth"}\';\n}\n' + EXTRA)
+    return harden(s)
 
 def router_site(s):
     if 'auth_request /_fsr_auth' in s:

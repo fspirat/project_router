@@ -42,7 +42,7 @@ jobs:
 
       - name: Upload files
         run: |
-          tar -C server -czf - auth bin/fspirat-watch cron.d fail2ban logrotate | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
+          tar -C server -czf - auth bin/fspirat-watch cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
 
       - name: Install
         run: |
@@ -61,12 +61,19 @@ jobs:
             install -m 644 $D/fail2ban/fspirat.local /etc/fail2ban/jail.d/fspirat.local
             install -m 644 $D/fail2ban/filter.d/fspirat-router-auth.conf /etc/fail2ban/filter.d/fspirat-router-auth.conf
             systemctl restart fail2ban && sleep 2 && fail2ban-client status | tail -n 1
+            # секреты nginx — не для всех пользователей (deploy их видеть не должен)
+            chown root:root /etc/nginx/snippets/fspirat-router.conf && chmod 640 /etc/nginx/snippets/fspirat-router.conf
+            [ -f /etc/nginx/.htpasswd_router ] && chown root:www-data /etc/nginx/.htpasswd_router && chmod 640 /etc/nginx/.htpasswd_router
             echo "файлы установлены"'
 
       - name: nginx
         if: inputs.nginx
         run: |
-          ssh vps 'python3 /tmp/fsr-deploy/auth/nginx-apply.py'
+          ssh vps 'set -e; python3 /tmp/fsr-deploy/auth/nginx-apply.py
+            # HSTS и без версии nginx в ответах
+            install -m 644 /tmp/fsr-deploy/nginx/conf.d/security-headers.conf /etc/nginx/conf.d/security-headers.conf
+            sed -i "s/^\([[:space:]]*\)server_tokens build;.*/\1server_tokens off;/" /etc/nginx/nginx.conf
+            nginx -t -q && systemctl reload nginx && echo "заголовки: применены"'
 
       - name: Verify
         run: |
@@ -76,4 +83,7 @@ jobs:
             echo "/router/api без входа: $(curl -s -o /dev/null -w %{http_code} "https://fspirat.online/router/api?action=net")"
             echo "router.fspirat.online без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://router.fspirat.online/)"
             echo "сайт: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/)"
+            echo "api без X-FSR (как ссылка с чужого сайта): $(curl -s -w " %{http_code}" "https://fspirat.online/router/api?action=reboot")"
+            echo "иконка PWA без входа: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/router/manifest.webmanifest)"
+            echo "заголовки: $(curl -sI https://fspirat.online/ | grep -iE "^(server|strict-transport-security):" | tr -d "\r" | tr "\n" " ")"
             rm -rf /tmp/fsr-deploy'
