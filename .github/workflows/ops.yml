@@ -47,7 +47,7 @@ jobs:
             if ssh-keygen -y -f "$f" >/dev/null 2>&1; then
               echo "✅ $n — правильный закрытый ключ, формат: $kind ($(ssh-keygen -l -f "$f" | awk '{print $1, $4}'))"
             else
-              echo "❌ $n — не удалось прочитать закрытый ключ (формат: $kind; первые символы: ${v:0:12}…)"; ok=0
+              echo "❌ $n — не удалось прочитать закрытый ключ (формат: $kind)"; ok=0
             fi
           done
           [ $ok = 1 ]
