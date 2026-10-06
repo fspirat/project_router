@@ -27,6 +27,11 @@ jobs:
 
       - name: Rsync web/ -> /var/www/fspirat.online/router/
         run: |
+          # Ключ deploy ограничен rrsync (только выкладка в /var/www/fspirat.online, пути — от этой папки).
+          # Пока ограничения нет — полный путь (так workflow работает и до, и после включения rrsync).
+          H="deploy@${{ secrets.SSH_HOST }}"
+          if [ "$(ssh -i ~/.ssh/id_deploy -o BatchMode=yes $H echo plain 2>/dev/null)" = plain ]; then D=/var/www/fspirat.online/router/; else D=router/; fi
+          echo "цель: $D"
           rsync -avz --delete --exclude 'setup/' \
             -e "ssh -i ~/.ssh/id_deploy" \
-            ./web/ "deploy@${{ secrets.SSH_HOST }}:/var/www/fspirat.online/router/"
+            ./web/ "$H:$D"

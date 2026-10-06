@@ -1,0 +1,62 @@
+name: Restrict deploy key
+
+# Ключи пользователя deploy (ими GitHub выкладывает сайт и страницу роутера) — только rsync
+# в /var/www/fspirat.online через rrsync: без оболочки, без чтения других файлов сервера, без туннелей.
+# Если ключ из секретов GitHub утечёт, им можно будет только перезаписать сайт, но не читать секреты сервера.
+# Копия authorized_keys сохраняется; если проверка не прошла — возвращается. Запуск: Actions → Restrict deploy key.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  restrict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          case "$SSH_KEY" in *"-----BEGIN"*) printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy ;; *) echo "$SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/deploy ;; esac
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+      - name: Restrict
+        run: |
+          ssh vps 'set -e
+            F=/home/deploy/.ssh/authorized_keys
+            command -v rrsync >/dev/null || { echo "❌ нет /usr/bin/rrsync"; exit 1; }
+            cp -p $F $F.bak-rrsync
+            python3 - "$F" <<PY
+          import re, sys
+          f = sys.argv[1]
+          out = []
+          for line in open(f).read().splitlines():
+              m = re.search(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-\S+|sk-\S+) \S+.*$", line)
+              if not line.strip() or line.lstrip().startswith("#") or not m:
+                  out.append(line); continue
+              out.append("restrict,command=\"/usr/bin/rrsync /var/www/fspirat.online\" " + m.group(0))
+          open(f, "w").write("\n".join(out) + "\n")
+          print("ключей ограничено:", sum(1 for l in out if l.startswith("restrict,")))
+          PY
+            chown deploy:deploy $F; chmod 600 $F'
+      - name: Verify
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          D="ssh -i $HOME/.ssh/deploy -o BatchMode=yes -o ConnectTimeout=15"
+          ok=1
+          if rsync --list-only -e "$D" deploy@"$SSH_HOST":router/ | grep -q index.html; then echo "✅ выкладка (rsync) работает"; else echo "❌ rsync не работает"; ok=0; fi
+          if out=$($D deploy@"$SSH_HOST" "cat /etc/passwd" 2>&1) && echo "$out" | grep -q "root:"; then echo "❌ оболочка всё ещё доступна"; ok=0; else echo "✅ команды и оболочка запрещены: $(echo "$out" | head -1)"; fi
+          if rsync --list-only -e "$D" deploy@"$SSH_HOST":../ 2>/dev/null | grep -q .; then echo "❌ можно выйти за пределы /var/www/fspirat.online"; ok=0; else echo "✅ выйти за пределы папки сайта нельзя"; fi
+          if [ $ok = 0 ]; then
+            ssh vps 'mv /home/deploy/.ssh/authorized_keys.bak-rrsync /home/deploy/.ssh/authorized_keys'; echo "↩️ вернул как было"; exit 1
+          fi
+          ssh vps 'rm -f /home/deploy/.ssh/authorized_keys.bak-rrsync'

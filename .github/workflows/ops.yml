@@ -60,7 +60,12 @@ jobs:
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/OPS_SSH_KEY root@"$SSH_HOST" 'echo "✅ вход root: $(whoami)@$(hostname)"'
           [ -f ~/.ssh/SSH_KEY ] || { echo "⚠️ вход deploy не проверен: SSH_KEY не читается"; exit 0; }
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/SSH_KEY deploy@"$SSH_HOST" 'echo "✅ вход deploy: $(whoami)@$(hostname); запись в /var/www/fspirat.online/router: $(test -w /var/www/fspirat.online/router && echo да || echo нет)"'
+          # deploy ограничен rrsync: проверяем выкладку (список файлов router/), а не вход в оболочку
+          if rsync --list-only -e "ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/SSH_KEY" deploy@"$SSH_HOST":router/ 2>/dev/null | grep -q index.html; then
+            echo "✅ deploy: выкладка в /var/www/fspirat.online работает (rrsync)"
+          elif ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/SSH_KEY deploy@"$SSH_HOST" true 2>/dev/null; then
+            echo "⚠️ deploy входит в оболочку — ключ ещё не ограничен rrsync (workflow Restrict deploy key)"
+          else echo "❌ deploy: ни выкладка, ни вход не работают"; fi
 
       - name: Run command
         if: inputs.cmd != ''
