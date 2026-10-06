@@ -32,6 +32,8 @@ jobs:
           H="deploy@${{ secrets.SSH_HOST }}"
           if [ "$(ssh -i ~/.ssh/id_deploy -o BatchMode=yes $H echo plain 2>/dev/null)" = plain ]; then D=/var/www/fspirat.online/router/; else D=router/; fi
           echo "цель: $D"
-          rsync -avz --delete --exclude 'setup/' \
-            -e "ssh -i ~/.ssh/id_deploy" \
-            ./web/ "$H:$D"
+          # повтор: rrsync не пускает две выкладки одновременно (сайт и страница роутера в одну секунду)
+          for i in 1 2 3; do
+            rsync -avz --delete -e "ssh -i ~/.ssh/id_deploy" ./web/ "$H:$D" && break
+            [ $i = 3 ] && exit 1; echo "повтор через 20 с"; sleep 20
+          done

@@ -56,6 +56,9 @@
 - Секреты nginx (`snippets/fspirat-router.conf`, `.htpasswd_router`) — 640, пользователю deploy не видны.
 - HSTS и `server_tokens off` — `server/nginx/conf.d/security-headers.conf`.
 - fspirat-watch раз в 5 минут проверяет сайты, страницу входа и mtg; раз в день — сертификаты (< 14 дней → Telegram).
+- Cookie `fsr_session` не уходит на роутер (LuCI): map в `server/nginx/conf.d/fsr-luci-cookie.conf`.
+- Пользователь `tunnel` — оболочка `/usr/sbin/nologin` (только проброс портов).
+- Ключ `deploy` — только rrsync в /var/www/fspirat.online (workflow `Restrict deploy key`); пути в rsync — от этой папки.
 - Telegram-прокси mtg: `server/mtproxy/` (workflow `MTProxy setup`), 443 делит nginx stream по SNI.
 
 ## Доступ к роутеру с сервера
@@ -160,7 +163,7 @@ nginx перед каждым запросом спрашивает `check.php` 
 4. ~~История и журнал переживают перезагрузку~~ — сделано 06.10 (хранит сервер). Было: **История и журнал переживают перезагрузку**: раз в час копировать
    `/tmp/fspirat/{history,switch.log}` в `/etc/fspirat/`, при старте восстанавливать.
 5. ~~Сменить токен CGI~~ — сделано 06.10 (workflow `Rotate router token`, можно запускать повторно).
-6. Удалить с сервера `/var/www/fspirat.online/router/setup/` (больше не нужна).
+6. ~~Удалить `/router/setup/`~~ — сделано 07.10 (deploy-web больше её не исключает, rsync --delete убрал).
 7. ~~PWA-иконка~~ — сделано 06.10. Гостевой Wi-Fi пользователю не нужен.
 
 Подробности по всей инфраструктуре — `docs/infrastructure.md`, история решений — `docs/history.md`.

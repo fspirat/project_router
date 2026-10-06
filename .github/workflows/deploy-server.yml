@@ -72,7 +72,9 @@ jobs:
       - name: nginx
         if: inputs.nginx
         run: |
-          ssh vps 'set -e; python3 /tmp/fsr-deploy/auth/nginx-apply.py
+          ssh vps 'set -e
+            install -m 644 /tmp/fsr-deploy/nginx/conf.d/fsr-luci-cookie.conf /etc/nginx/conf.d/fsr-luci-cookie.conf
+            python3 /tmp/fsr-deploy/auth/nginx-apply.py
             # HSTS и без версии nginx в ответах
             install -m 644 /tmp/fsr-deploy/nginx/conf.d/security-headers.conf /etc/nginx/conf.d/security-headers.conf
             sed -i "s/^\([[:space:]]*\)server_tokens build;.*/\1server_tokens off;/" /etc/nginx/nginx.conf

@@ -73,9 +73,20 @@ def snippet(s):
             + 'location @fsr_api_401 {\n    default_type application/json;\n    return 401 \'{"error":"auth"}\';\n}\n' + EXTRA)
     return harden(s)
 
+LUCI_COOKIE = '        proxy_set_header Cookie $fsr_luci_cookie;   # без cookie входа в панель (map — conf.d/fsr-luci-cookie.conf)\n'
+
+def luci_cookie(s):
+    if '$fsr_luci_cookie' in s:
+        return s
+    new, n = re.subn(r'^([ \t]*proxy_set_header Authorization "";\n)', lambda m: m.group(1) + LUCI_COOKIE, s, count=1, flags=re.M)
+    if n != 1:
+        print('router site: не нашёл proxy_set_header Authorization — cookie не трогаю')
+        return s
+    return new
+
 def router_site(s):
     if 'auth_request /_fsr_auth' in s:
-        return s
+        return luci_cookie(s)
     new, n = BASIC.subn('        auth_request /_fsr_auth;\n        error_page 401 = @fsr_login;\n', s, count=1)
     if n != 1:
         sys.exit('router site: не нашёл auth_basic в location /')
@@ -83,7 +94,7 @@ def router_site(s):
            + '    location @fsr_login {\n        return 302 https://fspirat.online/router/login?next=https://router.fspirat.online$uri;\n    }\n\n')
     # вставить внутрь блока server с listen 443 — перед первой строкой "location / {"
     new = new.replace('    location / {', add + '    location / {', 1)
-    return new
+    return luci_cookie(new)
 
 def main():
     stamp = time.strftime('%Y%m%d-%H%M%S')
