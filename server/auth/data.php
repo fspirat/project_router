@@ -89,4 +89,5 @@ out([
     'offline_since' => $since ?: null,     // роутер не отвечает серверу (по данным fspirat-watch)
     'last_ok' => (int)trim((string)@file_get_contents(watch('last_ok'))) ?: null,
     'names' => (object)names(),
+    'mtg' => json_decode((string)@file_get_contents(watch('mtg.json')), true) ?: null,   // Telegram-прокси (fspirat-watch)
 ]);

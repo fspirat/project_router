@@ -223,6 +223,11 @@
   .band.g5{color:var(--lime);border-color:#2f4a1d} .band.g2{color:var(--amber);border-color:#4a3a12}
   .band-info{display:block;color:var(--dim);font-size:11px;margin-top:2px}
 
+  .mtg{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mtg b{font-family:var(--pixel);font-size:11px;font-weight:400}
+  .mtg.up b{color:var(--lime)} .mtg.down b{color:var(--red)}
+  .mtg.down .dot{background:var(--red);box-shadow:0 0 8px rgba(224,86,60,.6)}
+
   .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:92vw;background:#16220f;
          border:2px solid var(--green);padding:12px 16px;box-shadow:4px 4px 0 #000;font-size:14px;z-index:5}
   .toast.err{border-color:var(--red);background:#22100b}
@@ -329,6 +334,12 @@
         <div class="spd"><span>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
         <div class="spd"><span>Отдача</span><b id="sp-tx">—</b><small id="tot-tx"></small></div>
       </div>
+    </section>
+
+    <section class="panel" id="mtg-box" hidden>
+      <h2>Telegram-прокси</h2>
+      <div class="mtg"><span class="dot" id="mtg-dot"></span><b id="mtg-state">—</b><span class="muted" id="mtg-info"></span></div>
+      <p class="note">Свой прокси на сервере в Нидерландах (tg.fspirat.online, порт 443). Ссылка для подключения — в сообщении бота @FSRouter_bot.</p>
     </section>
 
     <section class="panel">
@@ -639,10 +650,25 @@ async function loadData(){
     if(r.status === 401){ location.href = '/router/login?next=' + encodeURIComponent(location.pathname); return; }
     if(!r.ok) return;
     hist = await r.json(); names = hist.names || {};
+    renderMtg(hist.mtg);
     renderChart(); renderLog(state);
     if(state) renderDevices(state.devices);
     if(!$('#down').hidden) showDown(true);
   } catch {}
+}
+
+function renderMtg(m){
+  $('#mtg-box').hidden = !m;
+  if(!m) return;
+  const stale = Date.now()/1000 - m.ts > 300;          // наблюдатель давно не писал — состояние неизвестно
+  const up = m.active && !stale;
+  const box = $('#mtg-box').querySelector('.mtg');
+  box.className = 'mtg ' + (up ? 'up' : 'down');
+  $('#mtg-dot').className = 'dot' + (up ? ' on' : '');
+  $('#mtg-state').textContent = stale ? 'нет данных' : m.active ? 'работает' : 'не работает';
+  const n = m.conns, word = n % 10 === 1 && n % 100 !== 11 ? 'подключение' : [2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100) ? 'подключения' : 'подключений';
+  $('#mtg-info').textContent = up ? `сейчас ${n} ${word}` + (m.since ? ` · без перезапуска ${minutes(Math.round((Date.now()/1000 - m.since) / 60))}` : '')
+    : stale ? `последние данные ${when(m.ts)}` : 'служба mtg остановлена — бот уже прислал сообщение';
 }
 
 function showDown(on){
