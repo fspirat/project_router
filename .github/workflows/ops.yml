@@ -41,13 +41,14 @@ jobs:
             case "$v" in
               ssh-ed25519*|ssh-rsa*|ecdsa-*) echo "❌ $n — это ОТКРЫТЫЙ ключ (.pub), нужен закрытый"; ok=0; continue ;;
               *"-----BEGIN"*) printf '%s\n' "$v" > "$f"; kind="как есть" ;;   # вставлен целиком
-              *) echo "$v" | tr -d ' \r\n' | base64 -d > "$f" 2>/dev/null; kind="base64" ;;
+              *) echo "$v" | tr -d ' \r\n' | base64 -d > "$f" 2>/dev/null || true; kind="base64" ;;
             esac
             chmod 600 "$f"
             if ssh-keygen -y -f "$f" >/dev/null 2>&1; then
               echo "✅ $n — правильный закрытый ключ, формат: $kind ($(ssh-keygen -l -f "$f" | awk '{print $1, $4}'))"
             else
-              echo "❌ $n — не удалось прочитать закрытый ключ (формат: $kind)"; ok=0
+              echo "❌ $n — не удалось прочитать закрытый ключ (формат: $kind)"; rm -f "$f"
+              [ "$n" = OPS_SSH_KEY ] && ok=0
             fi
           done
           [ $ok = 1 ]
@@ -58,6 +59,7 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/OPS_SSH_KEY root@"$SSH_HOST" 'echo "✅ вход root: $(whoami)@$(hostname)"'
+          [ -f ~/.ssh/SSH_KEY ] || { echo "⚠️ вход deploy не проверен: SSH_KEY не читается"; exit 0; }
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/SSH_KEY deploy@"$SSH_HOST" 'echo "✅ вход deploy: $(whoami)@$(hostname); запись в /var/www/fspirat.online/router: $(test -w /var/www/fspirat.online/router && echo да || echo нет)"'
 
       - name: Run command
