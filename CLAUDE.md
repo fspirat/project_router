@@ -48,6 +48,16 @@
 Правила те же: перед `nginx reload` — `nginx -t`; не печатать в лог файлы с секретами
 (`snippets/fspirat-router.conf`, `/etc/fspirat-watch.conf`, `/etc/fspirat.token`).
 
+## Защита (06.10.2026)
+
+- SSH на сервер — только ключи (`server/ssh/00-fspirat-hardening.conf`, workflow `SSH hardening`); пароль выключен.
+- `/router/api` и `/router/data` принимаются только с заголовком `X-FSR: 1` (ставит web/index.html) — защита от CSRF.
+  Без него nginx отвечает `403 {"error":"csrf"}`. `/router/` — `location ^~`, файлы PWA — точные локации.
+- Секреты nginx (`snippets/fspirat-router.conf`, `.htpasswd_router`) — 640, пользователю deploy не видны.
+- HSTS и `server_tokens off` — `server/nginx/conf.d/security-headers.conf`.
+- fspirat-watch раз в 5 минут проверяет сайты, страницу входа и mtg; раз в день — сертификаты (< 14 дней → Telegram).
+- Telegram-прокси mtg: `server/mtproxy/` (workflow `MTProxy setup`), 443 делит nginx stream по SNI.
+
 ## Доступ к роутеру с сервера
 
 Туннель fstunnel пробрасывает ещё `127.0.0.1:8022` на сервере → SSH роутера (dropbear). Ключ сервера
@@ -149,7 +159,7 @@ nginx перед каждым запросом спрашивает `check.php` 
    (Cloudflare в РФ замедляют). Сравнить с тарифом пользователя.
 4. ~~История и журнал переживают перезагрузку~~ — сделано 06.10 (хранит сервер). Было: **История и журнал переживают перезагрузку**: раз в час копировать
    `/tmp/fspirat/{history,switch.log}` в `/etc/fspirat/`, при старте восстанавливать.
-5. Сменить токен CGI (`/etc/fspirat.token` + nginx snippet) — старый засветился в чате.
+5. ~~Сменить токен CGI~~ — сделано 06.10 (workflow `Rotate router token`, можно запускать повторно).
 6. Удалить с сервера `/var/www/fspirat.online/router/setup/` (больше не нужна).
 7. ~~PWA-иконка~~ — сделано 06.10. Гостевой Wi-Fi пользователю не нужен.
 
