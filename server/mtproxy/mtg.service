@@ -1,0 +1,24 @@
+[Unit]
+Description=mtg - MTProto proxy for Telegram (tg.fspirat.online behind nginx stream on 443)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mtg
+Group=mtg
+ExecStart=/usr/local/bin/mtg run /etc/mtg.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

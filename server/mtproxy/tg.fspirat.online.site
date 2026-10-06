@@ -1,0 +1,19 @@
+# /etc/nginx/sites-available/tg.fspirat.online — сайт-«обложка» для MTProto-прокси.
+# Сюда mtg отправляет всех, кто подключился без секрета (проверки, сканеры): они видят обычный сайт.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name tg.fspirat.online;
+    location /.well-known/acme-challenge/ { root /var/www/tg; }
+    location / { return 301 https://fspirat.online/; }
+}
+server {
+    listen 127.0.0.1:10443 ssl proxy_protocol;
+    server_name tg.fspirat.online;
+    ssl_certificate /etc/letsencrypt/live/tg.fspirat.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tg.fspirat.online/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    root /var/www/tg;
+    location / { return 301 https://fspirat.online/; }
+}

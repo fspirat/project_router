@@ -1,0 +1,33 @@
+name: MTProxy setup
+
+# Ставит Telegram-прокси mtg на сервер (server/mtproxy/setup.sh): порт 443 делится nginx stream по SNI,
+# tg.fspirat.online → mtg, остальное → сайты. Копия /etc/nginx и откат при ошибке. Ссылка — в Telegram-бота.
+# Запускается только вручную: Actions → MTProxy setup → Run workflow.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+      - name: Checks
+        run: bash -n server/mtproxy/setup.sh
+      - name: Setup
+        run: |
+          tar -C server/mtproxy -czf - . | ssh vps 'rm -rf /root/mtproxy-setup && mkdir -p /root/mtproxy-setup && tar -xzf - -C /root/mtproxy-setup'
+          ssh vps 'bash /root/mtproxy-setup/setup.sh'
