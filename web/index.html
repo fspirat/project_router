@@ -76,6 +76,12 @@
   #real{font-size:14px;color:var(--dim)}
   #real b{font-family:var(--pixel);font-size:10px;font-weight:400;color:var(--text)}
   #real.bad,#real.bad b{color:var(--red)}
+  #cur-svc{grid-column:2}
+  #cur-svc .svc{display:block;font-size:13px;color:var(--dim)}
+  #cur-svc .svc span{white-space:nowrap}
+  #cur-svc .svc b{font-weight:500;color:var(--text)}
+  #cur-svc .svc b.ok{color:var(--green)} #cur-svc .svc b.mid{color:var(--amber)} #cur-svc .svc b.slow{color:var(--red)}
+  #cur-svc .si{width:15px;height:11px} #cur-svc .si.sq{width:12px;height:12px}
   .ping{display:inline-flex;align-items:center;gap:8px;color:var(--dim);font-size:13px;white-space:nowrap}
   .ping b{font-family:var(--pixel);font-size:10px;color:var(--text);font-weight:400}
   .meta{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
@@ -342,6 +348,7 @@
         <div id="vpn-text">Связываюсь с роутером…</div>
         <div class="current"><span id="cur-name">—</span><span class="ping" id="cur-ping"></span></div>
         <div id="real"></div>
+        <div id="cur-svc"></div>
       </div>
       <div class="warn" id="warn" hidden>В PassWall выбран не узел Split: правило прямых сайтов не работает, а смена сервера здесь ни на что не повлияет. Выбери Split в Basic Settings → Node.</div>
       <div class="meta"><span id="updated"></span></div>
@@ -532,6 +539,7 @@ function renderStatus(s){
   $('#updated').textContent = s.ping ? 'Проверено ' + ago(s.ping.updated) + ', автопроверка раз в 5 минут' : 'Проверок ещё не было.';
   $('#warn').hidden = s.split_active;
   renderTargets(s.targets);
+  $('#cur-svc').innerHTML = cur && cur.ms ? svcLine(cur) : '';      // YouTube · Discord · серверы Minecraft через текущий
 }
 
 const RANGES = {day: [86400, '24 часа', '24 ч назад'], week: [7*86400, '7 дней', '7 дней назад'], month: [30*86400, '30 дней', '30 дней назад']};
