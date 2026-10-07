@@ -197,6 +197,12 @@ case "$action" in
     /usr/bin/fspirat-fw $action "$mac" || reply "500 Internal Server Error" '{"error":"nft"}'
     echo "$(date '+%d.%m %H:%M') $([ $action = block ] && echo 'интернет выключен' || echo 'интернет включён'): $mac" >> $DIR/switch.log
     reply "200 OK" "{\"ok\":true,\"mac\":\"$mac\",\"blocked\":$([ $action = block ] && echo true || echo false)}" ;;
+  wake)   # разбудить компьютер (Wake-on-LAN) — fspirat-wake
+    echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || reply "400 Bad Request" '{"error":"bad mac"}'
+    wip=$(awk -v m="$mac" 'tolower($2)==m{print $3; exit}' /tmp/dhcp.leases)
+    n=$(/usr/bin/fspirat-wake "$mac" $wip 2>/dev/null)
+    [ "${n:-0}" -gt 0 ] || reply "500 Internal Server Error" '{"error":"send"}'
+    reply "200 OK" "{\"ok\":true,\"sent\":$n}" ;;
   settargets)   # свой список для пинга: list=вид~имя~адрес!вид~имя~адрес… (до 8 строк); пусто — список по умолчанию
     res=$(lua - "$QUERY_STRING" <<'L'
 local q = arg[1]:match('[?&]?list=([^&]*)') or ''

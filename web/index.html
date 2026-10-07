@@ -98,6 +98,7 @@
   .dev-traf{display:block;color:var(--dim);font-size:11px;width:100%}
   .blk{font:inherit;font-size:11px;color:var(--dim);background:none;border:1px solid var(--edge);cursor:pointer;padding:1px 6px}
   .blk:hover{color:var(--red);border-color:var(--red)}
+  .blk.wk:hover{color:var(--lime);border-color:var(--green)}
   .dev.is-blocked .dev-name > span:first-child{color:#f08a73;text-decoration:line-through}
   .dev.is-blocked .blk{color:var(--lime);border-color:var(--green)}
   .band.cut{color:#f08a73;border-color:#7a2e1f}
@@ -722,6 +723,7 @@ function renderDevices(list){
         <button class="ed" data-edit="${esc(d.mac)}" title="Переименовать" aria-label="Переименовать">✎</button>
         ${own && d.name ? `<small>в сети называется ${esc(d.name)}</small>` : ''}
         ${d.blocked ? '<span class="band cut">без интернета</span>' : ''}
+        ${!d.online || d.wake ? `<button class="blk wk" data-wake="${esc(d.mac)}" title="Wake-on-LAN: разбудить компьютер из сна">⏻ Разбудить</button>` : ''}
         <button class="blk" data-block="${esc(d.mac)}" title="${d.blocked ? 'Вернуть интернет' : 'Выключить интернет этому устройству'}">${d.blocked ? 'Включить интернет' : 'Выкл. интернет'}</button>
         ${info ? `<small class="band-info">${esc(info)}</small>` : ''}
         ${traf ? `<small class="dev-traf">${traf}</small>` : ''}
@@ -894,6 +896,20 @@ $('#range').addEventListener('click', e => {
   range = b.dataset.range;
   document.querySelectorAll('#range button').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderChart(); renderTChart(); loadData();
+});
+
+/* Разбудить компьютер (Wake-on-LAN). По Wi-Fi — только из сна и если адаптер умеет. */
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button[data-wake]'); if(!b) return;
+  const mac = b.dataset.wake, d = (state.devices || []).find(x => x.mac === mac) || {};
+  const nm = names[mac.toLowerCase()] || d.name || mac;
+  b.disabled = true;
+  try {
+    await api('wake', '&mac=' + encodeURIComponent(mac));
+    toast(`Сигнал «проснись» отправлен на «${nm}». Если компьютер умеет просыпаться по сети, он появится в сети через 10–30 секунд.`);
+    setTimeout(load, 20000); setTimeout(load, 45000);
+  } catch(err){ toast(err.message, true); }
+  finally { setTimeout(() => b.disabled = false, 5000); }
 });
 
 /* Выключить / включить интернет устройству (fspirat-fw на роутере: MAC в наборе block) */
