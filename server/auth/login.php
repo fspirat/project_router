@@ -8,7 +8,8 @@ header('Cache-Control: no-store');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: same-origin');   // при no-referrer браузер шлёт форму с Origin: null
-header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+// стиль страницы — встроенный (одна страница, без скриптов вообще), шрифт — свой /router/fonts/ (без Google)
+header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'");
 
 $next = fsr_next((string)($_POST['next'] ?? $_GET['next'] ?? '/router/'));
 $error = '';
@@ -83,9 +84,9 @@ $h = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#050605">
 <title>Вход · FSPIRAT Router</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
+  @font-face{font-family:"Press Start 2P";font-display:swap;src:url("/router/fonts/ps2p-cyrillic.woff2") format("woff2");unicode-range:U+0400-045F}
+  @font-face{font-family:"Press Start 2P";font-display:swap;src:url("/router/fonts/ps2p-latin.woff2") format("woff2");unicode-range:U+0000-00FF,U+2000-206F}
   :root{--bg:#050605;--panel:#0c110a;--edge:#1d2b15;--green:#7fbf3a;--lime:#9be052;--text:#d9e7cd;--dim:#7f8e74;--red:#e0563c;
         --pixel:"Minecraft","Press Start 2P",monospace;--body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   *{box-sizing:border-box}

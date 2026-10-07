@@ -34,6 +34,7 @@ if [ -f "$AUTHLOG" ]; then
       ip=${ipkv#ip=}
       case "$what" in
         OK)     send "🔑 Вход в панель роутера: $ip ($d $t)" ;;
+        LOGOUT_ALL) send "🚪 Выход из панели на всех устройствах: $ip ($d $t)" ;;
         LOCKED) [ "$(get "lock_$ip")" = "$d" ] || { send "⚠️ Подбор пароля к панели роутера с $ip — вход с этого адреса закрыт на 15 минут."; put "lock_$ip" "$d"; } ;;
       esac
     done

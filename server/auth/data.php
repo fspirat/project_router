@@ -10,13 +10,16 @@ require __DIR__ . '/lib.php';
 const FSR_WATCH = '/var/lib/fspirat';
 
 header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store');
+header('Cache-Control: private, no-store');
 header('X-Content-Type-Options: nosniff');
 
 function out(array $a, int $code = 200): never { http_response_code($code); echo json_encode($a, JSON_UNESCAPED_UNICODE); exit; }
 function watch(string $f): string { return (getenv('FSR_WATCH') ?: FSR_WATCH) . '/' . $f; }
 function names_file(): string { return fsr_dir() . '/names.json'; }
 function names(): array { $j = json_decode((string)@file_get_contents(names_file()), true); return is_array($j) ? $j : []; }
+
+// CSRF-токен этой сессии для страницы (check.php требует его в X-FSR у каждого действия)
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['csrf'])) out(['csrf' => fsr_csrf()]);
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';

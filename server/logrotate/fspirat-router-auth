@@ -7,3 +7,12 @@
     notifempty
     create 0640 www-data adm
 }
+# журнал действий в панели (server/auth/check.php) — дольше: полгода
+/var/log/fspirat-router-audit.log {
+    weekly
+    rotate 26
+    compress
+    missingok
+    notifempty
+    create 0640 www-data adm
+}

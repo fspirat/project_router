@@ -51,10 +51,45 @@ def harden(s):
         sys.exit('snippet: нет regex-локации PWA')
     return s
 
+# Этап 4 (аудит, 07.10.2026):
+#   — check.php видит исходный запрос (адрес и метод): действия (POST) — только с CSRF-токеном сессии в X-FSR;
+#   — X-FSR теперь не «1», а токен: nginx проверяет только, что заголовок есть (сам токен — check.php);
+#   — заголовки безопасности и запрет кэша для страницы, API и данных; ограничение частоты API (conf.d/fsr-limits.conf);
+#   — шрифты панели (/router/fonts/) открыты без входа: их берёт и страница входа.
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
+       "font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; "
+       "base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
+SEC = ('    add_header Strict-Transport-Security "max-age=31536000" always;\n'
+       '    add_header X-Content-Type-Options "nosniff" always;\n'
+       '    add_header Referrer-Policy "no-referrer" always;\n'
+       '    add_header X-Frame-Options "DENY" always;\n')
+# Cache-Control у API и данных ставят сами CGI и data.php (no-store) — здесь только у страницы
+PAGE_HDR = SEC + '    add_header Cache-Control "private, no-store" always;\n' + f'    add_header Content-Security-Policy "{CSP}" always;\n'
+API_HDR = SEC + '    limit_req zone=fsr_api burst=30 nodelay;\n'
+ORIG = '    fastcgi_param FSR_ORIG_URI $request_uri;\n    fastcgi_param FSR_ORIG_METHOD $request_method;\n'
+FONTS = 'location ^~ /router/fonts/ {\n    expires 30d;\n    add_header X-Content-Type-Options "nosniff" always;\n}\n'
+
+def harden2(s):
+    if 'FSR_ORIG_URI' in s:
+        return s
+    a = '    fastcgi_param SCRIPT_FILENAME /var/www/router-auth/check.php;\n'
+    if a not in s:
+        sys.exit('snippet: нет check.php в /_fsr_auth')
+    s = s.replace(a, a + ORIG, 1)
+    if s.count('if ($http_x_fsr != "1")') != 2:
+        sys.exit('snippet: нет проверки X-FSR в api/data')
+    s = s.replace('if ($http_x_fsr != "1")', 'if ($http_x_fsr = "")')
+    for loc, hdr in (('location ^~ /router/ {\n', PAGE_HDR), ('location = /router/api {\n', API_HDR),
+                     ('location = /router/data {\n', API_HDR)):
+        if loc not in s:
+            sys.exit('snippet: нет ' + loc.strip())
+        s = s.replace(loc, loc + hdr, 1)
+    return s.rstrip('\n') + '\n' + FONTS
+
 def snippet(s):
     if 'auth_request /_fsr_auth' in s:
         s = s if 'location = /router/data' in s else s.rstrip('\n') + '\n' + EXTRA
-        return harden(s)
+        return harden2(harden(s))
     blocks = re.split(r'(?=location )', s)
     out = []
     for b in blocks:
@@ -71,7 +106,7 @@ def snippet(s):
             + 'location = /router/logout {\n' + fcgi('logout.php') + '}\n'
             + 'location @fsr_login {\n    return 302 /router/login?next=$uri;\n}\n'
             + 'location @fsr_api_401 {\n    default_type application/json;\n    return 401 \'{"error":"auth"}\';\n}\n' + EXTRA)
-    return harden(s)
+    return harden2(harden(s))
 
 LUCI_COOKIE = '        proxy_set_header Cookie $fsr_luci_cookie;   # без cookie входа в панель (map — conf.d/fsr-luci-cookie.conf)\n'
 

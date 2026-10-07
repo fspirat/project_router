@@ -9,14 +9,22 @@ TOKEN=$(cat /etc/fspirat.token 2>/dev/null)
 REQ_TOKEN=${HTTP_COOKIE#*fspirat_token=}; REQ_TOKEN=${REQ_TOKEN%%;*}
 
 reply() { echo "Status: $1"; echo "Content-Type: application/json"; echo "Cache-Control: no-store"; echo; echo "$2"; exit 0; }
-jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
+jesc() { tr -d '\000-\011\013-\037' | sed 's/\\/\\\\/g;s/"/\\"/g'; }    # без управляющих символов (кроме \n): имена из DHCP задаёт само устройство
 bg() { ( setsid sh -c "$1" </dev/null >/dev/null 2>&1 & ); }
 
 [ -n "$TOKEN" ] && [ "$REQ_TOKEN" = "$TOKEN" ] || reply "403 Forbidden" '{"error":"forbidden"}'
 
-action=$(echo "$QUERY_STRING" | sed -n 's/^.*action=\([a-z]*\).*$/\1/p')
-id=$(echo "$QUERY_STRING" | sed -n 's/^.*id=\([A-Za-z0-9]*\).*$/\1/p')
-mac=$(echo "$QUERY_STRING" | sed -n 's/^.*mac=\([0-9a-fA-F:]*\).*$/\1/p' | tr A-F a-f)
+# Параметр запроса по точному имени (не «pcid=» вместо «id=»); значения дальше проверяются по своему формату
+param() { echo "&$QUERY_STRING" | sed -n "s/^.*&$1=\([^&]*\).*$/\1/p" | head -1; }
+action=$(param action | grep -E '^[a-z]{1,20}$')
+id=$(param id | grep -E '^[A-Za-z0-9]{1,32}$')
+mac=$(param mac | sed 's/%3[Aa]/:/g' | tr A-F a-f | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$')
+
+# Чтение — GET; всё, что меняет состояние или запускает работу, — только POST (nginx пускает POST только с CSRF-токеном).
+case "$action" in
+  status|net|pingone) ;;
+  *) [ "$REQUEST_METHOD" = POST ] || reply "405 Method Not Allowed" '{"error":"method"}' ;;
+esac
 
 cpu_sample() { awk '/^cpu /{t=0; for(i=2;i<=NF;i++) t+=$i; print t, $5+$6}' /proc/stat; }
 wan_dev() { d=$(ifstatus wan 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null); echo "${d:-wan}"; }
@@ -191,12 +199,15 @@ case "$action" in
     bg "lua /usr/share/passwall2/subscribe.lua start; sleep 5; /usr/bin/fspirat-ping"
     reply "200 OK" '{"ok":true}' ;;
   speedtest)
-    via=$(echo "$QUERY_STRING" | sed -n 's/^.*via=\([a-z]*\).*$/\1/p')
+    via=$(param via)
     [ "$via" = vpn ] || [ "$via" = direct ] || reply "400 Bad Request" '{"error":"bad via"}'
-    if [ -f $DIR/speed.lock ] && kill -0 "$(cat $DIR/speed.lock)" 2>/dev/null; then reply "409 Conflict" '{"error":"busy"}'; fi
-    echo $$ > $DIR/speed.lock
+    # один тест за раз: mkdir атомарен (два запроса в одну секунду не запустят два теста); зависший — через 3 минуты снимается
+    L=$DIR/speed.lockd
+    [ -d $L ] && [ $(( $(date +%s) - $(cat $L/ts 2>/dev/null || echo 0) )) -gt 180 ] && rm -rf $L
+    mkdir $L 2>/dev/null || reply "409 Conflict" '{"error":"busy"}'
+    date +%s > $L/ts
     res=$(speed_run $via)
-    rm -f $DIR/speed.lock
+    rm -rf $L
     echo "$res" > $DIR/speed_$via.json
     reply "200 OK" "$res" ;;
   block|unblock)   # выключить / включить интернет устройству (fspirat-fw)
@@ -215,6 +226,7 @@ case "$action" in
     [ -s /etc/fspirat/pc.token ] || { (umask 077; head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > /etc/fspirat/pc.token); }
     reply "200 OK" "{\"token\":\"$(cat /etc/fspirat/pc.token)\",\"mac\":\"$(cat /etc/fspirat/pc.mac 2>/dev/null)\"}" ;;
   pcset)    # какое устройство — компьютер (пустой mac — убрать)
+    [ -n "$(param mac)" ] && [ -z "$mac" ] && reply "400 Bad Request" '{"error":"bad mac"}'
     mkdir -p /etc/fspirat
     if [ -z "$mac" ]; then rm -f /etc/fspirat/pc.mac
     else echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || reply "400 Bad Request" '{"error":"bad mac"}'; echo "$mac" > /etc/fspirat/pc.mac; fi
@@ -229,8 +241,23 @@ case "$action" in
     reply "200 OK" '{"ok":true}' ;;
   settargets)   # свой список для пинга: list=вид~имя~адрес!вид~имя~адрес… (до 8 строк); пусто — список по умолчанию
     res=$(lua - "$QUERY_STRING" <<'L'
-local q = arg[1]:match('[?&]?list=([^&]*)') or ''
+local q = ('&' .. arg[1]):match('&list=([^&]*)') or ''
+if #q > 3000 then io.write('long'); os.exit(0) end
 q = q:gsub('+', ' '):gsub('%%(%x%x)', function(h) return string.char(tonumber(h, 16)) end)
+-- Адрес не должен вести внутрь: роутер, домашняя сеть, сам сервер панели (замер идёт с роутера — это SSRF).
+-- Имена проверяются здесь, IP после DNS — ещё раз при каждом замере (fspirat-targets, защита от DNS rebinding).
+local function inner(h)
+  h = h:lower()
+  if h == 'localhost' or h:match('%.localhost$') or h:match('%.local$') or h:match('%.lan$') or h:match('%.home%.arpa$')
+     or h:match('%.internal$') or not h:find('%.') then return true end
+  if h:match('^0x') or h:match('^[%d]+$') then return true end          -- 0x7f000001, 2130706433 — тот же 127.0.0.1
+  local a, b, c, d = h:match('^(%d+)%.(%d+)%.(%d+)%.(%d+)$')
+  if not a then return h:match('^[%d.]+$') ~= nil end                    -- 127.1 и прочие сокращения IP
+  a, b = tonumber(a), tonumber(b)
+  return a == 0 or a == 10 or a == 127 or a >= 224 or (a == 100 and b >= 64 and b <= 127) or (a == 169 and b == 254)
+      or (a == 172 and b >= 16 and b <= 31) or (a == 192 and b == 168) or (a == 198 and (b == 18 or b == 19))
+      or tonumber(c) > 255 or tonumber(d) > 255 or a > 255 or b > 255
+end
 local out, n = {}, 0
 for e in (q .. '!'):gmatch('([^!]*)!') do
   if e ~= '' then
@@ -241,9 +268,11 @@ for e in (q .. '!'):gmatch('([^!]*)!') do
     if #name < 1 or #name > 40 or name:find('[%c|~!"<>&]') or name:find('\\', 1, true) then io.write('name'); os.exit(0) end
     if k == 'web' then
       if not a:match('^https?://[%w%.%-]+[%w%-%./_%?=]*$') or #a > 200 then io.write('url'); os.exit(0) end
+      if inner(a:match('^https?://([%w%.%-]+)')) then io.write('inner'); os.exit(0) end
     elseif k == 'mc' then
       local h, p = a:match('^([%w%.%-]+):?(%d*)$')
       if not h or #h > 100 or (p ~= '' and (tonumber(p) < 1 or tonumber(p) > 65535)) then io.write('host'); os.exit(0) end
+      if inner(h) then io.write('inner'); os.exit(0) end
       a = h .. ':' .. (p ~= '' and p or '25565')
     else io.write('kind'); os.exit(0) end
     n = n + 1; if n > 8 then io.write('many'); os.exit(0) end

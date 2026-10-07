@@ -18,19 +18,29 @@ mc|AgeMagic|mc.agemagic.net:25565
 mc|LostVale|fixfuckingdpi.lostvale.fun:25565
 L
 jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
+# Адрес ведёт внутрь (роутер, домашняя сеть, loopback, link-local, CGNAT)? Проверяем то, во что имя превращается сейчас:
+# список проверяют и при сохранении (CGI settargets), а здесь — защита от DNS rebinding (имя «стало» внутренним).
+inner() {
+  case "$1" in *[!0-9.]*) ips=$(nslookup "$1" 2>/dev/null | awk '/^Name:/{n=1} n && /^Address/{print $NF}') ;; *) ips=$1 ;; esac
+  [ -n "$ips" ] || return 1                                      # не резолвится — замер просто покажет «нет ответа»
+  echo "$ips" | awk -F. '/:/ { if (tolower($0) ~ /^(::1?$|fe[89ab]|f[cd])/) bad=1; next }
+    { a=$1+0; b=$2+0; if (a==0 || a==10 || a==127 || a>=224 || (a==100 && b>=64 && b<=127) ||
+    (a==169 && b==254) || (a==172 && b>=16 && b<=31) || (a==192 && b==168)) bad=1 } END { exit bad ? 0 : 1 }'
+}
 web_ms() { # лучшая из двух: ttfb - tls
   for k in 1 2; do
-    curl -s -m 8 $PX -o /dev/null -w '%{http_code} %{time_appconnect} %{time_starttransfer}\n' "$1"
+    curl -s -m 8 $PX --proto =http,https --max-redirs 0 -o /dev/null -w '%{http_code} %{time_appconnect} %{time_starttransfer}\n' "$1"
   done | awk '$1 != "000" && $3 > $2 {ms = int(($3 - $2) * 1000 + 0.5); if (!b || ms < b) b = ms} END {print b + 0}'
 }
 out=""
 while IFS='|' read -r kind name addr; do
   case "$kind" in web|mc) ;; *) continue ;; esac
   if [ "$kind" = web ]; then
-    v=$(web_ms "$addr"); host=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##')
+    host=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##')
+    if inner "$host"; then v=0; else v=$(web_ms "$addr"); fi
   else
     host=${addr%:*}; port=${addr##*:}; [ "$port" = "$addr" ] && port=25565
-    v=$(/usr/bin/fspirat-mcping "$host" "$port" $MCPX)
+    if inner "$host"; then v=0; else v=$(/usr/bin/fspirat-mcping "$host" "$port" $MCPX); fi
   fi
   out="$out${out:+,}{\"kind\":\"$kind\",\"name\":\"$(echo "$name" | jesc)\",\"host\":\"$(echo "$host" | jesc)\",\"vpn\":${v:-0}}"
 done < $LIST

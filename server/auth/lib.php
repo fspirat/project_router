@@ -18,6 +18,7 @@ const FSR_DIR = '/var/lib/fspirat-router-auth';
 const FSR_HTPASSWD = '/etc/nginx/.htpasswd_router';
 const FSR_USER = 'bob';
 const FSR_LOG = '/var/log/fspirat-router-auth.log';
+const FSR_AUDIT = '/var/log/fspirat-router-audit.log';   // действия в панели (кто, что, откуда) — без секретов
 const FSR_COOKIE = 'fsr_session';
 const FSR_COOKIE_DOMAIN = 'fspirat.online';     // один вход для fspirat.online/router/ и router.fspirat.online
 const FSR_TTL_SHORT = 12 * 3600;               // без «Запомнить»: 12 часов
@@ -129,7 +130,8 @@ function fsr_cookie(string $value, int $expires): void
 {
     setcookie(FSR_COOKIE, $value, [
         'expires' => $expires, 'path' => '/', 'domain' => fsr_cookie_domain(),
-        'secure' => true, 'httponly' => true, 'samesite' => 'Lax',
+        // Strict: с чужого сайта cookie не уйдёт вообще (router.fspirat.online — тот же сайт, ему уходит)
+        'secure' => true, 'httponly' => true, 'samesite' => 'Strict',
     ]);
 }
 
@@ -159,11 +161,46 @@ function fsr_session_valid(): bool
     return true;
 }
 
-function fsr_session_end(): void
+/** Выход. $all — закрыть все сессии (на всех устройствах), иначе только эту. */
+function fsr_session_end(bool $all = false): void
 {
     $tok = $_COOKIE[FSR_COOKIE] ?? '';
-    if (preg_match('/^[a-f0-9]{64}$/', $tok)) fsr_db()->prepare('DELETE FROM sessions WHERE hash = ?')->execute([hash('sha256', $tok)]);
+    if ($all) fsr_db()->exec('DELETE FROM sessions');
+    elseif (preg_match('/^[a-f0-9]{64}$/', $tok)) fsr_db()->prepare('DELETE FROM sessions WHERE hash = ?')->execute([hash('sha256', $tok)]);
     fsr_cookie('', 1);
+}
+
+// ---------- защита действий: CSRF-токен и журнал ----------
+
+/** Токен сессии из cookie (или '' — нет/кривой). */
+function fsr_session_token(): string
+{
+    $tok = $_COOKIE[FSR_COOKIE] ?? '';
+    return preg_match('/^[a-f0-9]{64}$/', $tok) ? $tok : '';
+}
+
+/** CSRF-токен этой сессии: HMAC от токена сессии. Чужой сайт его не знает (cookie HttpOnly, ответ data.php ему не прочитать);
+ *  с новой сессией меняется сам. Страница берёт его из /router/data?csrf=1 и шлёт в заголовке X-FSR. */
+function fsr_csrf(): string
+{
+    $tok = fsr_session_token();
+    return $tok === '' ? '' : substr(hash_hmac('sha256', 'fspirat-csrf-v1', $tok), 0, 48);
+}
+
+/** Короткая ссылка на сессию для журнала (не сам токен и не его полный хэш). */
+function fsr_session_ref(): string
+{
+    $tok = fsr_session_token();
+    return $tok === '' ? '-' : substr(hash('sha256', $tok), 0, 8);
+}
+
+/** Журнал действий: «время ДЕЙСТВИЕ детали ip=… s=… ua="…"». Токены, пароли и коды сюда не попадают. */
+function fsr_audit(string $action, string $detail = ''): void
+{
+    $clean = fn(string $v, int $n) => preg_replace('/[^\x20-\x7e\x{0400}-\x{04ff}]/u', '', mb_substr($v, 0, $n));
+    $ua = $clean($_SERVER['HTTP_USER_AGENT'] ?? '', 120);
+    @file_put_contents(getenv('FSR_AUDIT') ?: FSR_AUDIT, date('Y-m-d H:i:s') . ' ' . $clean($action, 20) . ($detail !== '' ? ' ' . $clean($detail, 120) : '')
+        . ' ip=' . fsr_ip() . ' s=' . fsr_session_ref() . " ua=\"$ua\"\n", FILE_APPEND | LOCK_EX);
 }
 
 /** Куда вернуться после входа: только наши адреса. */
@@ -213,7 +250,7 @@ function fsr_tg_send(string $text): bool
 function fsr_aux_cookie(string $name, string $value, int $expires): void
 {
     setcookie($name, $value, ['expires' => $expires, 'path' => '/router/', 'domain' => fsr_cookie_domain(),
-        'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+        'secure' => true, 'httponly' => true, 'samesite' => 'Strict']);
 }
 
 /** Устройство уже подтверждено кодом (и не дольше 30 дней назад пользовались). */
