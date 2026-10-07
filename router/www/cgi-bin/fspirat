@@ -261,8 +261,8 @@ case "$action" in
       echo "$d" >> /etc/fspirat/mydirect_added
     else
       echo "$cur" | grep -qx "$d" || reply "200 OK" '{"ok":true,"same":true}'
-      uci set passwall2.$rule.domain_list="$(echo "$cur" | grep -vx "$d")"
-      grep -vx "$d" /etc/fspirat/mydirect_added > /etc/fspirat/mydirect_added.tmp 2>/dev/null; mv /etc/fspirat/mydirect_added.tmp /etc/fspirat/mydirect_added
+      uci set passwall2.$rule.domain_list="$(echo "$cur" | grep -vxF "$d")"
+      grep -vxF "$d" /etc/fspirat/mydirect_added > /etc/fspirat/mydirect_added.tmp 2>/dev/null; mv /etc/fspirat/mydirect_added.tmp /etc/fspirat/mydirect_added
     fi
     uci commit passwall2
     echo "$(date '+%d.%m %H:%M') MyDirect $([ $action = diradd ] && echo '+' || echo '−') $d" >> $DIR/switch.log
@@ -278,7 +278,7 @@ case "$action" in
     SD=/etc/fspirat/svc_direct; touch $SD
     old=$(awk -F'|' -v n="$name" '$1==n{print $3}' $SD)      # что добавляли раньше (домен или IP через пробел)
     dl=$(uci -q get passwall2.$rule.domain_list | tr -d '\r'); il=$(uci -q get passwall2.$rule.ip_list | tr -d '\r')
-    for x in $old; do dl=$(echo "$dl" | grep -vx "$x"); il=$(echo "$il" | grep -vx "$x/32"); done
+    for x in $old; do dl=$(echo "$dl" | grep -vxF "$x"); il=$(echo "$il" | grep -vxF "$x/32"); done
     awk -F'|' -v n="$name" '$1!=n' $SD > $SD.tmp
     if [ "$(param on)" = 1 ]; then
       if [ "$kind" = web ]; then

@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <title>FSPIRAT Router</title>
 <meta name="theme-color" content="#050605">
@@ -15,19 +15,39 @@
 </head>
 <body>
 <div class="wrap">
+  <!-- Шапка: логотип, вкладки (на телефоне — внизу экрана), LuCI и выход -->
   <header class="top">
     <a class="logo" href="/">FSPIRAT<small>ROUTER</small></a>
-    <nav class="top-links" aria-label="Ссылки">
-      <a class="btn ghost small" href="https://router.fspirat.online" target="_blank" rel="noopener" title="Полные настройки роутера (LuCI)">LuCI ↗</a>
-      <a class="btn ghost small" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
+    <nav class="tabs" role="tablist" aria-label="Разделы">
+      <a class="tab" role="tab" href="#vpn" data-tab="vpn">VPN</a>
+      <a class="tab" role="tab" href="#net" data-tab="net">Сеть</a>
+      <a class="tab" role="tab" href="#dev" data-tab="dev">Устройства</a>
+      <a class="tab" role="tab" href="#log" data-tab="log">Журнал</a>
     </nav>
+    <span class="sp"></span>
+    <a class="btn ghost small" href="https://router.fspirat.online" target="_blank" rel="noopener" title="Полные настройки роутера (LuCI)">LuCI ↗</a>
+    <a class="btn ghost small" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
   </header>
 
-  <!-- Общее состояние: заголовок и «обновлено», пункты, одна главная кнопка. Остальные действия — в своих блоках ниже. -->
-  <section class="overall" id="overall" aria-live="polite">
-    <div class="ov-head"><b class="ov-title" id="ov-title">ПРОВЕРЯЮ…</b><small class="ov-upd" id="ov-upd"></small></div>
-    <ul class="ov-items" id="ov-items"></ul>
-    <button class="btn primary small ov-btn" id="ping-btn" title="Пинг всех серверов, проверка VPN и сервисов">↻ Проверить</button>
+  <!-- Главная карточка: общее состояние + текущий сервер + показатели + действия -->
+  <section class="panel hero" id="hero" aria-live="polite">
+    <i class="lamp" aria-hidden="true"></i>
+    <div class="hero-head">
+      <b class="ov-title" id="ov-title">ПРОВЕРЯЮ…</b>
+      <small class="ov-upd" id="ov-upd"></small>
+      <ul class="ov-items" id="ov-items"></ul>
+    </div>
+    <div class="hero-acts">
+      <button class="btn primary" id="ping-btn" title="Пинг всех серверов, проверка VPN и сервисов">↻ Проверить</button>
+      <button class="btn small" data-act="restart">Перезапустить VPN</button>
+      <button class="btn small" data-act="update">Обновить подписку</button>
+    </div>
+    <div class="hero-cur">
+      <div class="cur-box"><small>Подключён сервер</small><b class="cur-name" id="cur-name">—</b></div>
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <p class="hero-foot"><span id="sub-line"></span><span id="updated"></span></p>
+    <div class="warn-box" id="warn" hidden>В PassWall выбран не узел Split: правило прямых сайтов не работает, а смена сервера здесь ни на что не повлияет. Выбери Split в Basic Settings → Node.</div>
   </section>
 
   <section class="panel down" id="down" role="alert" hidden>
@@ -43,156 +63,184 @@
         <li>проверить, есть ли дома интернет без VPN;</li>
         <li>если не помогло — выключить роутер из розетки на 10 секунд.</li></ul></div>
     </div>
-    <p class="note" id="down-note">Кнопки на странице не работают, пока роутер не на связи. История и журнал ниже — с сервера.</p>
+    <p class="note">Кнопки не работают, пока роутер не на связи. История и журнал — с сервера.</p>
   </section>
 
-  <nav class="tabs" role="tablist">
-    <a class="tab" role="tab" href="#vpn" data-tab="vpn">VPN</a>
-    <a class="tab" role="tab" href="#net" data-tab="net">Роутер и сеть</a>
-  </nav>
-
-  <!-- ===== Вкладка VPN ===== -->
-  <div data-page="vpn">
-    <section class="panel needs-router" aria-live="polite">
-      <div class="status vpn" id="vpn">
-        <div class="lamp"></div>
-        <div id="vpn-text">Связываюсь с роутером…</div>
-        <div class="current"><span id="cur-name">—</span><span class="ping" id="cur-ping"></span></div>
-        <div id="real"></div>
-        <div id="cur-svc"></div>
-      </div>
-      <div class="warn" id="warn" hidden>В PassWall выбран не узел Split: правило прямых сайтов не работает, а смена сервера здесь ни на что не повлияет. Выбери Split в Basic Settings → Node.</div>
-      <div class="meta"><span id="updated"></span>
-        <span class="meta-acts"><button class="btn small" data-act="restart">Перезапустить VPN</button><button class="btn small" data-act="update">Обновить подписку</button></span></div>
-    </section>
-
-    <section class="panel">
-      <div class="h2row"><h2 id="chart-title">Связь за 24 часа</h2>
-        <div class="seg" id="range" role="group" aria-label="Период">
-          <button data-range="day" aria-pressed="true">24 ч</button><button data-range="week" aria-pressed="false">7 дней</button><button data-range="month" aria-pressed="false">30 дней</button>
-        </div></div>
-      <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График отклика VPN за сутки"></svg>
-      <div class="chart-legend"><span id="chart-from">24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
-      <div class="stats facts">
-        <div class="fact"><span>Средняя задержка</span><b id="st-avg">—</b></div>
-        <div class="fact"><span>Лучший</span><b id="st-min">—</b></div>
-        <div class="fact"><span>Худший</span><b id="st-max">—</b></div>
-        <div class="fact"><span>Сбоев VPN</span><b id="st-fail">—</b></div>
-        <div class="fact"><span>Роутер без связи</span><b id="st-off">—</b></div>
-      </div>
-      <div class="chart-keys"><span class="lg"><i style="background:var(--lime)"></i>задержка через VPN</span><span class="lg"><i style="background:var(--red)"></i>VPN не прошёл</span><span class="lg"><i style="background:rgba(127,142,116,.35)"></i>роутер не на связи</span></div>
-    </section>
-
-    <section class="panel" id="tgts">
-      <div class="h2row"><h2 id="tchart-title">Сервисы через VPN</h2>
-        <div class="h2btns"><button class="rp" id="tg-refresh" title="Перемерить" aria-label="Перемерить задержку до сервисов">↻</button><button class="btn small" id="tg-edit">✎ Список</button></div></div>
-      <ul class="tg-keys" id="tg-list"></ul>
-      <svg class="chart" id="tchart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График задержки до сервисов"></svg>
-      <div class="chart-legend"><span id="tchart-from">24 ч назад</span><span id="tchart-max"></span><span>сейчас</span></div>
+  <!-- ===== VPN ===== -->
+  <div data-page="vpn" class="cols">
+    <section class="panel needs-router srv-panel">
+      <div class="h2row"><h2>Серверы</h2>
+        <div class="h2btns"><button class="btn small" id="tg-edit" title="Какие сервисы мерить">✎ Сервисы</button><button class="btn small" id="ping-all" title="Пинг всех серверов и сервисов через каждый">↻ Пинг всех</button></div></div>
+      <div class="tbl-wrap"><table class="srv-tbl" id="srv"><tbody><tr><td class="empty">Загружаю список серверов…</td></tr></tbody></table></div>
+      <p class="tbl-hint">Лучшее значение в столбце обведено. Нажми строку, чтобы подключить сервер. Сервисы через другие серверы меряются раз в 30 минут.</p>
+      <div class="best-list" id="best"></div>
+      <div class="svcdir" id="svcdir"></div>
+      <details id="dead-box" hidden><summary id="dead-sum"></summary><ul class="dead" id="dead"></ul></details>
       <form id="tg-form" class="tg-form" hidden>
+        <h3>Сервисы для замера</h3>
         <div id="tg-rows"></div>
         <div class="tg-acts"><button type="button" class="btn small" id="tg-add">+ Добавить</button>
-          <span class="sp"></span><button type="button" class="btn small ghost" id="tg-cancel">Отмена</button><button type="submit" class="btn small">Сохранить</button></div>
-        <p class="note">Сайт — ссылка https://…, задержка = ответ сервера на уже открытом соединении. Minecraft — адрес сервера, как в игре (порт по умолчанию 25565). До 8 строк. Через текущий сервер — раз в 5 минут, через остальные — раз в 30 минут.</p>
+          <span class="sp"></span><button type="button" class="btn small ghost" id="tg-cancel">Отмена</button><button type="submit" class="btn small primary">Сохранить</button></div>
+        <p class="note">Сайт — ссылка https://…; Minecraft — адрес сервера, как в игре (порт по умолчанию 25565). До 8 строк. Через текущий сервер — раз в 5 минут, через остальные — раз в 30 минут.</p>
       </form>
     </section>
 
-    <section class="panel needs-router">
-      <div class="h2row"><h2>Серверы</h2><button class="btn small" id="ping-all" title="TCP-пинг всех серверов и проверка текущего через VPN">↻ Пинг всех</button></div>
-      <ul class="list" id="list"><li class="empty">Загружаю список серверов…</li></ul>
-      <details id="dead-box" hidden>
-        <summary id="dead-sum"></summary>
-        <ul class="list" id="dead"></ul>
-      </details>
-    </section>
+    <div class="side">
+      <section class="panel">
+        <div class="h2row"><h2 id="chart-title">Связь за 24 часа</h2>
+          <div class="seg" id="range" role="group" aria-label="Период">
+            <button data-range="day" aria-pressed="true">24 ч</button><button data-range="week" aria-pressed="false">7 дней</button><button data-range="month" aria-pressed="false">30 дней</button>
+          </div></div>
+        <div class="series" id="series" role="group" aria-label="Что показать"></div>
+        <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График задержки"></svg>
+        <div class="chart-legend"><span id="chart-from">24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
+        <div class="stats" id="stats"></div>
+      </section>
 
+      <section class="panel">
+        <div class="h2row"><h2>Журнал</h2><a class="more-link" href="#log">все записи →</a></div>
+        <ul class="log" id="log-mini"><li class="empty"><span>Загружаю…</span></li></ul>
+      </section>
+
+      <section class="panel">
+        <div class="h2row"><h2>Устройства</h2><a class="more-link" href="#dev" id="dev-mini-sum">все →</a></div>
+        <ul class="dev-list" id="dev-mini"><li class="empty">Загружаю…</li></ul>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===== Сеть ===== -->
+  <div data-page="net" class="cols" hidden>
+    <div class="col">
+      <section class="panel needs-router">
+        <h2>Интернет сейчас</h2>
+        <div class="speed">
+          <div class="spd"><span>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
+          <div class="spd"><span>Отдача</span><b id="sp-tx">—</b><small id="tot-tx"></small></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Тест скорости</h2>
+        <div class="st-grid">
+          <div class="st" id="st-vpn">
+            <div class="st-head"><span>Через VPN</span><button class="btn small" data-speed="vpn">Запустить</button></div>
+            <div class="st-nums">
+              <div><span>Загрузка</span><b class="st-down">—</b></div>
+              <div><span>Отдача</span><b class="st-up">—</b></div>
+              <div><span>Задержка</span><b class="st-lat">—</b></div>
+            </div>
+            <small class="st-meta">Ещё не запускали.</small>
+          </div>
+          <div class="st" id="st-direct">
+            <div class="st-head"><span>Напрямую, без VPN</span><button class="btn small" data-speed="direct">Запустить</button></div>
+            <div class="st-nums">
+              <div><span>Загрузка</span><b class="st-down">—</b></div>
+              <div><span>Отдача</span><b class="st-up">—</b></div>
+              <div><span>Задержка</span><b class="st-lat">—</b></div>
+            </div>
+            <small class="st-meta">Ещё не запускали.</small>
+          </div>
+        </div>
+        <h3 class="sub-h">История загрузки, Мбит/с</h3>
+        <svg class="chart small" id="spchart" viewBox="0 0 600 110" preserveAspectRatio="none" role="img" aria-label="История теста скорости"></svg>
+        <div class="chart-legend"><span id="spchart-from"></span><span class="keys"><i class="k-vpn"></i>через VPN <i class="k-dir"></i>напрямую</span><span>сейчас</span></div>
+        <p class="note">Тест идёт с самого роутера в 4 потока, около 35 секунд. Загрузка «напрямую» — с Selectel (Россия), «через VPN» — с Hetzner (Германия), отдача — на Cloudflare. «Через VPN» показывает потолок шифрования самого роутера.</p>
+      </section>
+
+      <section class="panel fold-panel" id="mtg-box" hidden>
+        <details id="mtg-fold">
+          <summary>Telegram-прокси · <span id="mtg-sum">—</span></summary>
+          <div class="fold-body">
+            <div class="mtg"><span class="dot" id="mtg-dot"></span><b id="mtg-state">—</b><span class="muted" id="mtg-info"></span></div>
+            <p class="note">Свой прокси на сервере в Нидерландах (tg.fspirat.online, порт 443). Ссылка для подключения — в сообщении бота @FSRouter_bot.</p>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel">
+        <div class="h2row"><h2>Роутер</h2><button class="btn small danger" data-act="reboot">Перезагрузить роутер</button></div>
+        <div class="sys-head"><span id="sys-model">—</span><span id="sys-fw"></span></div>
+        <div class="meters">
+          <div class="meter"><div class="m-top"><span>Процессор</span><b id="m-cpu">—</b></div><div class="xp"><i id="x-cpu"></i></div><small id="s-cpu"></small></div>
+          <div class="meter"><div class="m-top"><span>Оперативная память</span><b id="m-ram">—</b></div><div class="xp"><i id="x-ram"></i></div><small id="s-ram"></small></div>
+          <div class="meter"><div class="m-top"><span>Флеш-память</span><b id="m-disk">—</b></div><div class="xp"><i id="x-disk"></i></div><small id="s-disk"></small></div>
+          <div class="meter"><div class="m-top"><span>Временные файлы</span><b id="m-tmp">—</b></div><div class="xp"><i id="x-tmp"></i></div><small id="s-tmp"></small></div>
+        </div>
+        <div class="facts">
+          <div class="fact"><span>Температура</span><b id="f-temp">—</b></div>
+          <div class="fact"><span>Работает без перезагрузки</span><b id="f-up">—</b></div>
+        </div>
+      </section>
+
+      <section class="panel needs-router" id="md">
+        <div class="h2row"><h2>Напрямую (MyDirect)</h2><small class="muted" id="md-count"></small></div>
+        <p class="note">Сайты из этого списка открываются без VPN — как из России. После каждого изменения VPN перезапускается (~5 секунд).</p>
+        <form class="md-add" id="md-form"><input id="md-in" maxlength="100" placeholder="пример: gosuslugi.ru" aria-label="Домен" autocomplete="off" spellcheck="false"><button class="btn small primary" type="submit">Добавить</button></form>
+        <h3 class="sub-h">Добавлены из панели</h3>
+        <ul class="md-list" id="md-added"><li class="empty">Загружаю…</li></ul>
+        <details class="md-all"><summary id="md-all-sum">Весь список</summary>
+          <input id="md-search" placeholder="Найти домен…" aria-label="Поиск по списку" autocomplete="off" spellcheck="false">
+          <ul class="md-list" id="md-found"></ul>
+        </details>
+      </section>
+
+      <section class="panel">
+        <h2>Безопасность</h2>
+        <p class="note">Вход — пароль и код из Telegram на новом устройстве. Входы и действия записываются, о важных бот пишет в Telegram. Каждое утро в 9:00 бот присылает отчёт за сутки.</p>
+        <form method="post" action="/router/logout" class="sec-row">
+          <input type="hidden" name="all" value="1">
+          <button class="btn small danger-outline" type="submit">Выйти на всех устройствах</button>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===== Устройства ===== -->
+  <div data-page="dev" hidden>
     <section class="panel">
-      <h2>Журнал</h2>
-      <ul class="log" id="log"><li class="empty"><span>Загружаю журнал…</span></li></ul>
+      <div class="h2row"><h2>Устройства</h2><small class="muted" id="dev-sum"></small></div>
+      <div id="devices"><p class="empty">Загружаю…</p></div>
+      <p class="note">«⋯» у устройства: переименовать, выключить интернет, пустить мимо VPN, расписание. «Скрытый MAC» — телефон сам меняет свой адрес для приватности, поэтому без имени.</p>
     </section>
   </div>
 
-  <!-- ===== Вкладка Роутер и сеть ===== -->
-  <div data-page="net" hidden>
-    <section class="panel needs-router">
-      <h2>Интернет сейчас</h2>
-      <div class="speed">
-        <div class="spd"><span>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
-        <div class="spd"><span>Отдача</span><b id="sp-tx">—</b><small id="tot-tx"></small></div>
-      </div>
-    </section>
-
-    <section class="panel fold-panel" id="mtg-box" hidden>
-      <details id="mtg-fold">
-        <summary>Telegram-прокси · <span id="mtg-sum">—</span></summary>
-        <div class="fold-body">
-          <div class="mtg"><span class="dot" id="mtg-dot"></span><b id="mtg-state">—</b><span class="muted" id="mtg-info"></span></div>
-          <p class="note">Свой прокси на сервере в Нидерландах (tg.fspirat.online, порт 443). Ссылка для подключения — в сообщении бота @FSRouter_bot.</p>
-        </div>
-      </details>
-    </section>
-
+  <!-- ===== Журнал ===== -->
+  <div data-page="log" hidden>
     <section class="panel">
-      <h2>Тест скорости</h2>
-      <div class="st-grid">
-        <div class="st" id="st-vpn">
-          <div class="st-head"><span>Через VPN</span><button class="btn small" data-speed="vpn">Запустить</button></div>
-          <div class="st-nums">
-            <div><span>Загрузка</span><b class="st-down">—</b></div>
-            <div><span>Отдача</span><b class="st-up">—</b></div>
-            <div><span>Задержка</span><b class="st-lat">—</b></div>
-          </div>
-          <small class="st-meta">Ещё не запускали.</small>
-        </div>
-        <div class="st" id="st-direct">
-          <div class="st-head"><span>Напрямую, без VPN</span><button class="btn small" data-speed="direct">Запустить</button></div>
-          <div class="st-nums">
-            <div><span>Загрузка</span><b class="st-down">—</b></div>
-            <div><span>Отдача</span><b class="st-up">—</b></div>
-            <div><span>Задержка</span><b class="st-lat">—</b></div>
-          </div>
-          <small class="st-meta">Ещё не запускали.</small>
-        </div>
-      </div>
-      <p class="note">Тест идёт с самого роутера в 4 потока и длится около 35 секунд. Загрузка «напрямую» — с сервера Selectel в России, «через VPN» — с сервера Hetzner в Германии; отдача — на Cloudflare. Шифрование VPN считает процессор роутера, поэтому «через VPN» показывает потолок именно роутера.</p>
-    </section>
-
-    <section class="panel">
-      <div class="h2row"><h2>Роутер</h2><button class="btn small danger" data-act="reboot">Перезагрузить роутер</button></div>
-      <div class="sys-head"><span id="sys-model">—</span><span id="sys-fw"></span></div>
-      <div class="meters">
-        <div class="meter"><div class="m-top"><span>Процессор</span><b id="m-cpu">—</b></div><div class="xp"><i id="x-cpu"></i></div><small id="s-cpu"></small></div>
-        <div class="meter"><div class="m-top"><span>Оперативная память</span><b id="m-ram">—</b></div><div class="xp"><i id="x-ram"></i></div><small id="s-ram"></small></div>
-        <div class="meter"><div class="m-top"><span>Флеш-память</span><b id="m-disk">—</b></div><div class="xp"><i id="x-disk"></i></div><small id="s-disk"></small></div>
-        <div class="meter"><div class="m-top"><span>Временные файлы</span><b id="m-tmp">—</b></div><div class="xp"><i id="x-tmp"></i></div><small id="s-tmp"></small></div>
-      </div>
-      <div class="facts">
-        <div class="fact"><span>Температура</span><b id="f-temp">—</b></div>
-        <div class="fact"><span>Работает без перезагрузки</span><b id="f-up">—</b></div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Устройства</h2>
-      <div id="devices"><p class="empty">Загружаю…</p></div>
-    </section>
-
-    <section class="panel">
-      <h2>Безопасность</h2>
-      <p class="note">Вход в панель — пароль и код из Telegram на новом устройстве. Все входы и действия в панели записываются, о перезагрузке, блокировке устройств и смене списка сервисов бот пишет в Telegram.</p>
-      <form method="post" action="/router/logout" class="sec-row">
-        <input type="hidden" name="all" value="1">
-        <button class="btn small danger-outline" type="submit">Выйти на всех устройствах</button>
-        <span class="muted">Если потерял телефон или входил с чужого компьютера: все входы закроются, понадобится пароль и код из Telegram.</span>
-      </form>
+      <div class="h2row"><h2>Журнал</h2>
+        <div class="seg" id="log-filter" role="group" aria-label="Какие записи">
+          <button data-lv="all" aria-pressed="true">Все</button><button data-lv="err" aria-pressed="false">Ошибки</button><button data-lv="warn" aria-pressed="false">Внимание</button><button data-lv="info" aria-pressed="false">Действия</button>
+        </div></div>
+      <ul class="log full" id="log"><li class="empty"><span>Загружаю журнал…</span></li></ul>
     </section>
   </div>
 </div>
+
+<!-- Нижняя панель вкладок (телефон) -->
+<nav class="mtabs" aria-label="Разделы">
+  <a href="#vpn" data-tab="vpn"><i aria-hidden="true">◉</i>VPN</a>
+  <a href="#net" data-tab="net"><i aria-hidden="true">⇅</i>Сеть</a>
+  <a href="#dev" data-tab="dev"><i aria-hidden="true">▣</i>Устр.</a>
+  <a href="#log" data-tab="log"><i aria-hidden="true">≡</i>Журнал</a>
+</nav>
+
+<!-- Меню устройства (⋯) -->
+<div class="menu" id="devmenu" role="menu" hidden></div>
 
 <dialog class="dlg" id="dlg" aria-labelledby="dlg-title" aria-describedby="dlg-text">
   <h3 id="dlg-title"></h3>
   <p id="dlg-text"></p>
   <div class="dlg-acts"><button class="btn" id="dlg-cancel" type="button">Отмена</button><button class="btn primary" id="dlg-ok" type="button">Да</button></div>
+</dialog>
+
+<dialog class="dlg" id="sched-dlg" aria-labelledby="sched-title">
+  <h3 id="sched-title">Расписание</h3>
+  <p>В это время у устройства не будет интернета — каждый день. Можно через полночь, например 23:00 → 07:00.</p>
+  <div class="sched-row"><label>Выключать в <input type="time" id="sched-off" value="23:00"></label><label>Включать в <input type="time" id="sched-on" value="07:00"></label></div>
+  <div class="dlg-acts"><button class="btn ghost" id="sched-del" type="button">Убрать</button><span class="sp"></span><button class="btn" id="sched-cancel" type="button">Отмена</button><button class="btn primary" id="sched-ok" type="button">Сохранить</button></div>
 </dialog>
 
 <script src="app.js"></script>
