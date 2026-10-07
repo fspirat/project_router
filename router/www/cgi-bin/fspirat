@@ -166,8 +166,8 @@ status_json() {
   [ -f $DIR/svc/lock ] && kill -0 "$(cat $DIR/svc/lock)" 2>/dev/null && svcrun=true || svcrun=false
   hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
   sub=$(cat $DIR/sub.json 2>/dev/null); [ -n "$sub" ] || sub=null
-  sd=$(awk -F'|' 'NF{printf "%s\"%s\"", (n++?",":""), $1}' /etc/fspirat/svc_direct 2>/dev/null)
-  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"sub\":$sub,\"svc_direct\":[$sd],\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+  sdl=$(cut -d'|' -f1 /etc/fspirat/svc_direct 2>/dev/null | jesc | awk 'NF{printf "%s\"%s\"", (n++?",":""), $0}')   # не sd: sd — тест скорости напрямую
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"sub\":$sub,\"svc_direct\":[$sdl],\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
 }
 
 case "$action" in
