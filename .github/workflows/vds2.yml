@@ -1,0 +1,65 @@
+name: VDS2 Germany
+
+# Второй сервер VPN (64.188.83.100). Шаги:
+#   setup    — первый вход по паролю из секрета VDS2_PASS: ключ сервера панели, обновления, firewall, fail2ban, Xray VLESS+Reality
+#   lockdown — проверка входа по ключу с сервера панели (/root/.ssh/vds2_key), затем вход по паролю выключается
+#   router   — узел «🇩🇪 Германия (fspirat)» в PassWall на роутере (без перезапуска VPN). Ключи Xray не печатаются.
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        type: choice
+        options: [setup, lockdown, router]
+        default: setup
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+env:
+  VDS: 64.188.83.100
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH (сервер панели)
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+
+      - name: setup
+        if: inputs.stage == 'setup'
+        env:
+          SSHPASS: ${{ secrets.VDS2_PASS }}
+        run: |
+          [ -n "$SSHPASS" ] || { echo "нет секрета VDS2_PASS"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no root@$VDS 'bash -s' < vds2/setup.sh
+
+      - name: lockdown
+        if: inputs.stage == 'lockdown'
+        run: |
+          ssh vps "ssh -n -i /root/.ssh/vds2_key -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@$VDS 'echo вход по ключу: работает'"
+          ssh vps "ssh -i /root/.ssh/vds2_key -o BatchMode=yes root@$VDS 'bash -s'" < vds2/lockdown.sh
+          ssh vps "ssh -n -i /root/.ssh/vds2_key -o BatchMode=yes root@$VDS 'echo после выключения пароля ключ работает'"
+
+      - name: router
+        if: inputs.stage == 'router'
+        run: |
+          ssh vps "VDS=$VDS bash -s" <<'SH'
+          set -e
+          eval "$(ssh -n -i /root/.ssh/vds2_key -o BatchMode=yes root@$VDS 'cat /usr/local/etc/xray/fspirat.env' | grep -E '^(UUID|PUBK|SID|SNI)=[A-Za-z0-9._:-]+$')"
+          [ -n "$UUID" ] && [ -n "$PUBK" ] && [ -n "$SID" ] || { echo "нет ключей с VDS"; exit 1; }
+          R="ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes root@127.0.0.1"
+          printf 'S=fspirat_de\nuci -q delete passwall2.$S || true\nuci set passwall2.$S=nodes\n%s\nuci commit passwall2\n' "$(for kv in "remarks=🇩🇪 Германия (fspirat)" type=Xray protocol=vless "address=$VDS" port=443 "uuid=$UUID" encryption=none flow=xtls-rprx-vision tls=1 reality=1 "reality_publicKey=$PUBK" "reality_shortId=$SID" reality_spiderX=/ "tls_serverName=$SNI" fingerprint=chrome utls=1 transport=raw tcp_guise=none tls_allowInsecure=0 timeout=60 group=nosok add_mode=0; do printf "uci set passwall2.\$S.%s='%s'\n" "${kv%%=*}" "${kv#*=}"; done)" | $R 'sh -s'
+          $R "uci show passwall2.fspirat_de | grep -vE 'uuid|reality_publicKey|reality_shortId'"
+          echo "проверка через узел (tcping):"; $R "tcping -q -c 2 -p 443 $VDS 2>&1 | tail -2"
+          SH
