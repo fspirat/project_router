@@ -275,6 +275,8 @@ i.ok,b.ok{color:var(--green)} i.mid,b.mid{color:var(--amber)} i.slow,b.slow{colo
 .st-nums span{display:block;color:var(--dim);font-size:12px}
 .st-nums b{display:block;font-family:var(--pixel);font-size:13px;font-weight:400;color:var(--lime);line-height:2.2;white-space:nowrap}
 .st-nums b small,.spd b small{font-family:var(--body);font-size:11px;color:var(--dim);margin-left:4px}
+.st-dev{margin-bottom:12px;border-color:#2f4a1d}
+.st-dev .st-nums b{font-size:15px}
 .st-meta{display:block;color:var(--dim);font-size:12px;margin-top:6px}
 /* узкая карточка (две рядом в половине экрана): единицы — под числом, кнопка — под заголовком */
 @container (max-width:340px){

@@ -57,7 +57,7 @@ def harden(s):
 #   — заголовки безопасности и запрет кэша для страницы, API и данных; ограничение частоты API (conf.d/fsr-limits.conf);
 #   — шрифты панели (/router/fonts/) открыты без входа: их берёт и страница входа.
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
-       "font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; "
+       "font-src 'self'; img-src 'self' data:; connect-src 'self' https://speed.cloudflare.com; manifest-src 'self'; "
        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
 SEC = ('    add_header Strict-Transport-Security "max-age=31536000" always;\n'
        '    add_header X-Content-Type-Options "nosniff" always;\n'
@@ -69,9 +69,12 @@ API_HDR = SEC + '    limit_req zone=fsr_api burst=30 nodelay;\n'
 ORIG = '    fastcgi_param FSR_ORIG_URI $request_uri;\n    fastcgi_param FSR_ORIG_METHOD $request_method;\n'
 FONTS = 'location ^~ /router/fonts/ {\n    expires 30d;\n    add_header X-Content-Type-Options "nosniff" always;\n}\n'
 
+# Этап 5: тест скорости в браузере — странице можно обращаться к speed.cloudflare.com (больше никуда)
+CSP_OLD = CSP.replace(" https://speed.cloudflare.com", "")
+
 def harden2(s):
     if 'FSR_ORIG_URI' in s:
-        return s
+        return s.replace(CSP_OLD, CSP)
     a = '    fastcgi_param SCRIPT_FILENAME /var/www/router-auth/check.php;\n'
     if a not in s:
         sys.exit('snippet: нет check.php в /_fsr_auth')

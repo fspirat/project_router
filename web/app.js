@@ -742,6 +742,51 @@ async function pingAll(){
 $('#ping-btn').addEventListener('click', pingAll);
 $('#ping-all').addEventListener('click', pingAll);
 
+/* Тест скорости в браузере: само устройство → роутер → VPN → ближайший сервер Cloudflare (как обычный трафик).
+   Загрузка — 6 потоков, отдача — 4 потока, по 8 секунд; первая секунда (разгон) не считается. */
+const CFS = 'https://speed.cloudflare.com';
+const bq = () => '&r=' + Math.random().toString(36).slice(2);
+async function bLatency(){
+  let best = 1e9, colo = '';
+  for(let i = 0; i < 6; i++){
+    const t = performance.now(), r = await fetch(CFS + '/__down?bytes=0' + bq(), {cache: 'no-store'});
+    await r.arrayBuffer(); best = Math.min(best, performance.now() - t); colo = r.headers.get('cf-meta-colo') || colo;
+  }
+  return [Math.round(best), colo];
+}
+async function bMeasure(kind, show){
+  const SEC = 8, WARM = 1000, t0 = performance.now(); let bytes = 0, stop = false;
+  const add = n => { if(performance.now() - t0 > WARM) bytes += n; };
+  const down = async () => { while(!stop){ const r = await fetch(CFS + '/__down?bytes=50000000' + bq(), {cache: 'no-store'}); const rd = r.body.getReader();
+    for(;;){ const {done, value} = await rd.read(); if(done) break; add(value.length); if(stop){ rd.cancel().catch(() => {}); break; } } } };
+  const blob = new Blob([new Uint8Array(2e6)]);
+  const up = async () => { while(!stop){ await fetch(CFS + '/__up?' + bq().slice(1), {method: 'POST', body: blob}); add(blob.size); } };
+  const ps = [...Array(kind === 'down' ? 6 : 4)].map(() => (kind === 'down' ? down : up)().catch(() => {}));
+  const rate = () => bytes * 8 / Math.max(0.001, (performance.now() - t0 - WARM) / 1000);
+  const tick = setInterval(() => { if(performance.now() - t0 > WARM) show(rate()); }, 250);
+  await new Promise(r => setTimeout(r, SEC * 1000));
+  const res = rate(); stop = true; clearInterval(tick); Promise.allSettled(ps);
+  return res;
+}
+$('#bspeed').addEventListener('click', async e => {
+  const btn = e.currentTarget, box = $('#st-dev'), set = (c, h) => box.querySelector(c).innerHTML = h;
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Идёт тест, ~20 сек…';
+  ['.st-down', '.st-up', '.st-lat'].forEach(c => set(c, '—'));
+  try {
+    box.querySelector('.st-meta').textContent = 'Меряю задержку…';
+    const [lat, colo] = await bLatency(); set('.st-lat', `${lat}<small>ms</small>`);
+    box.querySelector('.st-meta').textContent = 'Меряю загрузку…';
+    const d = await bMeasure('down', v => set('.st-down', spd(v))); set('.st-down', spd(d));
+    box.querySelector('.st-meta').textContent = 'Меряю отдачу…';
+    const u = await bMeasure('up', v => set('.st-up', spd(v))); set('.st-up', spd(u));
+    box.querySelector('.st-meta').textContent = `Это устройство через VPN · сервер Cloudflare ${colo || ''} · ${when(Date.now() / 1000)}. Загрузка 6 потоков, отдача 4, по 8 секунд.`;
+    toast(`Это устройство: ${speed(d)} загрузка, ${speed(u)} отдача, задержка ${lat} ms.`);
+  } catch(err){
+    console.warn('browser speedtest', err);
+    box.querySelector('.st-meta').textContent = 'Не получилось: сервер теста не ответил. Если страница открыта не через VPN или Cloudflare заблокирован — повтори позже.';
+  } finally { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = 'Запустить'; }
+});
+
 document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', async () => {
   const via = btn.dataset.speed, all = document.querySelectorAll('[data-speed]');
   all.forEach(x => x.disabled = true); btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Идёт тест, ~35 сек…';

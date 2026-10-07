@@ -125,9 +125,18 @@
 
       <section class="panel">
         <h2>Тест скорости</h2>
+        <div class="st st-dev" id="st-dev">
+          <div class="st-head"><span>Это устройство, через VPN</span><button class="btn small primary" id="bspeed">Запустить</button></div>
+          <div class="st-nums">
+            <div><span>Загрузка</span><b class="st-down">—</b></div>
+            <div><span>Отдача</span><b class="st-up">—</b></div>
+            <div><span>Задержка</span><b class="st-lat">—</b></div>
+          </div>
+          <small class="st-meta">Замер прямо в браузере: твой телефон или компьютер → роутер → VPN → ближайший сервер Cloudflare. Показывает настоящую скорость этого устройства.</small>
+        </div>
         <div class="st-grid">
           <div class="st" id="st-vpn">
-            <div class="st-head"><span>Через VPN</span><button class="btn small" data-speed="vpn">Запустить</button></div>
+            <div class="st-head"><span>С роутера, через VPN</span><button class="btn small" data-speed="vpn">Запустить</button></div>
             <div class="st-nums">
               <div><span>Загрузка</span><b class="st-down">—</b></div>
               <div><span>Отдача</span><b class="st-up">—</b></div>
@@ -136,7 +145,7 @@
             <small class="st-meta">Ещё не запускали.</small>
           </div>
           <div class="st" id="st-direct">
-            <div class="st-head"><span>Напрямую, без VPN</span><button class="btn small" data-speed="direct">Запустить</button></div>
+            <div class="st-head"><span>С роутера, без VPN</span><button class="btn small" data-speed="direct">Запустить</button></div>
             <div class="st-nums">
               <div><span>Загрузка</span><b class="st-down">—</b></div>
               <div><span>Отдача</span><b class="st-up">—</b></div>
