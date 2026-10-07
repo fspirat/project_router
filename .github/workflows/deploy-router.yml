@@ -19,7 +19,7 @@ jobs:
 
       - name: Checks
         run: |
-          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/www/cgi-bin/fspirat router/etc/init.d/fstunnel; do sh -n "$f"; done
+          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/www/cgi-bin/fspirat router/etc/init.d/fstunnel; do sh -n "$f"; done
 
       - name: SSH
         env:
@@ -45,6 +45,8 @@ jobs:
           push router/bin/fspirat-mcping  /usr/bin/fspirat-mcping
           push router/bin/fspirat-targets /usr/bin/fspirat-targets
           push router/bin/fspirat-svcping /usr/bin/fspirat-svcping
+          push router/bin/fspirat-fw      /usr/bin/fspirat-fw
+          ssh vps "$R '/usr/bin/fspirat-fw && nft list table inet fspirat >/dev/null && echo \"  таблица inet fspirat на месте\"'"
           ssh vps "$R 'grep -q fspirat-ping /etc/crontabs/root || { echo \"*/5 * * * * /usr/bin/fspirat-ping\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
 
       - name: Verify

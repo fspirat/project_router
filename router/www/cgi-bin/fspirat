@@ -16,6 +16,7 @@ bg() { ( setsid sh -c "$1" </dev/null >/dev/null 2>&1 & ); }
 
 action=$(echo "$QUERY_STRING" | sed -n 's/^.*action=\([a-z]*\).*$/\1/p')
 id=$(echo "$QUERY_STRING" | sed -n 's/^.*id=\([A-Za-z0-9]*\).*$/\1/p')
+mac=$(echo "$QUERY_STRING" | sed -n 's/^.*mac=\([0-9a-fA-F:]*\).*$/\1/p' | tr A-F a-f)
 
 cpu_sample() { awk '/^cpu /{t=0; for(i=2;i<=NF;i++) t+=$i; print t, $5+$6}' /proc/stat; }
 wan_dev() { d=$(ifstatus wan 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null); echo "${d:-wan}"; }
@@ -48,6 +49,7 @@ devices_json() {
   printf '['
   first=1
   wifi_clients > $DIR/wifi.txt
+  /usr/bin/fspirat-fw counters > $DIR/traf.txt 2>/dev/null     # «ip up dn» — байты с момента создания таблицы
   [ -f /tmp/dhcp.leases ] && while read -r exp mac ip name cid; do
     flags=$(awk -v ip="$ip" '$1==ip{print $3}' /proc/net/arp)
     [ "$flags" = "0x2" ] && on=true || on=false
@@ -57,9 +59,12 @@ devices_json() {
     if [ -n "$1" ]; then w=",\"band\":\"$1\",\"signal\":${2:-0},\"rate\":${3:-0}"; on=true
     elif [ $on = true ]; then w=',"band":"wired"'
     else w=''; fi
+    set -- $(awk -v ip="$ip" '$1==ip{print $2, $3; exit}' $DIR/traf.txt)
+    t=",\"up\":${1:-0},\"dn\":${2:-0}"
+    grep -qx "$mac" /etc/fspirat/blocked 2>/dev/null && t="$t,\"blocked\":true"
     [ $first -eq 1 ] || printf ','
     first=0
-    printf '{"name":"%s","ip":"%s","mac":"%s","online":%s%s}' "$n" "$ip" "$mac" "$on" "$w"
+    printf '{"name":"%s","ip":"%s","mac":"%s","online":%s%s%s}' "$n" "$ip" "$mac" "$on" "$w" "$t"
   done < /tmp/dhcp.leases
   printf ']'
 }
@@ -138,10 +143,12 @@ status_json() {
   sv=$(cat $DIR/speed_vpn.json 2>/dev/null); [ -n "$sv" ] || sv=null
   sd=$(cat $DIR/speed_direct.json 2>/dev/null); [ -n "$sd" ] || sd=null
   tg=$(cat $DIR/targets.json 2>/dev/null); [ -n "$tg" ] || tg=null
+  tl=$(cat /etc/fspirat/targets 2>/dev/null || cat $DIR/targets.default 2>/dev/null)
+  tl=$(echo "$tl" | jesc | awk 'NF{printf "%s\"%s\"", (n++?",":""), $0}')
   svc=$(for f in $DIR/svc/*.json; do [ -f "$f" ] && printf '"%s":%s,' "$(basename "$f" .json)" "$(cat "$f")"; done | sed 's/,$//')
   [ -f $DIR/svc/lock ] && kill -0 "$(cat $DIR/svc/lock)" 2>/dev/null && svcrun=true || svcrun=false
   hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
-  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
 }
 
 case "$action" in
@@ -185,6 +192,46 @@ case "$action" in
     rm -f $DIR/speed.lock
     echo "$res" > $DIR/speed_$via.json
     reply "200 OK" "$res" ;;
+  block|unblock)   # выключить / включить интернет устройству (fspirat-fw)
+    echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || reply "400 Bad Request" '{"error":"bad mac"}'
+    /usr/bin/fspirat-fw $action "$mac" || reply "500 Internal Server Error" '{"error":"nft"}'
+    echo "$(date '+%d.%m %H:%M') $([ $action = block ] && echo 'интернет выключен' || echo 'интернет включён'): $mac" >> $DIR/switch.log
+    reply "200 OK" "{\"ok\":true,\"mac\":\"$mac\",\"blocked\":$([ $action = block ] && echo true || echo false)}" ;;
+  settargets)   # свой список для пинга: list=вид~имя~адрес!вид~имя~адрес… (до 8 строк); пусто — список по умолчанию
+    res=$(lua - "$QUERY_STRING" <<'L'
+local q = arg[1]:match('[?&]?list=([^&]*)') or ''
+q = q:gsub('+', ' '):gsub('%%(%x%x)', function(h) return string.char(tonumber(h, 16)) end)
+local out, n = {}, 0
+for e in (q .. '!'):gmatch('([^!]*)!') do
+  if e ~= '' then
+    local k, name, a = e:match('^(%a+)~([^~]+)~([^~]+)$')
+    if not k then io.write('bad'); os.exit(0) end
+    name = name:gsub('^%s+', ''):gsub('%s+$', '')
+    -- имя: без служебных символов, до 40 байт (~20 русских букв)
+    if #name < 1 or #name > 40 or name:find('[%c|~!"<>&]') or name:find('\\', 1, true) then io.write('name'); os.exit(0) end
+    if k == 'web' then
+      if not a:match('^https?://[%w%.%-]+[%w%-%./_%?=]*$') or #a > 200 then io.write('url'); os.exit(0) end
+    elseif k == 'mc' then
+      local h, p = a:match('^([%w%.%-]+):?(%d*)$')
+      if not h or #h > 100 or (p ~= '' and (tonumber(p) < 1 or tonumber(p) > 65535)) then io.write('host'); os.exit(0) end
+      a = h .. ':' .. (p ~= '' and p or '25565')
+    else io.write('kind'); os.exit(0) end
+    n = n + 1; if n > 8 then io.write('many'); os.exit(0) end
+    out[#out + 1] = k .. '|' .. name .. '|' .. a
+  end
+end
+os.execute('mkdir -p /etc/fspirat')
+if #out == 0 then os.remove('/etc/fspirat/targets') else
+  local f = io.open('/etc/fspirat/targets.new', 'w'); f:write(table.concat(out, '\n') .. '\n'); f:close()
+  os.rename('/etc/fspirat/targets.new', '/etc/fspirat/targets')
+end
+io.write('ok')
+L
+)
+    [ "$res" = ok ] || reply "400 Bad Request" "{\"error\":\"$res\"}"
+    rm -f $DIR/svc/*.json
+    bg "/usr/bin/fspirat-targets; /usr/bin/fspirat-svcping"
+    reply "200 OK" "{\"ok\":true,\"list\":\"$(cat /etc/fspirat/targets 2>/dev/null | jesc | tr '\n' '\t')\"}" ;;
   reboot)
     bg "sleep 2; reboot"
     reply "200 OK" '{"ok":true}' ;;

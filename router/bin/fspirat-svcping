@@ -2,7 +2,7 @@
 # FSPIRAT: задержка до сервисов (YouTube, Discord, Minecraft…) через КАЖДЫЙ живой сервер, не только текущий.
 # Для сервера поднимается временный Xray с его настройками (конфиг собирает сам PassWall) на 127.0.0.1:10801,
 # через него меряет fspirat-targets, затем Xray закрывается. По одному серверу за раз (~30 МБ памяти, 2–5 с на сервер).
-# Результат: /tmp/fspirat/svc/<id узла>.json. Запуск: из fspirat-ping раз в 30 минут и по кнопке «Пинг всех» (CGI svcping).
+# Результат: /tmp/fspirat/svc/<id узла>.json, без VPN (строка «Напрямую (MyDirect)») — svc/direct.json. Запуск: из fspirat-ping раз в 30 минут и по кнопке «Пинг всех» (CGI svcping).
 DIR=/tmp/fspirat; SVC=$DIR/svc; P=10801
 mkdir -p $SVC
 if [ -f $SVC/lock ] && kill -0 "$(cat $SVC/lock)" 2>/dev/null; then exit 0; fi
@@ -11,22 +11,24 @@ X=""
 trap '[ -n "$X" ] && kill $X 2>/dev/null; rm -f $SVC/lock $DIR/svc-xray.conf' EXIT INT TERM
 SHUNT=9DxG2j8l
 CUR=$(uci -q get passwall2.$SHUNT.default_node)
+/usr/bin/fspirat-targets direct $SVC/direct.json >/dev/null 2>&1
 # живые узлы из последней проверки (ms > 0)
 for id in $(sed 's/},{/}\n{/g' $DIR/ping.json 2>/dev/null | grep -o '"id":"[A-Za-z0-9]*","name":"[^"]*","ms":[1-9][0-9]*' | cut -d'"' -f4); do
-  if [ "$id" = "$CUR" ]; then          # текущий — через основной SOCKS PassWall, временный Xray не нужен
-    /usr/bin/fspirat-targets 127.0.0.1:1070 $SVC/$id.json nodirect >/dev/null 2>&1
+  if [ "$id" = "$CUR" ]; then          # текущий меряет fspirat-ping раз в 5 минут — берём оттуда
+    cp $DIR/targets.json $SVC/$id.json 2>/dev/null
     continue
   fi
   lua /usr/lib/lua/luci/passwall2/util_xray.lua gen_config \
     "{\"node\":\"$id\",\"flag\":\"fsx\",\"local_socks_address\":\"127.0.0.1\",\"local_socks_port\":\"$P\",\"loglevel\":\"none\"}" > $DIR/svc-xray.conf 2>/dev/null || continue
   /usr/bin/xray run -c $DIR/svc-xray.conf >/dev/null 2>&1 & X=$!
   n=0; while [ $n -lt 6 ] && ! netstat -ltn 2>/dev/null | grep -q "127.0.0.1:$P "; do sleep 1; n=$((n+1)); done
-  netstat -ltn 2>/dev/null | grep -q "127.0.0.1:$P " && /usr/bin/fspirat-targets 127.0.0.1:$P $SVC/$id.json nodirect >/dev/null 2>&1
+  netstat -ltn 2>/dev/null | grep -q "127.0.0.1:$P " && /usr/bin/fspirat-targets 127.0.0.1:$P $SVC/$id.json >/dev/null 2>&1
   kill $X 2>/dev/null; wait $X 2>/dev/null; X=""
 done
 # старые результаты узлов, которых больше нет (подписка обновилась) — убрать
 for f in $SVC/*.json; do
   [ -f "$f" ] || continue
+  [ "$f" = $SVC/direct.json ] && continue
   grep -q "\"id\":\"$(basename "$f" .json)\"" $DIR/ping.json 2>/dev/null || rm -f "$f"
 done
 date +%s > $SVC/done

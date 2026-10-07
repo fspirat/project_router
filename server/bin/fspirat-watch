@@ -102,6 +102,47 @@ fi
 rm -f $S/offline_since
 put last_ok "$NOW"
 
+# Новое устройство в сети (MAC, которого ещё не было в списке DHCP). Первый запуск — только запоминаем всех.
+KNOWN=$S/known_macs
+macs=$(jq -r '.devices[]?.mac // empty | ascii_downcase' <<<"$J")
+if [ ! -f $KNOWN ]; then
+  sort -u <<<"$macs" > $KNOWN
+else
+  for m in $macs; do
+    grep -qxF "$m" $KNOWN && continue
+    echo "$m" >> $KNOWN
+    info=$(jq -r --arg m "$m" '[.devices[] | select((.mac | ascii_downcase) == $m)][0]
+      | [(if (.name // "") == "" then "без имени" else .name end), .ip,
+         ({"5g": "Wi-Fi 5 ГГц", "6g": "Wi-Fi 6 ГГц", "2g": "Wi-Fi 2,4 ГГц", "wired": "кабель"}[.band // ""] // "")]
+      | map(select(. != "")) | join(" · ")' <<<"$J")
+    send "📱 Новое устройство в сети: $info
+MAC $m
+Если оно чужое — выключи ему интернет на странице роутера: https://fspirat.online/router/#net"
+    event "$NOW" newdev "Новое устройство: $info ($m)"
+  done
+fi
+
+# Трафик устройств: роутер отдаёт байты с момента создания своей таблицы (fspirat-fw), сюда — прирост по дням.
+#   traffic.json: {"last": {mac: [up, dn]}, "days": {"ГГГГ-ММ-ДД": {mac: [up, dn]}}} — 62 дня
+if jq -e '[.devices[]? | select(.up != null)] | length > 0' >/dev/null 2>&1 <<<"$J"; then
+  [ -s $S/traffic.json ] || echo '{"last":{},"days":{}}' > $S/traffic.json
+  jq --argjson j "$J" --arg day "$(date +%F)" --arg cut "$(date -d '-62 days' +%F)" '
+    reduce ($j.devices[] | select(.up != null) | {m: (.mac | ascii_downcase), c: [.up, .dn]}) as $d (.;
+      (.last[$d.m] // [0, 0]) as $l
+      | [range(2) | if $d.c[.] >= $l[.] then $d.c[.] - $l[.] else $d.c[.] end] as $inc   # счётчик сбросился — считаем с нуля
+      | .last[$d.m] = $d.c
+      | .days[$day][$d.m] = [range(2) as $i | ((.days[$day][$d.m] // [0, 0])[$i] + $inc[$i])])
+    | .days |= with_entries(select(.key >= $cut))' $S/traffic.json > $S/traffic.tmp && mv $S/traffic.tmp $S/traffic.json
+fi
+
+# Задержка до сервисов через текущий сервер (роутер меряет раз в 5 минут): targets.tsv "время имя ms" — для графика
+tts=$(jq -r '.targets.ts // 0' <<<"$J")
+if [ "$tts" -gt "$(get targetslast || echo 0)" ] 2>/dev/null; then
+  jq -r --arg t "$tts" '.targets.list[]? | "\($t)\t\(.name)\t\(.vpn)"' <<<"$J" >> $S/targets.tsv
+  put targetslast "$tts"
+fi
+[ "$(date +%M)" = 00 ] && [ -f $S/targets.tsv ] && awk -F'\t' -v t=$((NOW - 35*86400)) '$1 >= t' $S/targets.tsv > $S/targets.tmp && mv $S/targets.tmp $S/targets.tsv
+
 # Перезагрузка роутера: время работы стало меньше прежнего
 up=$(jq -r '.sys.uptime // 0' <<<"$J")
 [ -n "$(get uptime)" ] && [ "$up" -lt "$(get uptime)" ] && event "$((NOW - up))" reboot "Роутер перезагрузился"

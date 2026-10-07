@@ -17,6 +17,7 @@ if [ -f $DIR/lock ] && kill -0 "$(cat $DIR/lock)" 2>/dev/null; then exit 0; fi
 echo $$ > $DIR/lock
 trap 'rm -f $DIR/lock' EXIT INT TERM
 rm -f $DIR/res/*
+/usr/bin/fspirat-fw 2>/dev/null       # таблица счётчиков и блокировок (после перезагрузки её нет)
 
 ping_node() {
   ms=$(tcping -q -c 1 -i 1 -t 2 -p "$3" "$2" 2>&1 | grep -o 'time=[0-9]*' | head -1 | cut -d= -f2)

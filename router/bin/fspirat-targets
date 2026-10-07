@@ -1,13 +1,14 @@
 #!/bin/sh
 # FSPIRAT: задержка до важных сервисов «как у устройств дома» — через PassWall (SOCKS 1070, те же правила Split).
 #   web — время ответа на HTTP-запрос по уже открытому TLS-соединению (чистая задержка, без рукопожатий)
-#   mc  — Server List Ping, как в списке серверов Minecraft (fspirat-mcping), плюс напрямую для сравнения
-# Список: /etc/fspirat/targets (строки «вид|имя|адрес»), иначе — по умолчанию ниже. Результат: /tmp/fspirat/targets.json
-# Запуск: fspirat-targets [socks host:port] [файл результата] [nodirect] — так его зовёт fspirat-svcping для других серверов
+#   mc  — Server List Ping, как в списке серверов Minecraft (fspirat-mcping)
+# Список: /etc/fspirat/targets (строки «вид|имя|адрес»; правится из панели), иначе — по умолчанию ниже.
+# Запуск: fspirat-targets [socks host:port | direct] [файл результата]. Результат по умолчанию: /tmp/fspirat/targets.json
+#   direct — без VPN (как сайты из MyDirect); тогда ещё «base» — TCP-пинг до ya.ru
 DIR=/tmp/fspirat; mkdir -p $DIR
 SOCKS=${1:-127.0.0.1:1070}
 OUT=${2:-$DIR/targets.json}
-NODIRECT=$3
+if [ "$SOCKS" = direct ]; then PX=""; MCPX=""; else PX="-x socks5h://$SOCKS"; MCPX=$SOCKS; fi
 LIST=/etc/fspirat/targets
 [ -s $LIST ] || LIST=$DIR/targets.default
 [ -s $DIR/targets.default ] || cat > $DIR/targets.default <<'L'
@@ -19,20 +20,21 @@ L
 jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
 web_ms() { # лучшая из двух: ttfb - tls
   for k in 1 2; do
-    curl -s -m 8 -x socks5h://$SOCKS -o /dev/null -w '%{http_code} %{time_appconnect} %{time_starttransfer}\n' "$1"
+    curl -s -m 8 $PX -o /dev/null -w '%{http_code} %{time_appconnect} %{time_starttransfer}\n' "$1"
   done | awk '$1 != "000" && $3 > $2 {ms = int(($3 - $2) * 1000 + 0.5); if (!b || ms < b) b = ms} END {print b + 0}'
 }
 out=""
 while IFS='|' read -r kind name addr; do
   case "$kind" in web|mc) ;; *) continue ;; esac
   if [ "$kind" = web ]; then
-    v=$(web_ms "$addr"); d=null; host=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##')
+    v=$(web_ms "$addr"); host=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##')
   else
     host=${addr%:*}; port=${addr##*:}; [ "$port" = "$addr" ] && port=25565
-    v=$(/usr/bin/fspirat-mcping "$host" "$port" $SOCKS)
-    if [ -n "$NODIRECT" ]; then d=null; else d=$(/usr/bin/fspirat-mcping "$host" "$port"); fi
+    v=$(/usr/bin/fspirat-mcping "$host" "$port" $MCPX)
   fi
-  out="$out${out:+,}{\"kind\":\"$kind\",\"name\":\"$(echo "$name" | jesc)\",\"host\":\"$(echo "$host" | jesc)\",\"vpn\":${v:-0},\"direct\":${d:-null}}"
+  out="$out${out:+,}{\"kind\":\"$kind\",\"name\":\"$(echo "$name" | jesc)\",\"host\":\"$(echo "$host" | jesc)\",\"vpn\":${v:-0}}"
 done < $LIST
-echo "{\"ts\":$(date +%s),\"list\":[$out]}" > $OUT.tmp && mv $OUT.tmp $OUT
+base=""
+[ -z "$PX" ] && base=",\"base\":$(for k in 1 2 3; do curl -s -m 4 -o /dev/null -w '%{time_connect}\n' https://ya.ru/; done | awk '$1 > 0 {ms = int($1 * 1000 + 0.5); if (!b || ms < b) b = ms} END {print b + 0}')"
+echo "{\"ts\":$(date +%s)$base,\"list\":[$out]}" > $OUT.tmp && mv $OUT.tmp $OUT
 cat $OUT

@@ -72,6 +72,43 @@ foreach (array_slice(@file(watch('events.tsv'), FILE_IGNORE_NEW_LINES) ?: [], -3
 }
 usort($events, fn($a, $b) => $b[0] <=> $a[0]);
 
+// Задержка до сервисов (targets.tsv "время<TAB>имя<TAB>ms", 0 — не ответил): {имя: [[время, ms], …]}, усреднение — как у истории
+$tpoints = [];
+$fh = @fopen(watch('targets.tsv'), 'r');
+while ($fh && ($line = fgets($fh)) !== false) {
+    $p = explode("\t", rtrim($line, "\n"));
+    if (count($p) < 3 || (int)$p[0] < $from) continue;
+    $b = $step ? intdiv((int)$p[0], $step) * $step : (int)$p[0];
+    $tpoints[$p[1]][$b][] = (int)$p[2];
+}
+if ($fh) fclose($fh);
+foreach ($tpoints as $n => $bs) {
+    ksort($bs);
+    $out = [];
+    foreach ($bs as $b => $v) {
+        $ok = array_filter($v, fn($x) => $x > 0);
+        $out[] = [$step ? $b + intdiv($step, 2) : $b, $ok ? (int)round(array_sum($ok) / count($ok)) : 0];
+    }
+    $tpoints[$n] = $out;
+}
+
+// Трафик устройств (traffic.json от fspirat-watch): сегодня и с начала месяца, [отдано, скачано] в байтах
+$traffic = [];
+$tj = json_decode((string)@file_get_contents(watch('traffic.json')), true);
+if (is_array($tj['days'] ?? null)) {
+    $today = date('Y-m-d'); $month = date('Y-m');
+    foreach ($tj['days'] as $day => $macs) {
+        if (!str_starts_with((string)$day, $month) || !is_array($macs)) continue;
+        foreach ($macs as $m => $v) {
+            $t = &$traffic[$m];
+            $t ??= ['d' => [0, 0], 'm' => [0, 0]];
+            $t['m'][0] += (int)$v[0]; $t['m'][1] += (int)$v[1];
+            if ($day === $today) { $t['d'][0] += (int)$v[0]; $t['d'][1] += (int)$v[1]; }
+            unset($t);
+        }
+    }
+}
+
 $since = (int)trim((string)@file_get_contents(watch('offline_since')));
 out([
     'now' => $now,
@@ -89,5 +126,7 @@ out([
     'offline_since' => $since ?: null,     // роутер не отвечает серверу (по данным fspirat-watch)
     'last_ok' => (int)trim((string)@file_get_contents(watch('last_ok'))) ?: null,
     'names' => (object)names(),
+    'tpoints' => (object)$tpoints,     // задержка до сервисов через текущий сервер
+    'traffic' => (object)$traffic,     // трафик устройств по MAC
     'mtg' => json_decode((string)@file_get_contents(watch('mtg.json')), true) ?: null,   // Telegram-прокси (fspirat-watch)
 ]);

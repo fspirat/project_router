@@ -1,0 +1,65 @@
+#!/bin/sh
+# FSPIRAT: своя таблица nftables «inet fspirat» (PassWall и fw4 её не трогают):
+#   • счётчики трафика каждого устройства по IP (up — от устройства в интернет, dn — обратно); страница берёт их
+#     в статусе, сервер (fspirat-watch) складывает в «сегодня / за месяц»
+#   • «выключить интернет» устройству: MAC в наборе block → всё, кроме самого роутера (DHCP, DNS), отбрасывается.
+#     Стоит раньше PassWall (prerouting −300), поэтому VPN это не обходит. Список MAC — /etc/fspirat/blocked.
+# fspirat-fw             — создать таблицу, если её нет (после перезагрузки; зовёт fspirat-ping раз в 5 минут)
+# fspirat-fw block MAC   / fspirat-fw unblock MAC
+# fspirat-fw counters    — «ip up dn» по каждому устройству
+LAN=br-lan
+NET=$(uci -q get network.lan.ipaddr); NET=${NET:-192.168.7.1/24}; NET=${NET%.*}.0/${NET#*/}
+BL=/etc/fspirat/blocked
+mkdir -p /etc/fspirat; touch $BL
+
+ensure() {
+  nft list table inet fspirat >/dev/null 2>&1 && return 0
+  els=$(grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' $BL | tr '\n' ',' | sed 's/,$//')
+  nft -f - <<N
+table inet fspirat {
+  set up {
+    type ipv4_addr; size 512; flags dynamic; counter
+  }
+  set dn {
+    type ipv4_addr; size 512; flags dynamic; counter
+  }
+  set block {
+    type ether_addr; ${els:+elements = { $els }}
+  }
+  chain pre {
+    type filter hook prerouting priority -300; policy accept;
+    iifname "$LAN" ether saddr @block jump blk
+    iifname "$LAN" ip saddr $NET ip daddr != $NET update @up { ip saddr }
+  }
+  chain blk {
+    fib daddr type { local, broadcast, multicast } return
+    drop
+  }
+  chain post {
+    type filter hook postrouting priority 300; policy accept;
+    oifname "$LAN" ip daddr $NET ip saddr != $NET update @dn { ip daddr }
+  }
+}
+N
+}
+
+mac_ok() { echo "$1" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; }
+
+case "$1" in
+  block|unblock)
+    m=$(echo "$2" | tr A-F a-f); mac_ok "$m" || { echo "bad mac" >&2; exit 2; }
+    ensure
+    grep -vx "$m" $BL > $BL.tmp
+    if [ "$1" = block ]; then
+      echo "$m" >> $BL.tmp; nft add element inet fspirat block "{ $m }"
+    else
+      nft delete element inet fspirat block "{ $m }" 2>/dev/null
+    fi
+    mv $BL.tmp $BL ;;
+  counters)
+    ensure
+    for s in up dn; do
+      nft list set inet fspirat $s 2>/dev/null | tr ',{}' '   ' | awk -v s=$s '{for(i=1;i<=NF;i++){ if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) ip=$i; if($i=="bytes" && ip!="") { print ip, s, $(i+1); ip="" } }}'
+    done | awk '{ if($2=="up") u[$1]=$3; else d[$1]=$3; a[$1]=1 } END { for(i in a) print i, u[i]+0, d[i]+0 }' ;;
+  *) ensure ;;
+esac
