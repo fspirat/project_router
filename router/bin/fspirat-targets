@@ -11,11 +11,11 @@ OUT=${2:-$DIR/targets.json}
 if [ "$SOCKS" = direct ]; then PX=""; MCPX=""; else PX="-x socks5h://$SOCKS"; MCPX=$SOCKS; fi
 LIST=/etc/fspirat/targets
 [ -s $LIST ] || LIST=$DIR/targets.default
-[ -s $DIR/targets.default ] || cat > $DIR/targets.default <<'L'
+cat > $DIR/targets.default <<'L'
 web|YouTube|https://www.youtube.com/generate_204
 web|Discord|https://discord.com/api/v10/gateway
 mc|AgeMagic|mc.agemagic.net:25565
-mc|LostVale|fixfuckingdpi.lostvale.fun:25565
+mc|AgeM(DPI)|fixfuckingdpi.lostvale.fun:25565
 L
 jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
 # Адрес ведёт внутрь (роутер, домашняя сеть, loopback, link-local, CGNAT)? Проверяем то, во что имя превращается сейчас:

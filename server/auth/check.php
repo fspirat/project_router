@@ -40,8 +40,9 @@ try {
     }
     http_response_code(204);
 } catch (Throwable $e) {
+    // сбой базы входа — это не «вход истёк»: 500, страница покажет ошибку и повторит запрос, на страницу входа не выкинет
     error_log('fspirat-router-auth: ' . $e->getMessage());
-    http_response_code(401);
+    http_response_code(500);
     exit;
 }
 // Уведомление — после ответа nginx: действие не ждёт Telegram

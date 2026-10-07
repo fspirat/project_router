@@ -8,7 +8,7 @@ mkdir -p $DIR
 TOKEN=$(cat /etc/fspirat.token 2>/dev/null)
 REQ_TOKEN=${HTTP_COOKIE#*fspirat_token=}; REQ_TOKEN=${REQ_TOKEN%%;*}
 
-reply() { echo "Status: $1"; echo "Content-Type: application/json"; echo "Cache-Control: no-store"; echo; echo "$2"; exit 0; }
+reply() { printf "Status: %s\nContent-Type: application/json\nCache-Control: no-store\n\n%s\n" "$1" "$2"; exit 0; }
 jesc() { tr -d '\000-\011\013-\037' | sed 's/\\/\\\\/g;s/"/\\"/g'; }    # без управляющих символов (кроме \n): имена из DHCP задаёт само устройство
 bg() { ( setsid sh -c "$1" </dev/null >/dev/null 2>&1 & ); }
 
@@ -16,13 +16,18 @@ bg() { ( setsid sh -c "$1" </dev/null >/dev/null 2>&1 & ); }
 
 # Параметр запроса по точному имени (не «pcid=» вместо «id=»); значения дальше проверяются по своему формату
 param() { echo "&$QUERY_STRING" | sed -n "s/^.*&$1=\([^&]*\).*$/\1/p" | head -1; }
+# Раскодировать %XX (имена сервисов: скобки, русские буквы) — дальше сравнивается только с уже известными именами
+urldec() { lua - "$1" <<'L'
+io.write((arg[1]:gsub("+", " "):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)))
+L
+}
 action=$(param action | grep -E '^[a-z]{1,20}$')
 id=$(param id | grep -E '^[A-Za-z0-9]{1,32}$')
 mac=$(param mac | sed 's/%3[Aa]/:/g' | tr A-F a-f | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$')
 
 # Чтение — GET; всё, что меняет состояние или запускает работу, — только POST (nginx пускает POST только с CSRF-токеном).
 case "$action" in
-  status|net|pingone) ;;
+  status|net|pingone|mydirect) ;;
   *) [ "$REQUEST_METHOD" = POST ] || reply "405 Method Not Allowed" '{"error":"method"}' ;;
 esac
 
@@ -70,6 +75,10 @@ devices_json() {
     set -- $(awk -v ip="$ip" '$1==ip{print $2, $3; exit}' $DIR/traf.txt)
     t=",\"up\":${1:-0},\"dn\":${2:-0}"
     grep -qx "$mac" /etc/fspirat/blocked 2>/dev/null && t="$t,\"blocked\":true"
+    grep -qx "$mac" /tmp/fspirat/sched_blocked 2>/dev/null && t="$t,\"sblocked\":true"
+    [ -n "$(uci -q get passwall2.fsp_$(echo $mac | tr -d :))" ] && t="$t,\"direct\":true"
+    sc=$(awk -v m="$mac" '$1==m{printf "%s-%s", $2, $3; exit}' /etc/fspirat/schedule 2>/dev/null)
+    [ -n "$sc" ] && t="$t,\"sched\":\"$sc\""
     [ $first -eq 1 ] || printf ','
     first=0
     printf '{"name":"%s","ip":"%s","mac":"%s","online":%s%s%s}' "$n" "$ip" "$mac" "$on" "$w" "$t"
@@ -156,7 +165,9 @@ status_json() {
   svc=$(for f in $DIR/svc/*.json; do [ -f "$f" ] && printf '"%s":%s,' "$(basename "$f" .json)" "$(cat "$f")"; done | sed 's/,$//')
   [ -f $DIR/svc/lock ] && kill -0 "$(cat $DIR/svc/lock)" 2>/dev/null && svcrun=true || svcrun=false
   hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
-  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+  sub=$(cat $DIR/sub.json 2>/dev/null); [ -n "$sub" ] || sub=null
+  sd=$(awk -F'|' 'NF{printf "%s\"%s\"", (n++?",":""), $1}' /etc/fspirat/svc_direct 2>/dev/null)
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"sub\":$sub,\"svc_direct\":[$sd],\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
 }
 
 case "$action" in
@@ -208,6 +219,84 @@ case "$action" in
     /usr/bin/fspirat-fw $action "$mac" || reply "500 Internal Server Error" '{"error":"nft"}'
     echo "$(date '+%d.%m %H:%M') $([ $action = block ] && echo 'интернет выключен' || echo 'интернет включён'): $mac" >> $DIR/switch.log
     reply "200 OK" "{\"ok\":true,\"mac\":\"$mac\",\"blocked\":$([ $action = block ] && echo true || echo false)}" ;;
+  direct)   # устройство мимо VPN (правило доступа PassWall без узла = напрямую); перезапуск PassWall ~5 с
+    [ -n "$mac" ] || reply "400 Bad Request" '{"error":"bad mac"}'
+    sid=fsp_$(echo "$mac" | tr -d :)
+    if [ "$(param on)" = 1 ]; then
+      uci set passwall2.$sid=acl_rule; uci set passwall2.$sid.enabled=1; uci set passwall2.$sid.remarks="FSPIRAT: мимо VPN"
+      uci -q delete passwall2.$sid.sources; uci add_list passwall2.$sid.sources="$mac"
+    else uci -q delete passwall2.$sid; fi
+    [ -n "$(uci show passwall2 | grep '=acl_rule$')" ] && uci set passwall2.@global[0].acl_enable=1 || uci set passwall2.@global[0].acl_enable=0
+    uci commit passwall2
+    echo "$(date '+%d.%m %H:%M') $([ "$(param on)" = 1 ] && echo 'мимо VPN' || echo 'снова через VPN'): $mac" >> $DIR/switch.log
+    bg "/etc/init.d/passwall2 restart"
+    reply "200 OK" "{\"ok\":true,\"direct\":$([ "$(param on)" = 1 ] && echo true || echo false)}" ;;
+  schedule)   # расписание интернета устройству: off/on — ЧЧММ; пустой off — убрать
+    [ -n "$mac" ] || reply "400 Bad Request" '{"error":"bad mac"}'
+    off=$(param off); on=$(param on); mkdir -p /etc/fspirat; touch /etc/fspirat/schedule
+    grep -v "^$mac " /etc/fspirat/schedule > /etc/fspirat/schedule.tmp
+    if [ -n "$off" ]; then
+      for v in "$off" "$on"; do echo "$v" | grep -qE '^([01][0-9]|2[0-3])[0-5][0-9]$' || { rm -f /etc/fspirat/schedule.tmp; reply "400 Bad Request" '{"error":"time"}'; }; done
+      [ "$off" != "$on" ] || { rm -f /etc/fspirat/schedule.tmp; reply "400 Bad Request" '{"error":"time"}'; }
+      echo "$mac $off $on" >> /etc/fspirat/schedule.tmp
+    fi
+    mv /etc/fspirat/schedule.tmp /etc/fspirat/schedule
+    /usr/bin/fspirat-fw schedule
+    reply "200 OK" '{"ok":true}' ;;
+  mydirect)   # список «напрямую» (MyDirect): домены; added — добавленные из панели
+    rule=$(uci show passwall2 | grep "\.remarks='MyDirect'" | head -1 | cut -d. -f2)
+    [ -n "$rule" ] || reply "500 Internal Server Error" '{"error":"no rule"}'
+    dl=$(uci -q get passwall2.$rule.domain_list | tr -d '\r' | jesc | awk 'NF{printf "%s\"%s\"", (n++?",":""), $0}')
+    ad=$(cat /etc/fspirat/mydirect_added 2>/dev/null | awk 'NF{printf "%s\"%s\"", (n++?",":""), $0}')
+    reply "200 OK" "{\"domains\":[$dl],\"added\":[$ad]}" ;;
+  diradd|dirdel)   # добавить / убрать домен в MyDirect (перезапуск PassWall ~5 с)
+    d=$(param d | tr A-Z a-z)
+    echo "$d" | grep -qE '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$' && [ ${#d} -le 100 ] || reply "400 Bad Request" '{"error":"domain"}'
+    rule=$(uci show passwall2 | grep "\.remarks='MyDirect'" | head -1 | cut -d. -f2)
+    [ -n "$rule" ] || reply "500 Internal Server Error" '{"error":"no rule"}'
+    cur=$(uci -q get passwall2.$rule.domain_list | tr -d '\r')
+    if [ $action = diradd ]; then
+      echo "$cur" | grep -qx "$d" && reply "200 OK" '{"ok":true,"same":true}'
+      uci set passwall2.$rule.domain_list="$(printf '%s\n%s' "$d" "$cur")"
+      echo "$d" >> /etc/fspirat/mydirect_added
+    else
+      echo "$cur" | grep -qx "$d" || reply "200 OK" '{"ok":true,"same":true}'
+      uci set passwall2.$rule.domain_list="$(echo "$cur" | grep -vx "$d")"
+      grep -vx "$d" /etc/fspirat/mydirect_added > /etc/fspirat/mydirect_added.tmp 2>/dev/null; mv /etc/fspirat/mydirect_added.tmp /etc/fspirat/mydirect_added
+    fi
+    uci commit passwall2
+    echo "$(date '+%d.%m %H:%M') MyDirect $([ $action = diradd ] && echo '+' || echo '−') $d" >> $DIR/switch.log
+    bg "/etc/init.d/passwall2 restart"
+    reply "200 OK" '{"ok":true}' ;;
+  svcdirect)   # сервис из списка — напрямую: сайт — его домен в MyDirect, Minecraft — IP сервера в MyDirect (игра идёт по IP)
+    name=$(urldec "$(param name)")
+    line=$(cat /etc/fspirat/targets 2>/dev/null || cat $DIR/targets.default) ; line=$(echo "$line" | awk -F'|' -v n="$name" '$2==n{print; exit}')
+    [ -n "$line" ] || reply "400 Bad Request" '{"error":"no target"}'
+    kind=${line%%|*}; addr=${line##*|}
+    rule=$(uci show passwall2 | grep "\.remarks='MyDirect'" | head -1 | cut -d. -f2)
+    [ -n "$rule" ] || reply "500 Internal Server Error" '{"error":"no rule"}'
+    SD=/etc/fspirat/svc_direct; touch $SD
+    old=$(awk -F'|' -v n="$name" '$1==n{print $3}' $SD)      # что добавляли раньше (домен или IP через пробел)
+    dl=$(uci -q get passwall2.$rule.domain_list | tr -d '\r'); il=$(uci -q get passwall2.$rule.ip_list | tr -d '\r')
+    for x in $old; do dl=$(echo "$dl" | grep -vx "$x"); il=$(echo "$il" | grep -vx "$x/32"); done
+    awk -F'|' -v n="$name" '$1!=n' $SD > $SD.tmp
+    if [ "$(param on)" = 1 ]; then
+      if [ "$kind" = web ]; then
+        h=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##; s#^www\.##'); new=$h; dl=$(printf '%s\n%s' "$h" "$dl")
+      else
+        h=${addr%:*}; new=$(nslookup "$h" 2>/dev/null | awk '/^Name:/{n=1} n && /^Address/ && $NF !~ /:/ {print $NF}' | sort -u | tr '\n' ' ')
+        [ -n "$new" ] || { rm -f $SD.tmp; reply "400 Bad Request" '{"error":"resolve"}'; }
+        for x in $new; do il=$(printf '%s/32\n%s' "$x" "$il"); done
+      fi
+      echo "$name|$kind|$new" >> $SD.tmp
+    fi
+    mv $SD.tmp $SD
+    uci set passwall2.$rule.domain_list="$(echo "$dl" | sed '/^$/d')"
+    uci set passwall2.$rule.ip_list="$(echo "$il" | sed '/^$/d')"
+    uci commit passwall2
+    echo "$(date '+%d.%m %H:%M') $name: $([ "$(param on)" = 1 ] && echo 'напрямую' || echo 'через VPN')" >> $DIR/switch.log
+    bg "/etc/init.d/passwall2 restart"
+    reply "200 OK" '{"ok":true}' ;;
   settargets)   # свой список для пинга: list=вид~имя~адрес!вид~имя~адрес… (до 8 строк); пусто — список по умолчанию
     res=$(lua - "$QUERY_STRING" <<'L'
 local q = ('&' .. arg[1]):match('&list=([^&]*)') or ''

@@ -34,9 +34,13 @@ function fsr_db(): PDO
 {
     static $db = null;
     if ($db) return $db;
+    // ATTR_TIMEOUT — ждать до 10 с, если базу держит другой запрос (страница шлёт несколько запросов сразу).
+    // Раньше journal_mode=WAL выполнялся до busy_timeout и сразу падал «database is locked» → check.php отвечал 401
+    // и страница отправляла на вход. Режим WAL сохраняется в самой базе — включаем, только если ещё не включён.
     $db = new PDO('sqlite:' . fsr_dir() . '/auth.sqlite', null, null, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
-    $db->exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;');
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_TIMEOUT => 10]);
+    $db->exec('PRAGMA busy_timeout=10000');
+    if (strtolower((string)$db->query('PRAGMA journal_mode')->fetchColumn()) !== 'wal') $db->exec('PRAGMA journal_mode=WAL');
     $db->exec('CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, created INTEGER NOT NULL, seen INTEGER NOT NULL,
                  ttl INTEGER NOT NULL, ip TEXT, ua TEXT)');
     $db->exec('CREATE TABLE IF NOT EXISTS fails(ip TEXT NOT NULL, ts INTEGER NOT NULL)');
@@ -111,6 +115,7 @@ function fsr_locked(): int
     $st = fsr_db()->prepare('SELECT COUNT(*) n, MAX(ts) last FROM fails WHERE ip = ? AND ts > ?');
     $st->execute([fsr_ip(), time() - FSR_LOCK_SEC]);
     $r = $st->fetch();
+    $st->closeCursor();
     return (int)$r['n'] >= FSR_MAX_FAILS ? max(1, (int)$r['last'] + FSR_LOCK_SEC - time()) : 0;
 }
 
@@ -156,6 +161,7 @@ function fsr_session_valid(): bool
     $st = $db->prepare('SELECT seen, ttl FROM sessions WHERE hash = ?');
     $st->execute([hash('sha256', $tok)]);
     $r = $st->fetch();
+    $st->closeCursor();          // иначе чтение держит снимок базы и UPDATE ниже сразу получает «database is locked»
     if (!$r || $r['seen'] + $r['ttl'] < time()) return false;
     if (time() - $r['seen'] > 300) $db->prepare('UPDATE sessions SET seen = ? WHERE hash = ?')->execute([time(), hash('sha256', $tok)]);
     return true;
@@ -262,6 +268,7 @@ function fsr_device_ok(): bool
     $st = $db->prepare('SELECT seen FROM devices WHERE hash = ?');
     $st->execute([hash('sha256', $tok)]);
     $seen = $st->fetchColumn();
+    $st->closeCursor();
     if ($seen === false || (int)$seen + FSR_DEV_TTL < time()) return false;
     $db->prepare('UPDATE devices SET seen = ? WHERE hash = ?')->execute([time(), hash('sha256', $tok)]);
     fsr_aux_cookie(FSR_DEV_COOKIE, $tok, time() + FSR_DEV_TTL);
@@ -316,6 +323,7 @@ function fsr_code_check(string $code): ?array
     $st = $db->prepare('SELECT code, remember, next FROM codes WHERE hash = ? AND created >= ? AND tries < ?');
     $st->execute([$h, time() - FSR_CODE_TTL, FSR_CODE_TRIES]);
     $r = $st->fetch();
+    $st->closeCursor();
     if (!$r) return null;
     if (!preg_match('/^\d{6}$/', $code) || !password_verify($code, $r['code'])) {
         $db->prepare('UPDATE codes SET tries = tries + 1 WHERE hash = ?')->execute([$h]);

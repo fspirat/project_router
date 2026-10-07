@@ -19,7 +19,7 @@ jobs:
 
       - name: Checks
         run: |
-          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/www/cgi-bin/fspirat router/etc/init.d/fstunnel; do sh -n "$f"; done
+          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/www/cgi-bin/fspirat router/etc/init.d/fstunnel; do sh -n "$f"; done
 
       - name: SSH
         env:
@@ -46,9 +46,14 @@ jobs:
           push router/bin/fspirat-targets /usr/bin/fspirat-targets
           push router/bin/fspirat-svcping /usr/bin/fspirat-svcping
           push router/bin/fspirat-fw      /usr/bin/fspirat-fw
+          push router/bin/fspirat-sub     /usr/bin/fspirat-sub
           ssh vps "$R 'rm -f /usr/bin/fspirat-wake /usr/bin/fspirat-pc /etc/fspirat/pc.mac /etc/fspirat/pc.token'"   # «Разбудить/Усыпить» убраны
           ssh vps "$R '/usr/bin/fspirat-fw && nft list table inet fspirat >/dev/null && echo \"  таблица inet fspirat на месте\"'"
           ssh vps "$R 'grep -q fspirat-ping /etc/crontabs/root || { echo \"*/5 * * * * /usr/bin/fspirat-ping\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
+          # расписание интернета устройствам — раз в минуту; cron без записи «cron.err» о каждом запуске (это не ошибки)
+          ssh vps "$R 'c=0; grep -q \"fspirat-fw schedule\" /etc/crontabs/root || { echo \"* * * * * /usr/bin/fspirat-fw schedule\" >> /etc/crontabs/root; c=1; }
+            [ \"\$(uci -q get system.@system[0].cronloglevel)\" = 9 ] || { uci set system.@system[0].cronloglevel=9; uci commit system; c=1; }
+            [ \$c = 1 ] && /etc/init.d/cron restart; crontab -l'"
 
       - name: Verify
         run: |

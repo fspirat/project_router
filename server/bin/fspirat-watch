@@ -209,3 +209,49 @@ pct=$(jq -r '.sys | if .disk_total > 0 then (.disk_used * 100 / .disk_total | fl
 if [ "$pct" -ge 90 ] && [ "$(get flash)" != 1 ]; then
   send "💾 Флеш-память роутера заполнена на $pct%. Новые пакеты скоро перестанут ставиться."; put flash 1
 elif [ "$pct" -lt 85 ]; then put flash 0; fi
+
+# Тест скорости: каждый новый результат — в историю для графика (speed.tsv "время вид загрузка отдача задержка"), 180 дней
+for via in vpn direct; do
+  row=$(jq -r --arg v $via '.speed[$v] // empty | select(.ts) | "\(.ts) \($v) \(.down // 0) \(.up // 0) \(.latency // 0)"' <<<"$J")
+  [ -n "$row" ] || continue
+  ts=${row%% *}
+  [ "$ts" -gt "$(get speedlast_$via || echo 0)" ] 2>/dev/null && { echo "$row" >> $S/speed.tsv; put speedlast_$via "$ts"; }
+done
+[ "$(date +%H%M)" = 0300 ] && [ -f $S/speed.tsv ] && awk -v t=$((NOW - 180*86400)) '$1 >= t' $S/speed.tsv > $S/speed.tmp && mv $S/speed.tmp $S/speed.tsv
+
+# Подписка VPN (роутер берёт из заголовков подписки nosok): за 3 дня до конца — напоминание раз в день
+exp=$(jq -r '.sub.expire // 0' <<<"$J")
+if [ "${exp:-0}" -gt 0 ] 2>/dev/null; then
+  left=$(( (exp - NOW) / 86400 ))
+  if [ "$left" -le 3 ] && [ "$(get sub_warned)" != "$(date +%F)" ]; then
+    send "⏳ Подписка VPN заканчивается через $left дн. — $(TZ=Europe/Samara date -d @$exp '+%d.%m.%Y'). Продли, иначе VPN дома перестанет работать."
+    put sub_warned "$(date +%F)"
+  fi
+fi
+
+# Отчёт за сутки — каждый день в 9:00 по Самаре (05:00 UTC на сервере)
+if [ "$(date -u +%H%M)" = 0500 ] && [ "$(get report_day)" != "$(date +%F)" ]; then
+  put report_day "$(date +%F)"
+  from=$((NOW - 86400))
+  read -r okn avg fails offm <<<"$(awk -v t=$from '$1 >= t { if ($2 > 0) { n++; s += $2 } else if ($2 == 0) f++; else o++ } END { printf "%d %d %d %d", n, (n ? s / n : 0), f, o }' $S/history.tsv 2>/dev/null)"
+  sw=$(awk -F'\t' -v t=$from '$1 >= t && ($2 == "auto" || $2 == "manual")' $S/events.tsv 2>/dev/null | wc -l)
+  nd=$(awk -F'\t' -v t=$from '$1 >= t && $2 == "newdev"' $S/events.tsv 2>/dev/null | wc -l)
+  yday=$(date -u -d yesterday +%F)
+  NAMES=/var/lib/fspirat-router-auth/names.json
+  top=$(jq -r --arg d "$yday" --argjson j "$J" --slurpfile n <(cat $NAMES 2>/dev/null || echo '{}') '
+    (.days[$d] // {}) | to_entries | sort_by(-.value[1]) | .[:3][]
+    | .key as $m | (($n[0][$m]) // ([$j.devices[]? | select((.mac | ascii_downcase) == $m) | .name][0]) // $m) as $nm
+    | "  • \(if $nm == "" then $m else $nm end): ↓\(.value[1] / 1073741824 * 10 | floor / 10) ГБ"' $S/traffic.json 2>/dev/null)
+  sub=$(jq -r 'if .sub.expire then "Подписка: до \(.sub.expire | strftime("%d.%m")), осталось \(((.sub.expire - now) / 86400) | floor) дн." else "" end' <<<"$J")
+  msg="📊 Роутер за сутки
+Сервер: $name, задержка $(jq -r '.ping.real // 0' <<<"$J") ms
+Связь: средняя задержка ${avg:-0} ms, сбоев VPN ${fails:-0}, без связи ${offm:-0} мин
+Работает без перезагрузки: $(( $(jq -r '.sys.uptime // 0' <<<"$J") / 86400 )) дн.
+Смен сервера: $sw · новых устройств: $nd"
+  [ -n "$top" ] && msg="$msg
+Больше всех скачали вчера:
+$top"
+  [ -n "$sub" ] && msg="$msg
+$sub"
+  send "$msg"
+fi

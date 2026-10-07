@@ -106,6 +106,9 @@ if [ $FAILS -ge $FAILS_TO_SWITCH ]; then
   fi
 fi
 
+# 4б. Подписка VPN (срок и трафик) — раз в час и если ещё нет данных
+if [ ! -s $DIR/sub.json ] || [ $(( $(date +%M | sed 's/^0//') )) -lt 5 ]; then ( setsid /usr/bin/fspirat-sub </dev/null >/dev/null 2>&1 & ); fi
+
 # 5. Задержка до сервисов (YouTube, Discord, серверы Minecraft) — для блока под текущим сервером
 /usr/bin/fspirat-targets >/dev/null 2>&1
 # 6. То же через все живые серверы (в фоне, раз в 30 минут; по кнопке «Пинг всех» — сразу)

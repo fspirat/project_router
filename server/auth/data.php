@@ -112,6 +112,14 @@ if (is_array($tj['days'] ?? null)) {
     }
 }
 
+// История теста скорости (speed.tsv "время вид загрузка отдача задержка") за 90 дней: [[время, "vpn"|"direct", загрузка, отдача, задержка], …]
+$speed = [];
+foreach (@file(watch('speed.tsv'), FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+    $p = explode(' ', $line);
+    if (count($p) >= 5 && (int)$p[0] >= $now - 90 * 86400 && in_array($p[1], ['vpn', 'direct'], true))
+        $speed[] = [(int)$p[0], $p[1], (int)$p[2], (int)$p[3], (int)$p[4]];
+}
+
 $since = (int)trim((string)@file_get_contents(watch('offline_since')));
 out([
     'now' => $now,
@@ -131,5 +139,6 @@ out([
     'names' => (object)names(),
     'tpoints' => (object)$tpoints,     // задержка до сервисов через текущий сервер
     'traffic' => (object)$traffic,     // трафик устройств по MAC
+    'speed' => $speed,                 // история теста скорости
     'mtg' => json_decode((string)@file_get_contents(watch('mtg.json')), true) ?: null,   // Telegram-прокси (fspirat-watch)
 ]);

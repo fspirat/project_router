@@ -1,0 +1,21 @@
+#!/bin/sh
+# FSPIRAT: данные подписки VPN (nosok) из заголовков ответа подписки → /tmp/fspirat/sub.json
+#   subscription-userinfo: upload=…; download=…; total=… (0 — без лимита); expire=… (unix-время)
+#   profile-title: название подписки (бывает base64:…)
+# Ссылка подписки (это доступ) никуда не печатается. Запуск: из fspirat-ping раз в час; результат — в статусе панели.
+DIR=/tmp/fspirat; mkdir -p $DIR
+S=$(uci show passwall2 2>/dev/null | grep '=subscribe_list$' | head -1 | cut -d. -f2 | cut -d= -f1)
+URL=$(uci -q get passwall2.$S.url)
+[ -n "$URL" ] || exit 0
+for via in "-x socks5h://127.0.0.1:1070" ""; do               # сначала через VPN, не вышло — напрямую
+  H=$(curl -s -m 20 $via -A clash -D - -o /dev/null "$URL" 2>/dev/null | tr -d '\r')
+  echo "$H" | grep -qi '^subscription-userinfo:' && break
+done
+ui=$(echo "$H" | grep -i '^subscription-userinfo:' | head -1 | cut -d: -f2-)
+[ -n "$ui" ] || exit 0
+val() { v=$(echo "$ui" | tr ';' '\n' | sed -n "s/^ *$1 *= *\([0-9]*\).*/\1/p" | head -1); echo "${v:-0}"; }
+title=$(echo "$H" | grep -i '^profile-title:' | head -1 | cut -d: -f2- | sed 's/^ *//')
+case "$title" in base64:*) title=$(echo "${title#base64:}" | base64 -d 2>/dev/null) ;; esac
+title=$(printf '%s' "$title" | tr -d '"\\\000-\037')
+printf '{"ts":%s,"up":%s,"down":%s,"total":%s,"expire":%s,"title":"%s"}\n' "$(date +%s)" "$(val upload)" "$(val download)" "$(val total)" "$(val expire)" "$title" > $DIR/sub.json.tmp \
+  && mv $DIR/sub.json.tmp $DIR/sub.json
