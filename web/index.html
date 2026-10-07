@@ -21,7 +21,9 @@
     src:url("https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1/dist/TwemojiCountryFlags.woff2") format("woff2");
     font-display:swap;
   }
-  /* Если на главной подключён свой Minecraft-шрифт, вставь сюда его @font-face с font-family: "Minecraft" */
+  /* Цифры — из Minecraft-шрифта сайта (/admin/mc.ttf): в Press Start 2P мелкие «6» и «9» похожи на «G» и «g».
+     Только цифры (unicode-range), буквы остаются Press Start 2P; size-adjust — чтобы цифры были с буквы ростом. */
+  @font-face{font-family:"Minecraft";src:url("/admin/mc.ttf") format("truetype");font-display:swap;unicode-range:U+0030-0039;size-adjust:110%}
   :root{
     --bg:#050605; --panel:#0c110a; --edge:#1d2b15;
     --green:#7fbf3a; --lime:#9be052; --text:#d9e7cd; --dim:#7f8e74;
