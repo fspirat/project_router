@@ -153,7 +153,9 @@
   .srv.is-off .srv-name{color:var(--dim)}
   .srv-name{overflow-wrap:anywhere}
   .srv .svc{display:block;margin-top:3px;font-size:11.5px;color:var(--dim);letter-spacing:.01em}
-  .srv .svc span{white-space:nowrap} .srv .svc b{font-weight:500;color:var(--text)}
+  .srv .svc span{white-space:nowrap}
+  .si{width:13px;height:10px;vertical-align:-1px;margin-right:4px}
+  .tg-keys .si{width:15px;height:11px;margin-right:0} .srv .svc b{font-weight:500;color:var(--text)}
   .srv .svc b.ok{color:var(--green)} .srv .svc b.mid{color:var(--amber)} .srv .svc b.slow{color:var(--red)}
   .srv .ping{min-width:118px;justify-content:flex-end}
   .srv{grid-template-columns:1fr auto auto auto}
@@ -544,7 +546,7 @@ function tColor(name){
 function renderTargets(t){
   t = t || (state && state.targets);
   const list = (t && t.list) || [];
-  $('#tg-list').innerHTML = list.map(x => `<li title="${esc(x.host)}"><i style="background:${tColor(x.name)}"></i>${x.kind === 'mc' ? '⛏ ' : ''}${esc(x.name)} ${x.vpn ? `<b>${x.vpn}</b> ms` : '<b style="color:var(--red)">нет ответа</b>'}</li>`).join('')
+  $('#tg-list').innerHTML = list.map(x => `<li title="${esc(x.host)}"><i style="background:${tColor(x.name)}"></i>${svcIcon(x)}${esc(x.name)} ${x.vpn ? `<b>${x.vpn}</b> ms` : '<b style="color:var(--red)">нет ответа</b>'}</li>`).join('')
     || '<li>Замеров ещё не было.</li>';
   if(t && t.ts) $('#tg-refresh').title = 'Перемерить (последний замер ' + ago(t.ts) + ')';
   renderTChart();
@@ -748,13 +750,24 @@ function renderDevices(list){
 }
 
 /* Под сервером — тонкая строка задержки до сервисов через него (fspirat-svcping, раз в 30 мин). */
+/* Значки сервисов (по адресу): YouTube, Discord; Minecraft — ⛏ */
+const ICONS = {
+  youtube: '<svg class="si" viewBox="0 0 16 12" aria-hidden="true"><rect width="16" height="12" rx="3" fill="#ff0033"/><path d="M6.2 3.3v5.4L10.9 6z" fill="#fff"/></svg>',
+  discord: '<svg class="si" viewBox="0 0 127.14 96.36" aria-hidden="true"><path fill="#5865f2" d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z"/></svg>',
+};
+function svcIcon(x){
+  const h = (x.host || '').toLowerCase(), n = (x.name || '').toLowerCase();
+  if(/(^|\.)(youtube\.com|youtu\.be|googlevideo\.com)$/.test(h) || n === 'youtube') return ICONS.youtube;
+  if(/(^|\.)(discord\.com|discord\.gg|discordapp\.com)$/.test(h) || n === 'discord') return ICONS.discord;
+  return x.kind === 'mc' ? '⛏' : '';
+}
 const svcMs = ms => ms > 0 ? `<b class="${ms < 120 ? 'ok' : ms < 250 ? 'mid' : 'slow'}">${ms}</b>` : '<b class="slow">—</b>';
 function svcLine(n){
   const r = state && (n.id === state.current && state.targets ? state.targets : state.svc && state.svc[n.id]);
   if(!n.ms) return '';
   if(!r || !r.list) return state && state.svc_running ? '<small class="svc">измеряю…</small>' : '';
   return `<small class="svc" title="Задержка через этот сервер · ${esc(ago(r.ts))}">${r.list.map(x =>
-    `<span>${x.kind === 'mc' ? '⛏' : ''}${esc(x.name)} ${svcMs(x.vpn)}</span>`).join(' · ')}</small>`;
+    `<span>${svcIcon(x)}${esc(x.name)} ${svcMs(x.vpn)}</span>`).join(' · ')}</small>`;
 }
 function srvRow(n, cur){
   return `<li class="srv${n.id === cur ? ' is-cur' : ''}${n.ms ? '' : ' is-off'}">
