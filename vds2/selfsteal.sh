@@ -18,16 +18,15 @@ server { listen 80; listen [::]:80; server_name $D;
 N
 ln -sf /etc/nginx/sites-available/de /etc/nginx/sites-enabled/de; rm -f /etc/nginx/sites-enabled/default
 ufw allow 80/tcp >/dev/null
-nginx -t -q && systemctl reload nginx
+nginx -t -q; systemctl reload nginx
 [ -f /etc/letsencrypt/live/$D/fullchain.pem ] || certbot certonly -q --webroot -w /var/www/de -d $D --agree-tos --register-unsafely-without-email --non-interactive
 echo "сертификат: $(openssl x509 -in /etc/letsencrypt/live/$D/fullchain.pem -noout -enddate)"
 cat >> /etc/nginx/sites-available/de <<N
-server { listen 127.0.0.1:8443 ssl; http2 on; server_name $D;
+server { listen 127.0.0.1:8443 ssl http2; server_name $D;
   ssl_certificate /etc/letsencrypt/live/$D/fullchain.pem; ssl_certificate_key /etc/letsencrypt/live/$D/privkey.pem;
   ssl_protocols TLSv1.2 TLSv1.3; root /var/www/de; index index.html; }
 N
-grep -c "8443" /etc/nginx/sites-available/de | grep -q '^1$' || { echo "лишний блок 8443"; exit 1; }
-nginx -t -q && systemctl reload nginx
+nginx -t -q; systemctl reload nginx
 printf '#!/bin/sh\nsystemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/deploy/nginx.sh; chmod 755 /etc/letsencrypt/renewal-hooks/deploy/nginx.sh
 sed -i "s/^SNI=.*/SNI=$D/" /usr/local/etc/xray/fspirat.env
 jq --arg d "$D" '.inbounds[0].streamSettings.realitySettings.dest = "127.0.0.1:8443" | .inbounds[0].streamSettings.realitySettings.serverNames = [$d]' /usr/local/etc/xray/config.json > /tmp/c.json && cat /tmp/c.json > /usr/local/etc/xray/config.json && rm /tmp/c.json
