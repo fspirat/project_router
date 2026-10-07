@@ -140,6 +140,9 @@
   .srv.is-cur{border-color:var(--green);background:#122009}
   .srv.is-off .srv-name{color:var(--dim)}
   .srv-name{overflow-wrap:anywhere}
+  .srv .svc{display:block;margin-top:3px;font-size:11.5px;color:var(--dim);letter-spacing:.01em}
+  .srv .svc span{white-space:nowrap} .srv .svc b{font-weight:500;color:var(--text)}
+  .srv .svc b.ok{color:var(--green)} .srv .svc b.mid{color:var(--amber)} .srv .svc b.slow{color:var(--red)}
   .srv .ping{min-width:118px;justify-content:flex-end}
   .srv{grid-template-columns:1fr auto auto auto}
   .rp{font:inherit;font-size:15px;line-height:1;color:var(--dim);background:none;border:2px solid transparent;cursor:pointer;padding:4px 6px}
@@ -641,9 +644,18 @@ function renderDevices(list){
   $('#devices').innerHTML = list.length ? html : '<p class="empty">Нет устройств с выданным адресом.</p>';
 }
 
+/* Под сервером — тонкая строка задержки до сервисов через него (fspirat-svcping, раз в 30 мин). */
+const svcMs = ms => ms > 0 ? `<b class="${ms < 120 ? 'ok' : ms < 250 ? 'mid' : 'slow'}">${ms}</b>` : '<b class="slow">—</b>';
+function svcLine(n){
+  const r = state && state.svc && state.svc[n.id];
+  if(!n.ms) return '';
+  if(!r || !r.list) return state && state.svc_running ? '<small class="svc">измеряю…</small>' : '';
+  return `<small class="svc" title="Задержка через этот сервер · ${esc(ago(r.ts))}">${r.list.map(x =>
+    `<span>${x.kind === 'mc' ? '⛏' : ''}${esc(x.name)} ${svcMs(x.vpn)}</span>`).join(' · ')}</small>`;
+}
 function srvRow(n, cur){
   return `<li class="srv${n.id === cur ? ' is-cur' : ''}${n.ms ? '' : ' is-off'}">
-    <span class="srv-name">${esc(n.name)}</span>
+    <span class="srv-name">${esc(n.name)}${svcLine(n)}</span>
     <span class="ping">${pingHtml(n.ms)}</span>
     <button class="rp" data-ping="${esc(n.id)}" title="Пингануть этот сервер" aria-label="Пингануть ${esc(n.name)}">↻</button>
     ${n.id === cur ? '<span class="tag">Сейчас</span>'

@@ -107,3 +107,7 @@ fi
 
 # 5. Задержка до сервисов (YouTube, Discord, серверы Minecraft) — для блока под текущим сервером
 /usr/bin/fspirat-targets >/dev/null 2>&1
+# 6. То же через все живые серверы (в фоне, раз в 30 минут; по кнопке «Пинг всех» — сразу)
+if [ "$1" = all ] || [ $(( $(date +%M | sed 's/^0//') % 30 )) -lt 5 ]; then
+  ( setsid /usr/bin/fspirat-svcping </dev/null >/dev/null 2>&1 & )
+fi

@@ -3,8 +3,11 @@
 #   web — время ответа на HTTP-запрос по уже открытому TLS-соединению (чистая задержка, без рукопожатий)
 #   mc  — Server List Ping, как в списке серверов Minecraft (fspirat-mcping), плюс напрямую для сравнения
 # Список: /etc/fspirat/targets (строки «вид|имя|адрес»), иначе — по умолчанию ниже. Результат: /tmp/fspirat/targets.json
+# Запуск: fspirat-targets [socks host:port] [файл результата] [nodirect] — так его зовёт fspirat-svcping для других серверов
 DIR=/tmp/fspirat; mkdir -p $DIR
-SOCKS=127.0.0.1:1070
+SOCKS=${1:-127.0.0.1:1070}
+OUT=${2:-$DIR/targets.json}
+NODIRECT=$3
 LIST=/etc/fspirat/targets
 [ -s $LIST ] || LIST=$DIR/targets.default
 [ -s $DIR/targets.default ] || cat > $DIR/targets.default <<'L'
@@ -26,9 +29,10 @@ while IFS='|' read -r kind name addr; do
     v=$(web_ms "$addr"); d=null; host=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##')
   else
     host=${addr%:*}; port=${addr##*:}; [ "$port" = "$addr" ] && port=25565
-    v=$(/usr/bin/fspirat-mcping "$host" "$port" $SOCKS); d=$(/usr/bin/fspirat-mcping "$host" "$port")
+    v=$(/usr/bin/fspirat-mcping "$host" "$port" $SOCKS)
+    if [ -n "$NODIRECT" ]; then d=null; else d=$(/usr/bin/fspirat-mcping "$host" "$port"); fi
   fi
   out="$out${out:+,}{\"kind\":\"$kind\",\"name\":\"$(echo "$name" | jesc)\",\"host\":\"$(echo "$host" | jesc)\",\"vpn\":${v:-0},\"direct\":${d:-null}}"
 done < $LIST
-echo "{\"ts\":$(date +%s),\"list\":[$out]}" > $DIR/targets.json.tmp && mv $DIR/targets.json.tmp $DIR/targets.json
-cat $DIR/targets.json
+echo "{\"ts\":$(date +%s),\"list\":[$out]}" > $OUT.tmp && mv $OUT.tmp $OUT
+cat $OUT
