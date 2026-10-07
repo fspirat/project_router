@@ -152,10 +152,85 @@ function cmd_report(): void {
     @touch(fsr_dir() . '/report_now');       // fspirat-watch (cron, раз в минуту) пришлёт отчёт
     say('📊 Отчёт придёт в течение минуты.');
 }
+function cmd_ping(): void {
+    global $h;
+    say('↻ Перемеряю все серверы и сервисы, около 20 секунд…');
+    $s = router('ping', [], true, 90);
+    if (!$s || !isset($s['ping'])) { say(down_msg()); return; }
+    $nodes = $s['ping']['nodes'] ?? [];
+    usort($nodes, fn($a, $b) => [!($a['own'] ?? false), $a['ms'] <= 0, $a['ms']] <=> [!($b['own'] ?? false), $b['ms'] <= 0, $b['ms']]);
+    $svc = fn($id) => ($id === ($s['current'] ?? '') ? ($s['targets'] ?? null) : ($s['svc'][$id] ?? null))['list'] ?? [];
+    $lines = array_map(function ($n) use ($s, $h, $svc) {
+        $v = implode(' · ', array_map(fn($x) => $x['vpn'] > 0 ? $x['vpn'] : '—', $svc($n['id'])));
+        return (($n['id'] === ($s['current'] ?? '')) ? '▶️ ' : '') . $h(trim($n['name'])) . ' — <b>' . ($n['ms'] > 0 ? $n['ms'] . ' ms' : 'нет ответа') . '</b>' . ($v ? "\n      $v" : '');
+    }, $nodes);
+    $names = array_map(fn($x) => $x['name'], $s['targets']['list'] ?? []);
+    $best = [];
+    foreach ($names as $i => $nm) {
+        $b = null; foreach ($nodes as $n) { $v = $svc($n['id'])[$i]['vpn'] ?? 0; if ($v > 0 && $n['ms'] > 0 && (!$b || $v < $b[1])) $b = [$n, $v]; }
+        if ($b) $best[] = $h($nm) . ': ' . $h(trim($b[0]['name'])) . ' ' . $b[1] . ' ms';
+    }
+    say("<b>Пинг всех</b> (▶️ — сейчас)\nсервисы: " . $h(implode(' · ', $names)) . "\n\n" . implode("\n", $lines)
+        . ($best ? "\n\n<b>Лучший для:</b>\n" . implode("\n", $best) : '') . "\n\nПодключить — /servers");
+}
+function cmd_log(): void {
+    global $h;
+    $ev = array_slice(@file(WATCH . '/events.tsv', FILE_IGNORE_NEW_LINES) ?: [], -10);
+    if (!$ev) { say('Журнал пока пуст.'); return; }
+    $ico = ['offline' => '🔴', 'vpn_down' => '🔴', 'online' => '🟢', 'vpn_up' => '🟢', 'auto' => '🟡', 'reboot' => '🟡', 'newdev' => '🆕', 'manual' => '🌍'];
+    $tz = new DateTimeZone('Europe/Samara');
+    $out = array_map(function ($l) use ($h, $ico, $tz) {
+        [$t, $k, $txt] = array_pad(explode("\t", $l, 3), 3, '');
+        return ($ico[$k] ?? '▫️') . ' ' . (new DateTime('@' . (int)$t))->setTimezone($tz)->format('d.m H:i') . ' — ' . $h($txt);
+    }, array_reverse($ev));
+    say("<b>Журнал</b> (последние 10)\n" . implode("\n", $out));
+}
+function cmd_router(): void {
+    global $h;
+    $s = router('status');
+    if (!$s) { say(down_msg()); return; }
+    $y = $s['sys'] ?? []; $mb = fn($kb) => round($kb / 1024) . ' МБ';
+    $pc = fn($a, $b) => $b ? round($a / $b * 100) . '%' : '—';
+    $up = (int)($y['uptime'] ?? 0);
+    say('<b>' . $h($y['model'] ?? 'Роутер') . "</b>\n" . $h($y['fw'] ?? '') . "\n"
+        . 'Процессор: ' . ($y['cpu'] ?? '?') . '% · нагрузка ' . $h($y['load'] ?? '') . ' · ядер ' . ($y['cores'] ?? '?') . "\n"
+        . 'Память: ' . $mb(($y['mem_total'] ?? 0) - ($y['mem_avail'] ?? 0)) . ' из ' . $mb($y['mem_total'] ?? 0) . ' (' . $pc(($y['mem_total'] ?? 0) - ($y['mem_avail'] ?? 0), $y['mem_total'] ?? 0) . ")\n"
+        . 'Флеш: ' . $pc($y['disk_used'] ?? 0, $y['disk_total'] ?? 0) . ' · временные файлы: ' . $pc($y['tmp_used'] ?? 0, $y['tmp_total'] ?? 0) . "\n"
+        . 'Температура: ' . (isset($y['temp']) ? $y['temp'] . ' °C' : 'нет датчика') . "\n"
+        . 'Без перезагрузки: ' . floor($up / 86400) . ' д ' . floor($up % 86400 / 3600) . " ч\n"
+        . 'Интернет сейчас: ↓' . mbit($y['net']['rx'] ?? 0) . ' ↑' . mbit($y['net']['tx'] ?? 0) . "\n"
+        . 'С включения: ↓' . gb($y['net']['rx_total'] ?? 0) . ' ↑' . gb($y['net']['tx_total'] ?? 0));
+}
+function cmd_tgproxy(): void {
+    global $cb;
+    $m = json_decode((string)@file_get_contents(WATCH . '/mtg.json'), true);
+    if (!$m) { say('Нет данных о Telegram-прокси.'); return; }
+    $stale = time() - (int)($m['ts'] ?? 0) > 300; $up = ($m['active'] ?? false) && !$stale;
+    $since = (int)($m['since'] ?? 0) ? floor((time() - $m['since']) / 3600) : 0;
+    say(($up ? '🟢 Telegram-прокси работает' : ($stale ? '⚪ Нет свежих данных' : '🔴 Telegram-прокси не работает')) . "\n"
+        . 'tg.fspirat.online, порт 443' . ($up ? "\nПодключений сейчас: " . (int)$m['conns'] . ($since ? "\nБез перезапуска: " . floor($since / 24) . ' д ' . ($since % 24) . ' ч' : '') : ''),
+        [[['text' => '📨 Прислать ссылку для подключения', 'callback_data' => $cb('tgl')]]]);
+}
+function cmd_vds(): void {
+    global $h;
+    $v = json_decode((string)@file_get_contents(WATCH . '/vds.json'), true);
+    if (!$v) { say('Данных о серверах пока нет — они собираются раз в 5 минут.'); return; }
+    $one = function (string $title, ?array $x, string $note) {
+        if (!$x) return "<b>$title</b>\n🔴 не отвечает по SSH";
+        $mem = $x['mem_total'] ? round(($x['mem_total'] - $x['mem_avail']) / $x['mem_total'] * 100) : 0;
+        return "<b>$title</b>\n" . (($x['xray'] ?? '') === 'active' ? '🟢 VPN (Xray) работает' : '🔴 VPN (Xray): ' . htmlspecialchars($x['xray'] ?: 'не запущен')) . ' · соединений ' . (int)$x['conns'] . "\n"
+            . 'Нагрузка ' . htmlspecialchars($x['load']) . ' на ' . (int)$x['cores'] . ' ядр. · память ' . $mem . '% из ' . round($x['mem_total'] / 1048576, 1) . ' ГБ · диск ' . htmlspecialchars($x['disk']) . "\n"
+            . 'Без перезагрузки ' . floor($x['up'] / 86400) . ' д · трафик с запуска ↓' . gb($x['rx']) . ' ↑' . gb($x['tx']) . ($note ? "\n$note" : '');
+    };
+    $age = time() - (int)($v['ts'] ?? 0);
+    say($one('🇩🇪 Германия (fspirat) · 64.188.83.100', $v['de'] ?? null, '') . "\n\n"
+        . $one('🇳🇱 Нидерланды (fspirat) · сервер сайта', $v['nl'] ?? null, 'Здесь же сайт, панель и Telegram-прокси') . "\n\n"
+        . 'Данные ' . ($age < 90 ? 'свежие' : floor($age / 60) . ' мин назад') . '.');
+}
 function cmd_help(): void {
     say("<b>Команды роутера</b>\n/status — состояние VPN, сервера, сервисов\n/servers — серверы с пингом, подключение кнопкой\n/vpn <i>название</i> — подключить сервер, например /vpn германия\n"
         . "/devices — кто в сети и сколько скачал\n/block <i>имя</i> — выключить интернет устройству\n/unblock <i>имя</i> — включить обратно\n/speed — тест скорости без VPN\n"
-        . "/restart — перезапустить VPN\n/reboot — перезагрузить роутер\n/report — отчёт за сутки сейчас\n\nОпасные команды — с кнопкой подтверждения.");
+        . "/ping — перемерить все серверы и сервисы\n/log — журнал событий\n/router — нагрузка, память, температура\n/update — обновить подписку nosok\n/tgproxy — Telegram-прокси\n/vds — твои серверы в Германии и Нидерландах\n/restart — перезапустить VPN\n/reboot — перезагрузить роутер\n/report — отчёт за сутки сейчас\n\nОпасные команды — с кнопкой подтверждения.");
 }
 
 /* ---------- кнопки ---------- */
@@ -184,6 +259,14 @@ function on_button(array $q): void {
         case 'restart':
             $r = router('restart', [], true);
             edit($mid, $r && ($r['ok'] ?? false) ? '🔁 VPN перезапускается, связь вернётся через несколько секунд.' : '⚠️ Не получилось: ' . $h($r['error'] ?? 'роутер не отвечает'));
+            break;
+        case 'upd':
+            $r = router('update', [], true);
+            edit($mid, $r && ($r['ok'] ?? false) ? '📥 Обновляю подписку nosok — список серверов обновится примерно через минуту.' : '⚠️ Не получилось: ' . $h($r['error'] ?? 'роутер не отвечает'));
+            break;
+        case 'tgl':
+            @touch(fsr_dir() . '/tglink_now');
+            edit($mid, '📨 Ссылка придёт отдельным сообщением в течение минуты.');
             break;
         case 'reboot':
             $r = router('reboot', [], true);
@@ -214,5 +297,11 @@ match ($c) {
     '/restart' => cmd_confirm('restart', 'Перезапустить VPN?', 'Связь через VPN пропадёт на несколько секунд.', 'Да, перезапустить'),
     '/reboot' => cmd_confirm('reboot', '⚠️ Перезагрузить роутер?', 'Интернет дома пропадёт на 1–2 минуты.', '🔴 Да, перезагрузить'),
     '/report' => cmd_report(),
+    '/ping' => cmd_ping(),
+    '/log' => cmd_log(),
+    '/router' => cmd_router(),
+    '/update' => cmd_confirm('upd', 'Обновить подписку nosok?', 'Список серверов скачается заново, это займёт до минуты. VPN не перезапускается.', 'Да, обновить'),
+    '/tgproxy' => cmd_tgproxy(),
+    '/vds' => cmd_vds(),
     default => cmd_help(),
 };

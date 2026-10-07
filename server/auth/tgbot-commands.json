@@ -1,12 +1,72 @@
-{"commands":[
- {"command":"status","description":"Состояние VPN, сервера и сервисов"},
- {"command":"servers","description":"Серверы с пингом, подключение кнопкой"},
- {"command":"vpn","description":"Подключить сервер: /vpn германия"},
- {"command":"devices","description":"Кто в сети и сколько скачал"},
- {"command":"block","description":"Выключить интернет устройству: /block имя"},
- {"command":"unblock","description":"Включить интернет устройству: /unblock имя"},
- {"command":"speed","description":"Тест скорости без VPN"},
- {"command":"restart","description":"Перезапустить VPN"},
- {"command":"reboot","description":"Перезагрузить роутер"},
- {"command":"report","description":"Отчёт за сутки сейчас"},
- {"command":"help","description":"Список команд"}]}
+{
+ "commands": [
+  {
+   "command": "status",
+   "description": "Состояние VPN, сервера и сервисов"
+  },
+  {
+   "command": "servers",
+   "description": "Серверы с пингом, подключение кнопкой"
+  },
+  {
+   "command": "vpn",
+   "description": "Подключить сервер: /vpn германия"
+  },
+  {
+   "command": "devices",
+   "description": "Кто в сети и сколько скачал"
+  },
+  {
+   "command": "block",
+   "description": "Выключить интернет устройству: /block имя"
+  },
+  {
+   "command": "unblock",
+   "description": "Включить интернет устройству: /unblock имя"
+  },
+  {
+   "command": "speed",
+   "description": "Тест скорости без VPN"
+  },
+  {
+   "command": "ping",
+   "description": "Перемерить все серверы и сервисы"
+  },
+  {
+   "command": "log",
+   "description": "Журнал событий"
+  },
+  {
+   "command": "router",
+   "description": "Нагрузка, память, температура роутера"
+  },
+  {
+   "command": "update",
+   "description": "Обновить подписку nosok"
+  },
+  {
+   "command": "tgproxy",
+   "description": "Telegram-прокси: состояние и ссылка"
+  },
+  {
+   "command": "vds",
+   "description": "Твои серверы: Германия и Нидерланды"
+  },
+  {
+   "command": "restart",
+   "description": "Перезапустить VPN"
+  },
+  {
+   "command": "reboot",
+   "description": "Перезагрузить роутер"
+  },
+  {
+   "command": "report",
+   "description": "Отчёт за сутки сейчас"
+  },
+  {
+   "command": "help",
+   "description": "Список команд"
+  }
+ ]
+}

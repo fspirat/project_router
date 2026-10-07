@@ -1,0 +1,9 @@
+#!/bin/bash
+# Состояние сервера одной строкой JSON (для /vds в Telegram-боте). Запускается локально и на VDS через ssh (bash -s).
+dev=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+read -r rx tx <<<"$(awk -v d="$dev:" '$1==d{print $2, $10}' /proc/net/dev)"
+printf '{"up":%s,"load":"%s","cores":%s,"mem_total":%s,"mem_avail":%s,"disk":"%s","rx":%s,"tx":%s,"xray":"%s","conns":%s}\n' \
+  "$(cut -d. -f1 /proc/uptime)" "$(cut -d' ' -f1-3 /proc/loadavg)" "$(nproc)" \
+  "$(awk '/^MemTotal/{print $2}' /proc/meminfo)" "$(awk '/^MemAvailable/{print $2}' /proc/meminfo)" \
+  "$(df -k / | awk 'NR==2{print $5}')" "${rx:-0}" "${tx:-0}" "$(systemctl is-active xray 2>/dev/null)" \
+  "$(ss -Htn state established '( sport = :443 or sport = :10445 )' 2>/dev/null | wc -l)"

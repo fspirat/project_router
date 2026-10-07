@@ -37,12 +37,12 @@ jobs:
       - name: Checks
         run: |
           for f in server/auth/*.php; do php -l "$f"; done
-          bash -n server/bin/fspirat-watch
+          bash -n server/bin/fspirat-watch && bash -n server/bin/fspirat-vdsstat
           python3 -m py_compile server/auth/nginx-apply.py
 
       - name: Upload files
         run: |
-          tar -C server -czf - auth bin/fspirat-watch cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
+          tar -C server -czf - auth bin/fspirat-watch bin/fspirat-vdsstat cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
 
       - name: Install
         run: |
@@ -59,6 +59,7 @@ jobs:
             install -m 644 $D/logrotate/fspirat-router-auth /etc/logrotate.d/fspirat-router-auth
             # наблюдатель и cron
             tr -d "\r" < $D/bin/fspirat-watch > /usr/local/bin/fspirat-watch && chmod 755 /usr/local/bin/fspirat-watch
+            tr -d "\r" < $D/bin/fspirat-vdsstat > /usr/local/bin/fspirat-vdsstat && chmod 755 /usr/local/bin/fspirat-vdsstat
             tr -d "\r" < $D/cron.d/fspirat-watch > /etc/cron.d/fspirat-watch
             # fail2ban (без лога jail 3x-ipl он не стартует целиком)
             mkdir -p /var/log/x-ui && touch /var/log/x-ui/3xipl.log
