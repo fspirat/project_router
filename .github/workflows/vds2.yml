@@ -59,7 +59,7 @@ jobs:
           eval "$(ssh -n -i /root/.ssh/vds2_key -o BatchMode=yes root@$VDS 'cat /usr/local/etc/xray/fspirat.env' | grep -E '^(UUID|PUBK|SID|SNI)=[A-Za-z0-9._:-]+$')"
           [ -n "$UUID" ] && [ -n "$PUBK" ] && [ -n "$SID" ] || { echo "нет ключей с VDS"; exit 1; }
           R="ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes root@127.0.0.1"
-          printf 'S=fspirat_de\nuci -q delete passwall2.$S || true\nuci set passwall2.$S=nodes\n%s\nuci commit passwall2\n' "$(for kv in "remarks=🇩🇪 Германия (fspirat)" type=Xray protocol=vless "address=$VDS" port=443 "uuid=$UUID" encryption=none flow=xtls-rprx-vision tls=1 reality=1 "reality_publicKey=$PUBK" "reality_shortId=$SID" reality_spiderX=/ "tls_serverName=$SNI" fingerprint=chrome utls=1 transport=raw tcp_guise=none tls_allowInsecure=0 timeout=60 group=nosok add_mode=0; do printf "uci set passwall2.\$S.%s='%s'\n" "${kv%%=*}" "${kv#*=}"; done)" | $R 'sh -s'
-          $R "uci show passwall2.fspirat_de | grep -vE 'uuid|reality_publicKey|reality_shortId'"
+          printf 'S=fspiratDE\nuci -q delete passwall2.$S || true\nuci set passwall2.$S=nodes\n%s\nuci commit passwall2\n' "$(for kv in "remarks=🇩🇪 Германия (fspirat)" type=Xray protocol=vless "address=$VDS" port=443 "uuid=$UUID" encryption=none flow=xtls-rprx-vision tls=1 reality=1 "reality_publicKey=$PUBK" "reality_shortId=$SID" reality_spiderX=/ "tls_serverName=$SNI" fingerprint=chrome utls=1 transport=raw tcp_guise=none tls_allowInsecure=0 timeout=60 group=nosok add_mode=0; do printf "uci set passwall2.\$S.%s='%s'\n" "${kv%%=*}" "${kv#*=}"; done)" | $R 'sh -s'
+          $R "uci show passwall2.fspiratDE | grep -vE 'uuid|reality_publicKey|reality_shortId'"
           echo "проверка через узел (tcping):"; $R "tcping -q -c 2 -p 443 $VDS 2>&1 | tail -2"
           SH
