@@ -20,13 +20,19 @@
     <a class="btn" href="https://router.fspirat.online" target="_blank" rel="noopener">Открыть LuCI</a>
   </header>
 
+  <section class="overall" id="overall" aria-live="polite">
+    <b class="ov-title" id="ov-title">ПРОВЕРЯЮ…</b>
+    <ul class="ov-items" id="ov-items"></ul>
+    <small class="ov-upd" id="ov-upd"></small>
+  </section>
+
   <section class="panel topbar">
     <div class="controls">
       <button class="btn primary" id="ping-btn">Проверить серверы</button>
       <button class="btn" data-act="restart">Перезапустить VPN</button>
       <button class="btn" data-act="update">Обновить подписку</button>
       <button class="btn danger" data-act="reboot">Перезагрузить роутер</button>
-      <a class="btn small" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
+      <a class="btn" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
     </div>
   </section>
 
@@ -107,7 +113,7 @@
 
     <section class="panel">
       <h2>Журнал</h2>
-      <ul class="log" id="log"><li>Пока пусто.</li></ul>
+      <ul class="log" id="log"><li class="empty"><span>Загружаю журнал…</span></li></ul>
     </section>
   </div>
 
@@ -192,8 +198,24 @@
       <h2>Устройства</h2>
       <div id="devices"><p class="empty">Загружаю…</p></div>
     </section>
+
+    <section class="panel">
+      <h2>Безопасность</h2>
+      <p class="note">Вход в панель — пароль и код из Telegram на новом устройстве. Все входы и действия в панели записываются, о перезагрузке, блокировке устройств и смене списка сервисов бот пишет в Telegram.</p>
+      <form method="post" action="/router/logout" class="sec-row">
+        <input type="hidden" name="all" value="1">
+        <button class="btn small danger-outline" type="submit">Выйти на всех устройствах</button>
+        <span class="muted">Если потерял телефон или входил с чужого компьютера: все входы закроются, понадобится пароль и код из Telegram.</span>
+      </form>
+    </section>
   </div>
 </div>
+
+<dialog class="dlg" id="dlg" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+  <h3 id="dlg-title"></h3>
+  <p id="dlg-text"></p>
+  <div class="dlg-acts"><button class="btn" id="dlg-cancel" type="button">Отмена</button><button class="btn primary" id="dlg-ok" type="button">Да</button></div>
+</dialog>
 
 <script type="text/plain" id="pc-agent">
 # FSPIRAT: усыпить компьютер по команде с роутера (кнопка «☾ Усыпить» на fspirat.online/router/).

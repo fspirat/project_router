@@ -1,9 +1,11 @@
 /* FSPIRAT Router — логика страницы (подключает index.html; CSP: script-src 'self') */
 const API = '/router/api';
-// Свой заголовок в каждом запросе: nginx без него отвечает 403. Чужой сайт или ссылка его подставить не могут,
-// поэтому «?action=reboot» по ссылке из другого места не сработает (защита от CSRF).
-const H = {'X-FSR': '1'};
-let state = null, hist = null, names = {}, range = 'day', toastTimer, quietUntil = 0, editing = null;
+// Чтение (status, net, pingone) — GET. Всё остальное меняет что-то на роутере — только POST с CSRF-токеном сессии
+// в заголовке X-FSR: сервер (check.php) без верного токена и нашего Origin отвечает 403, роутер на GET — 405.
+// Токен — из /router/data?csrf=1 (ответ чужому сайту не прочитать), меняется с каждой новой сессией.
+const READ = new Set(['status', 'net', 'pingone']);
+let csrf = '';
+let state = null, hist = null, names = {}, range = 'day', toastTimer, quietUntil = 0, editing = null, lastOk = 0;
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -16,7 +18,8 @@ function bars(ms){
   for(let i=0;i<5;i++){ const h = 4+i*3; r += `<rect x="${i*4}" y="${16-h}" width="3" height="${h}" class="${i<l?'on':''}"/>`; }
   return `<svg class="bars" viewBox="0 0 20 16" aria-hidden="true">${r}</svg>`;
 }
-const pingHtml = ms => bars(ms) + (ms ? `<b>${ms}</b> ms` : 'нет ответа');
+const num = v => Number.isFinite(+v) ? Math.round(+v) : 0;     // числа с роутера — только числа (в HTML без экранирования)
+const pingHtml = ms => { ms = num(ms); return bars(ms) + (ms ? `<b>${ms}</b> ms` : 'нет ответа'); };
 const mb = kb => kb >= 1048576 ? (kb/1048576).toFixed(1)+' ГБ' : kb < 10240 ? (kb/1024).toFixed(1)+' МБ' : Math.round(kb/1024)+' МБ';
 const bytes = b => mb(b/1024);
 function speed(bps){
@@ -35,25 +38,68 @@ function upt(s){
 }
 function toast(msg, err){
   let t = $('.toast');
-  if(!t){ t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role','status'); document.body.append(t); }
-  t.textContent = msg; t.classList.toggle('err', !!err); t.hidden = false;
+  if(!t){ t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); document.body.append(t); }
+  t.textContent = (err ? '' : '✓ ') + msg; t.classList.toggle('err', !!err); t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, err ? 9000 : 6000);
 }
+const toLogin = () => { location.href = '/router/login?next=' + encodeURIComponent(location.pathname); };
 
-async function api(action, extra=''){
-  let r;
-  try { r = await fetch(`${API}?action=${action}${extra}`, {cache:'no-store', headers: H}); }
-  catch { throw new Error('Нет связи с сайтом. Проверь интернет.'); }
-  if(r.status === 401){ location.href = '/router/login?next=' + encodeURIComponent(location.pathname); throw new Error('Вход истёк — открываю страницу входа.'); }
-  if(r.status === 502 || r.status === 504){ const e = new Error('Роутер не на связи: туннель до сервера не поднят.'); e.down = true; throw e; }
-  if(r.status === 409) throw new Error('Тест скорости уже идёт, дождись результата.');
-  if(r.status === 403){
-    let m = ''; try { m = (await r.clone().json()).error || ''; } catch {}
-    throw new Error(m === 'csrf' ? 'Запрос отклонён: обнови страницу (Ctrl+F5).' : 'Роутер отклонил запрос: токен в nginx не совпадает с /etc/fspirat.token.');
-  }
-  if(!r.ok){ let m = ''; try { m = (await r.json()).error || ''; } catch {} throw new Error(`Ошибка ${r.status} при запросе к роутеру. ${m}`); }
-  return r.json();
+/* Окно подтверждения вместо confirm(): <dialog> (фокус внутри, Esc — отмена). ask(...) → true / false */
+function ask({title, text, ok = 'Да', danger = false}){
+  const d = $('#dlg');
+  $('#dlg-title').textContent = title; $('#dlg-text').textContent = text || '';
+  const okb = $('#dlg-ok'); okb.textContent = ok; okb.className = 'btn ' + (danger ? 'danger' : 'primary');
+  return new Promise(res => {
+    const close = v => { d.close(); res(v); };
+    okb.onclick = () => close(true); $('#dlg-cancel').onclick = () => close(false);
+    d.oncancel = e => { e.preventDefault(); close(false); };
+    d.showModal(); $('#dlg-cancel').focus();
+  });
 }
+
+/* Кнопка «занята»: надпись и disabled на время операции; вернуть — вызвать результат */
+function busy(b, text){
+  const old = b.textContent; b.disabled = true; b.setAttribute('aria-busy', 'true'); if(text) b.textContent = text;
+  return (later = 0) => setTimeout(() => { b.disabled = false; b.removeAttribute('aria-busy'); if(text) b.textContent = old; }, later);
+}
+
+async function csrfToken(fresh){
+  if(csrf && !fresh) return csrf;
+  const r = await fetch('/router/data?csrf=1', {cache: 'no-store', headers: {'X-FSR': '1'}});
+  if(r.status === 401){ toLogin(); throw new Error('Вход истёк — открываю страницу входа.'); }
+  csrf = (await r.json()).csrf || '';
+  return csrf;
+}
+// Понятные слова вместо кодов; код и ответ роутера — в консоли (F12) для разбора
+const ERR = {
+  'bad mac': 'неверный адрес устройства (MAC)', 'bad node': 'такого сервера нет — обнови список', 'bad via': 'неизвестный вид теста',
+  name: 'недопустимое имя', url: 'нужна ссылка вида https://сайт/путь', host: 'неверный адрес сервера', many: 'не больше 8 строк',
+  inner: 'адрес ведёт внутрь домашней сети или на сам роутер — так нельзя', long: 'слишком длинный список',
+  NOAGENT: 'скрипт на ПК не отвечает: он не установлен, или ПК уже спит', NOREPLY: 'скрипт на ПК не ответил',
+  DENY: 'ключ не совпал — установи скрипт на ПК заново', 'not pc': 'это устройство не выбрано как компьютер', 'no ip': 'у устройства нет адреса',
+};
+async function api(action, extra = ''){
+  const post = !READ.has(action), url = `${API}?action=${action}${extra}`;
+  const send = async fresh => fetch(url, {method: post ? 'POST' : 'GET', cache: 'no-store',
+    headers: {'X-FSR': post ? await csrfToken(fresh) : (csrf || '1')}});
+  let r;
+  try {
+    r = await send(false);
+    if(post && r.status === 403) r = await send(true);      // токен устарел (новая сессия) — взять свежий и повторить один раз
+  } catch(e){ if(e.message.startsWith('Вход')) throw e; throw new Error('Нет связи с сайтом. Проверь интернет и попробуй ещё раз.'); }
+  if(r.ok){ lastOk = Date.now(); return r.json(); }
+  let m = ''; try { m = (await r.clone().json()).error || ''; } catch {}
+  console.warn('router api', action, r.status, m);
+  if(r.status === 401){ toLogin(); throw new Error('Вход истёк — открываю страницу входа.'); }
+  if(r.status === 502 || r.status === 504){ const e = new Error('Роутер временно недоступен. Попробуй ещё раз через несколько секунд.'); e.down = true; throw e; }
+  if(r.status === 409) throw new Error(action === 'speedtest' ? 'Тест скорости уже идёт, дождись результата.' : 'Это действие уже выполняется.');
+  if(r.status === 429) throw new Error('Слишком много запросов подряд. Подожди пару секунд.');
+  if(r.status === 405) throw new Error('Страница устарела — обнови её (Ctrl+F5).');
+  if(r.status === 403) throw new Error(m === 'forbidden' ? 'Роутер отклонил запрос: ключ сервера не совпадает с роутером.' : 'Запрос отклонён. Обнови страницу (Ctrl+F5).');
+  if(r.status === 400) throw new Error('Роутер не принял запрос: ' + (ERR[m] || m || 'неверные данные') + '.');
+  throw new Error('Роутер не смог выполнить действие. Попробуй ещё раз через минуту.');
+}
+
 
 /* ---------- блоки ---------- */
 function renderStatus(s){
@@ -89,7 +135,7 @@ function tColor(name){
 function renderTargets(t){
   t = t || (state && state.targets);
   const list = (t && t.list) || [];
-  $('#tg-list').innerHTML = list.map(x => `<li title="${esc(x.host)}"><i style="background:${tColor(x.name)}"></i>${svcIcon(x)}${esc(x.name)} ${x.vpn ? `<b>${x.vpn}</b> ms` : '<b style="color:var(--red)">нет ответа</b>'}</li>`).join('')
+  $('#tg-list').innerHTML = list.map(x => `<li title="${esc(x.host)}"><i style="background:${tColor(x.name)}"></i>${svcIcon(x)}${esc(x.name)} ${num(x.vpn) ? `<b>${num(x.vpn)}</b> ms` : '<b style="color:var(--red)">нет ответа</b>'}</li>`).join('')
     || '<li>Замеров ещё не было.</li>';
   if(t && t.ts) $('#tg-refresh').title = 'Перемерить (последний замер ' + ago(t.ts) + ')';
   renderTChart();
@@ -158,22 +204,19 @@ $('#tg-form').addEventListener('submit', async e => {
     if(k === 'web' && !/^https?:\/\/[\w.-]+[\w\-./?=]*$/.test(a)) return toast(`«${n}»: нужна ссылка вида https://сайт/путь`, true);
     if(k === 'mc' && !/^[\w.-]+(:\d{1,5})?$/.test(a)) return toast(`«${n}»: нужен адрес сервера, например mc.server.net или mc.server.net:25565`, true);
   }
-  const b = e.submitter; b.disabled = true;
+  const done = busy(e.submitter, 'Сохраняю…');
   try {
     await api('settargets', '&list=' + encodeURIComponent(rows.map(r => r.join('~')).join('!')));
     state.target_list = rows.map(([k, n, a]) => [k, n, k === 'mc' && !a.includes(':') ? a + ':25565' : a].join('|'));
     $('#tg-form').hidden = true;
     toast('Список сохранён. Роутер перемеряет через пару минут.');
     setTimeout(load, 20000);
-  } catch(err){
-    const m = {name: 'недопустимое имя', url: 'неверная ссылка', host: 'неверный адрес сервера', many: 'не больше 8 строк'}[(err.message.match(/(name|url|host|many)\s*$/) || [])[1]];
-    toast(m ? 'Роутер не принял список: ' + m : err.message, true);
-  }
-  finally { b.disabled = false; }
+  } catch(err){ toast(err.message, true); }
+  finally { done(); }
 });
 $('#tg-refresh').addEventListener('click', async e => {
   const b = e.currentTarget; b.disabled = true;
-  try { const t = await api('targets'); if(state) state.targets = t; renderTargets(t); renderServers(state); toast('Задержка до сервисов обновлена.'); }
+  try { const t = await api('targets'); if(state) state.targets = t; renderTargets(t); renderServers(state); renderStatus(state); toast('Задержка до сервисов обновлена.'); }
   catch(err){ toast(err.message, true); }
   finally { b.disabled = false; }
 });
@@ -296,7 +339,7 @@ function renderDevices(list){
       <ul class="list">${wired.concat(other).map(d => row(d, d.band !== 'wired')).join('')}</ul></div>`;
   if(off.length)
     html += `<details><summary>Не в сети: ${off.length}</summary><ul class="list">${off.map(d => row(d, true)).join('')}</ul></details>`;
-  $('#devices').innerHTML = list.length ? html : '<p class="empty">Нет устройств с выданным адресом.</p>';
+  $('#devices').innerHTML = list.length ? html : '<p class="empty">Устройства не найдены: роутер пока никому не выдал адрес. Если дома есть подключённые устройства — подожди минуту или нажми «Проверить серверы».</p>';
 }
 
 /* Под сервером — тонкая строка задержки до сервисов через него (fspirat-svcping, раз в 30 мин). */
@@ -313,7 +356,7 @@ function svcIcon(x){
   if(/(^|\.)(discord\.com|discord\.gg|discordapp\.com)$/.test(h) || n === 'discord') return ICONS.discord;
   return x.kind === 'mc' ? ICONS.mc : ICONS.web;
 }
-const svcMs = ms => ms > 0 ? `<b class="${ms < 120 ? 'ok' : ms < 250 ? 'mid' : 'slow'}">${ms}</b>` : '<b class="slow">—</b>';
+const svcMs = ms => (ms = num(ms)) > 0 ? `<b class="${ms < 120 ? 'ok' : ms < 250 ? 'mid' : 'slow'}">${ms}</b>` : '<b class="slow">—</b>';
 function svcLine(n){
   const r = state && (n.id === state.current && state.targets ? state.targets : state.svc && state.svc[n.id]);
   if(!n.ms) return '';
@@ -357,16 +400,19 @@ function when(ts){
   if(d.toDateString() === t.toDateString()) return 'вчера ' + hm;
   return two(d.getDate()) + '.' + two(d.getMonth() + 1) + ' ' + hm;
 }
+// Уровень записи по её виду: ошибка / внимание / успех / информация
+const LEVEL = {offline: 'err', vpn_down: 'err', auto: 'warn', reboot: 'warn', newdev: 'warn', online: 'ok', vpn_up: 'ok'};
+const LEVEL_TXT = {err: 'ОШИБКА', warn: 'ВНИМАНИЕ', ok: 'УСПЕХ', info: 'ИНФО'};
 function renderLog(s){
   if(hist && hist.events && hist.events.length){
-    $('#log').innerHTML = hist.events.slice(0, 40).map(e =>
-      `<li class="k-${esc(e[1])}"><time>${when(e[0])}</time><span>${esc(e[2])}</span></li>`).join('');
+    $('#log').innerHTML = hist.events.slice(0, 60).map(e => { const lv = LEVEL[e[1]] || 'info';
+      return `<li class="k-${esc(e[1])} lv-${lv}"><time>${when(e[0])}</time><i class="lv">${LEVEL_TXT[lv]}</i><span>${esc(e[2])}</span></li>`; }).join('');
     return;
   }
   const nodes = ((s && s.ping && s.ping.nodes) || []);
   const byId = Object.fromEntries(nodes.map(n => [n.id, n.name]));
   const log = ((s && s.log) || []).slice().reverse().map(l => `<li><span>${esc(l.replace(/\b[A-Za-z0-9]{8}\b/g, id => byId[id] || id))}</span></li>`);
-  $('#log').innerHTML = log.join('') || '<li><span>Пока пусто.</span></li>';
+  $('#log').innerHTML = log.join('') || '<li class="empty"><span>Событий пока нет. Здесь появятся смены сервера, перезагрузки, сбои VPN и новые устройства.</span></li>';
 }
 
 const flag = cc => /^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' : '';
@@ -382,10 +428,46 @@ function renderSpeedCard(via, r){
 }
 function renderSpeedtest(sp){ if(!sp) return; renderSpeedCard('vpn', sp.vpn); renderSpeedCard('direct', sp.direct); }
 
+/* Общее состояние — одной строкой вверху: роутер, интернет, VPN, серверы, сервисы. Зелёный / жёлтый / красный. */
+function renderOverall(){
+  const box = $('#overall'), s = state, down = !$('#down').hidden;
+  const items = [];                 // [название, уровень ok|warn|err, подпись]
+  let why = '';
+  if(down || !s){
+    items.push(['Роутер', 'err', 'не на связи']);
+  } else {
+    const p = s.ping || {}, nodes = p.nodes || [], alive = nodes.filter(n => n.ms > 0).length;
+    const y = s.sys || {}, ram = y.mem_total ? 1 - y.mem_avail / y.mem_total : 0, disk = y.disk_total ? y.disk_used / y.disk_total : 0;
+    const hot = y.temp != null && y.temp >= 85;
+    items.push(['Роутер', ram > .9 || disk > .9 || hot ? 'warn' : 'ok', hot ? `${y.temp}°C` : ram > .9 ? 'мало памяти' : disk > .9 ? 'флеш почти полон' : 'в сети']);
+    const vpnOk = s.running && (!p.socks || p.real > 0);
+    items.push(['VPN', !s.running ? 'err' : !vpnOk ? 'err' : p.real > 250 ? 'warn' : 'ok', !s.running ? 'остановлен' : !vpnOk ? 'не проходит' : p.real ? p.real + ' ms' : 'работает']);
+    const dir = s.svc && s.svc.direct;
+    const net = vpnOk || (dir && dir.base > 0);
+    items.push(['Интернет', net ? 'ok' : 'err', net ? 'есть' : 'нет']);
+    items.push(['Серверы', alive >= 2 ? 'ok' : alive ? 'warn' : 'err', `${alive} из ${nodes.length}`]);
+    const t = (s.targets && s.targets.list) || [], bad = t.filter(x => !(x.vpn > 0));
+    if(t.length) items.push(['Сервисы', bad.length ? 'warn' : 'ok', bad.length ? 'не отвечает: ' + bad.map(x => x.name).join(', ') : 'отвечают']);
+    if(!s.split_active) why = 'В PassWall выбран не узел Split';
+  }
+  const worst = items.some(i => i[1] === 'err') ? 'err' : items.some(i => i[1] === 'warn') || why ? 'warn' : 'ok';
+  box.className = 'overall ' + worst;
+  $('#ov-title').textContent = {ok: 'ВСЁ РАБОТАЕТ', warn: 'ТРЕБУЕТ ВНИМАНИЯ', err: 'ЕСТЬ ПРОБЛЕМА'}[worst];
+  $('#ov-items').innerHTML = items.map(([n, lv, t]) => `<li class="${lv}"><i aria-hidden="true"></i>${esc(n)} <b>${esc(t)}</b></li>`).join('')
+    + (why ? `<li class="warn"><i aria-hidden="true"></i>${esc(why)}</li>` : '');
+  tickUpdated();
+}
+function tickUpdated(){
+  const el = $('#ov-upd'); if(!el) return;
+  if(!lastOk){ el.textContent = ''; return; }
+  const sec = Math.round((Date.now() - lastOk) / 1000);
+  el.textContent = 'обновлено ' + (sec < 5 ? 'только что' : sec < 60 ? sec + ' сек назад' : Math.round(sec / 60) + ' мин назад');
+}
+
 function render(){
   renderPc(state);
   renderStatus(state); renderChart(); renderSys(state.sys); renderSpeedtest(state.speed);
-  renderDevices(state.devices); renderServers(state); renderLog(state);
+  renderDevices(state.devices); renderServers(state); renderLog(state); renderOverall();
 }
 
 /* ---------- вкладки ---------- */
@@ -405,14 +487,15 @@ async function load(){
     if(Date.now() < quietUntil) return;
     $('#vpn-text').textContent = 'Роутер не отвечает'; $('#vpn').className = 'status vpn down';
     if(e.down) showDown(true); else toast(e.message, true);
+    renderOverall();
   }
 }
 
 /* История, журнал и имена устройств — с сервера: есть даже когда роутер не на связи */
 async function loadData(){
   try {
-    const r = await fetch('/router/data?range=' + range, {cache: 'no-store', headers: H});
-    if(r.status === 401){ location.href = '/router/login?next=' + encodeURIComponent(location.pathname); return; }
+    const r = await fetch('/router/data?range=' + range, {cache: 'no-store', headers: {'X-FSR': csrf || '1'}});
+    if(r.status === 401){ toLogin(); return; }
     if(!r.ok) return;
     hist = await r.json(); names = hist.names || {};
     renderMtg(hist.mtg);
@@ -518,15 +601,11 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button[data-sleep]'); if(!b) return;
   const mac = b.dataset.sleep, d = (state.devices || []).find(x => x.mac === mac) || {};
   const nm = names[mac.toLowerCase()] || d.name || mac;
-  if(!confirm(`Отправить «${nm}» в сон?`)) return;
-  b.disabled = true;
-  try { await api('sleep', '&mac=' + encodeURIComponent(mac)); toast(`«${nm}» засыпает. Разбудить — кнопкой «⏻ Разбудить».`); setTimeout(load, 15000); }
-  catch(err){
-    const m = /NOAGENT|NOREPLY/.test(err.message) ? 'Скрипт на ПК не отвечает: он не установлен, или ПК уже спит.'
-      : /DENY/.test(err.message) ? 'Ключ не совпал — установи скрипт заново командой из блока «Компьютер».' : err.message;
-    toast(m, true);
-  }
-  finally { setTimeout(() => b.disabled = false, 5000); }
+  if(!await ask({title: `Усыпить «${nm}»?`, text: 'Компьютер уйдёт в обычный сон. Разбудить — кнопкой «⏻ Разбудить».', ok: 'Усыпить'})) return;
+  const done = busy(b, 'Усыпляю…');
+  try { await api('sleep', '&mac=' + encodeURIComponent(mac)); toast(`«${nm}» засыпает.`); setTimeout(load, 15000); }
+  catch(err){ toast(err.message, true); }
+  finally { done(5000); }
 });
 
 /* Разбудить компьютер (Wake-on-LAN). По Wi-Fi — только из сна и если адаптер умеет. */
@@ -534,13 +613,13 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button[data-wake]'); if(!b) return;
   const mac = b.dataset.wake, d = (state.devices || []).find(x => x.mac === mac) || {};
   const nm = names[mac.toLowerCase()] || d.name || mac;
-  b.disabled = true;
+  const done = busy(b, 'Бужу…');
   try {
     await api('wake', '&mac=' + encodeURIComponent(mac));
     toast(`Сигнал «проснись» отправлен на «${nm}». Если компьютер умеет просыпаться по сети, он появится в сети через 10–30 секунд.`);
     setTimeout(load, 20000); setTimeout(load, 45000);
   } catch(err){ toast(err.message, true); }
-  finally { setTimeout(() => b.disabled = false, 5000); }
+  finally { done(5000); }
 });
 
 /* Выключить / включить интернет устройству (fspirat-fw на роутере: MAC в наборе block) */
@@ -548,13 +627,14 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button[data-block]'); if(!b) return;
   const mac = b.dataset.block, d = (state.devices || []).find(x => x.mac === mac) || {};
   const nm = names[mac.toLowerCase()] || d.name || mac;
-  if(!d.blocked && !confirm(`Выключить интернет устройству «${nm}»?\n\nОно останется в Wi-Fi, но сайты и приложения перестанут открываться — пока не нажмёшь «Включить интернет». Если это устройство, с которого ты сейчас смотришь, страница тоже станет недоступна с него.`)) return;
-  b.disabled = true;
+  if(!d.blocked && !await ask({title: `Выключить интернет «${nm}»?`, danger: true, ok: 'Выключить',
+    text: 'Устройство останется в Wi-Fi, но сайты и приложения перестанут открываться, пока не нажмёшь «Включить интернет». Если ты смотришь с этого устройства, страница тоже станет недоступна с него.'})) return;
+  const done = busy(b, d.blocked ? 'Включаю…' : 'Выключаю…');
   try {
     const r = await api(d.blocked ? 'unblock' : 'block', '&mac=' + encodeURIComponent(mac));
     d.blocked = r.blocked; renderDevices(state.devices);
     toast(r.blocked ? `Интернет для «${nm}» выключен.` : `Интернет для «${nm}» снова включён.`);
-  } catch(err){ toast(err.message, true); b.disabled = false; }
+  } catch(err){ toast(err.message, true); done(); }
 });
 
 /* Свои имена устройств (хранятся на сервере, по MAC) */
@@ -571,10 +651,13 @@ document.addEventListener('click', e => {
     editing = null;
     if(save){
       try {
-        const r = await fetch('/router/data', {method: 'POST', headers: H, body: new URLSearchParams({mac, name: inp.value})});
+        const post = async fresh => fetch('/router/data', {method: 'POST', headers: {'X-FSR': await csrfToken(fresh)}, body: new URLSearchParams({mac, name: inp.value})});
+        let r = await post(false);
+        if(r.status === 403) r = await post(true);
         if(!r.ok) throw new Error();
         names = (await r.json()).names || {};
-      } catch { toast('Не удалось сохранить имя.', true); }
+        toast('Имя сохранено.');
+      } catch { toast('Не удалось сохранить имя. Попробуй ещё раз.', true); }
     }
     renderDevices(state.devices);
   };
@@ -588,11 +671,10 @@ async function loadNet(){
 
 /* ---------- действия ---------- */
 async function pingAll(){
-  const bs = [$('#ping-btn'), $('#ping-all')], txt = bs.map(b => b.textContent);
-  bs.forEach(b => { b.disabled = true; b.textContent = 'Проверяю, ~20 сек…'; });
+  const undo = [$('#ping-btn'), $('#ping-all')].map(b => busy(b, 'Проверяю, ~20 сек…'));
   try { state = await api('ping'); render(); toast('Проверка серверов завершена.'); }
   catch(err){ toast(err.message, true); }
-  finally { bs.forEach((b, i) => { b.disabled = false; b.textContent = txt[i]; }); }
+  finally { undo.forEach(f => f()); }
 }
 $('#ping-btn').addEventListener('click', pingAll);
 $('#ping-all').addEventListener('click', pingAll);
@@ -611,7 +693,7 @@ document.addEventListener('click', async e => {
 
 document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('click', async () => {
   const via = btn.dataset.speed, all = document.querySelectorAll('[data-speed]');
-  all.forEach(x => x.disabled = true); btn.textContent = 'Идёт тест, ~35 сек…';
+  all.forEach(x => x.disabled = true); btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Идёт тест, ~35 сек…';
   $('#st-' + via).querySelector('.st-meta').textContent = 'Измеряю загрузку, потом отдачу…';
   try {
     const r = await api('speedtest', '&via=' + via);
@@ -619,14 +701,14 @@ document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('c
     renderSpeedCard(via, r);
     toast(`Тест ${via === 'vpn' ? 'через VPN' : 'напрямую'}: ${speed(r.down)} загрузка, ${speed(r.up)} отдача.`);
   } catch(err){ toast(err.message, true); }
-  finally { all.forEach(x => x.disabled = false); btn.textContent = 'Запустить'; }
+  finally { all.forEach(x => x.disabled = false); btn.removeAttribute('aria-busy'); btn.textContent = 'Запустить'; }
 }));
 
 document.addEventListener('click', async e => {
   const b = e.target.closest('button[data-id]'); if(!b) return;
   const n = state.ping.nodes.find(x => x.id === b.dataset.id);
-  if(!confirm(`Подключить «${n.name}»? Связь пропадёт на несколько секунд.`)) return;
-  b.disabled = true; b.textContent = 'Подключаю…';
+  if(!await ask({title: `Подключить «${n.name}»?`, text: 'VPN перезапустится, связь пропадёт на несколько секунд.', ok: 'Подключить'})) return;
+  b.disabled = true; b.setAttribute('aria-busy', 'true'); b.textContent = 'Подключаю…';
   try {
     await api('switch', '&id=' + encodeURIComponent(n.id));
     state.current = n.id; render(); quietUntil = Date.now() + 15000;
@@ -636,26 +718,37 @@ document.addEventListener('click', async e => {
 });
 
 const ACTIONS = {
-  restart: { ask: 'Перезапустить VPN? Связь пропадёт на несколько секунд.', done: 'VPN перезапускается.', quiet: 15000 },
-  update:  { ask: 'Обновить подписку nosok? Список серверов скачается заново, это займёт до минуты.', done: 'Подписка обновляется, список серверов обновится примерно через минуту.', quiet: 0 },
-  reboot:  { ask: 'Перезагрузить роутер? Интернет дома пропадёт на 1–2 минуты.', done: 'Роутер перезагружается. Страница сама обновится, когда он вернётся.', quiet: 150000 },
+  restart: { title: 'Перезапустить VPN?', text: 'Связь через VPN пропадёт на несколько секунд.', ok: 'Перезапустить', busy: 'Перезапускаю…', done: 'VPN перезапускается.', quiet: 15000 },
+  update:  { title: 'Обновить подписку?', text: 'Список серверов nosok скачается заново, это займёт до минуты.', ok: 'Обновить', busy: 'Обновляю…', done: 'Подписка обновляется, список серверов обновится примерно через минуту.', quiet: 0 },
+  reboot:  { title: 'Перезагрузить роутер?', text: 'Интернет дома пропадёт на 1–2 минуты, панель будет недоступна, пока роутер не вернётся.', ok: 'Перезагрузить', danger: true, busy: 'Перезагружаю…', done: 'Роутер перезагружается. Страница сама обновится, когда он вернётся.', quiet: 150000 },
 };
 document.querySelector('.controls').addEventListener('click', async e => {
   const b = e.target.closest('button[data-act]'); if(!b) return;
   const a = ACTIONS[b.dataset.act];
-  if(!confirm(a.ask)) return;
-  b.disabled = true;
+  if(!await ask(a)) return;
+  const done = busy(b, a.busy);
   try {
     await api(b.dataset.act);
     toast(a.done); quietUntil = Date.now() + a.quiet;
     setTimeout(load, b.dataset.act === 'update' ? 60000 : Math.max(10000, a.quiet));
-  } catch(err){ toast(err.message, true); }
-  finally { setTimeout(() => b.disabled = false, 5000); }
+    done(Math.min(a.quiet || 5000, 30000));
+  } catch(err){ toast(err.message, true); done(); }
 });
 
+/* Опрос: один запрос каждого вида за раз (медленный ответ не копит очередь), во вкладке в фоне — пауза,
+   при возврате на вкладку — сразу свежие данные. Таймеры заводятся один раз, слушатели — делегированные. */
+function every(ms, fn){
+  let busyNow = false;
+  const tick = async () => { if(document.hidden || busyNow) return; busyNow = true; try { await fn(); } finally { busyNow = false; } };
+  setInterval(tick, ms);
+  return tick;
+}
+const tLoad = every(30000, load), tData = every(60000, loadData);
+every(3000, loadNet);
+setInterval(tickUpdated, 5000);
+document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); } });
+
 showTab();
-load();
-loadData();
-setInterval(load, 30000);
-setInterval(loadData, 60000);
-setInterval(loadNet, 3000);
+tLoad();
+tData();
+csrfToken().catch(() => {});

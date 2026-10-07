@@ -55,6 +55,36 @@ h2{font-family:var(--pixel);font-size:11px;color:var(--green);font-weight:400;ma
 .btn.danger{background:#5a2216;box-shadow:inset 2px 2px 0 #8a3d2c,inset -2px -2px 0 #2e0f08}
 .btn.danger:hover:not(:disabled){background:#6d2a1b}
 .btn.small{padding:6px 10px;font-size:13px}
+.btn[aria-busy="true"]{cursor:progress;opacity:.8}
+.btn[aria-busy="true"]::after{content:"";display:inline-block;width:6px;height:6px;margin-left:8px;background:currentColor;
+  vertical-align:middle;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.btn.danger-outline{background:none;color:#f08a73;border-color:#5a2216;box-shadow:none}
+.btn.danger-outline:hover:not(:disabled){background:#1c0b06}
+
+/* Общее состояние — одна строка: заголовок, пункты, «обновлено …» (зелёный — ок, жёлтый — внимание, красный — проблема) */
+.overall{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;margin:0 0 12px;padding:10px 14px;
+  background:var(--panel);border:2px solid var(--edge);border-left-width:6px;transition:border-color .3s}
+.overall.ok{border-left-color:var(--green)} .overall.warn{border-left-color:var(--amber)} .overall.err{border-left-color:var(--red)}
+.ov-title{font-family:var(--pixel);font-size:11px;font-weight:400;letter-spacing:1px}
+.overall.ok .ov-title{color:var(--lime)} .overall.warn .ov-title{color:var(--amber)} .overall.err .ov-title{color:var(--red)}
+.ov-items{display:flex;flex-wrap:wrap;gap:4px 16px;list-style:none;margin:0;padding:0;font-size:13px;color:var(--dim)}
+.ov-items li{display:inline-flex;align-items:center;gap:6px}
+.ov-items i{width:8px;height:8px;background:var(--green)}
+.ov-items .warn i{background:var(--amber)} .ov-items .err i{background:var(--red)}
+.ov-items b{font-weight:500;color:var(--text)} .ov-items .err b{color:#f08a73} .ov-items .warn b{color:var(--amber)}
+.ov-upd{margin-left:auto;color:var(--dim);font-size:12px}
+
+/* Окно подтверждения */
+.dlg{max-width:min(420px,calc(100vw - 32px));padding:20px;color:var(--text);background:var(--panel);border:2px solid var(--green);
+  box-shadow:4px 4px 0 #000}
+.dlg::backdrop{background:rgba(0,0,0,.65)}
+.dlg[open]{animation:pop .15s ease-out}
+@keyframes pop{from{transform:translateY(6px);opacity:0}}
+.dlg h3{margin:0 0 10px;font-family:var(--pixel);font-size:12px;font-weight:400;line-height:1.7;color:var(--lime)}
+.dlg p{margin:0 0 18px;color:var(--dim);font-size:14px}
+.dlg-acts{display:flex;justify-content:flex-end;gap:10px}
+.sec-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
 /* Статус */
 .status{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;align-items:center}
@@ -95,6 +125,7 @@ h2{font-family:var(--pixel);font-size:11px;color:var(--green);font-weight:400;ma
 .srv .tag.dim{color:var(--dim);border-color:var(--edge)}
 .dev-traf{display:block;color:var(--dim);font-size:11px;width:100%}
 .blk{font:inherit;font-size:11px;color:var(--dim);background:none;border:1px solid var(--edge);cursor:pointer;padding:1px 6px}
+.blk[data-block]{color:#c9806f;border-color:#3a1d14}      /* выключить интернет — опасное действие */
 .blk:hover{color:var(--red);border-color:var(--red)}
 .blk.wk:hover{color:var(--lime);border-color:var(--green)}
 .dev.is-blocked .dev-name > span:first-child{color:#f08a73;text-decoration:line-through}
@@ -188,6 +219,7 @@ details[open] summary::before{content:"− "}
 .tabs{display:flex;gap:6px;margin:0 0 18px}
 .tab{font-family:var(--pixel);font-size:11px;color:var(--dim);text-decoration:none;padding:12px 16px;
      border:2px solid var(--edge);background:#0a0f08}
+.tab{transition:color .15s,background-color .15s,border-color .15s}
 .tab:hover{color:var(--text)}
 .tab[aria-selected="true"]{color:var(--lime);background:var(--panel);border-color:var(--green);box-shadow:3px 3px 0 #000}
 [data-page][hidden]{display:none}
@@ -236,7 +268,11 @@ body.is-down.no-state .needs-router{display:none}
 .chart-keys{color:var(--dim);font-size:12px;margin-top:8px}
 
 /* Журнал */
-.log li{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:baseline}
+.log{max-height:360px;overflow-y:auto;overscroll-behavior:contain}
+.log li{display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:baseline}
+.log li.empty{display:block}
+.log .lv{font-style:normal;font-family:var(--pixel);font-size:7px;letter-spacing:1px;padding:3px 5px;border:1px solid var(--edge);color:var(--dim)}
+.log .lv-ok .lv{color:var(--lime);border-color:#2c4a17} .log .lv-warn .lv{color:var(--amber);border-color:#5a4410} .log .lv-err .lv{color:#f08a73;border-color:#5a2216}
 .log time{font-family:var(--pixel);font-size:9px;color:var(--dim);white-space:nowrap;min-width:92px}
 .log .k-auto,.log .k-offline,.log .k-vpn_down{color:var(--amber)}
 .log .k-offline,.log .k-vpn_down{color:#f08a73}
@@ -292,6 +328,10 @@ body.is-down.no-state .needs-router{display:none}
 .toast.err{border-color:var(--red);background:#22100b}
 
 @media (max-width:560px){
+  .overall{padding:10px 12px;gap:6px 12px}
+  .ov-upd{margin-left:0;width:100%}
+  .log li{grid-template-columns:auto 1fr} .log .lv{display:none}
+  .dlg-acts .btn{flex:1}
   .meters,.speed,.st-grid,.down-cols,.bands{grid-template-columns:1fr}
   .tab{flex:1;text-align:center;padding:12px 8px}
   .srv{grid-template-columns:1fr auto auto;grid-template-areas:"name ping rp" "svc svc svc" "act act act";gap:6px 12px}
@@ -305,4 +345,4 @@ body.is-down.no-state .needs-router{display:none}
   .srv .ping{min-width:0}
   #cur-name{font-size:18px}
 }
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
