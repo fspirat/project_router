@@ -362,13 +362,13 @@
       <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График отклика VPN за сутки"></svg>
       <div class="chart-legend"><span id="chart-from">24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
       <div class="stats facts">
-        <div class="fact"><span>Средний отклик</span><b id="st-avg">—</b></div>
+        <div class="fact"><span>Средняя задержка</span><b id="st-avg">—</b></div>
         <div class="fact"><span>Лучший</span><b id="st-min">—</b></div>
         <div class="fact"><span>Худший</span><b id="st-max">—</b></div>
         <div class="fact"><span>Сбоев VPN</span><b id="st-fail">—</b></div>
         <div class="fact"><span>Роутер без связи</span><b id="st-off">—</b></div>
       </div>
-      <div class="chart-keys"><span class="lg"><i style="background:var(--lime)"></i>отклик через VPN</span><span class="lg"><i style="background:var(--red)"></i>VPN не прошёл</span><span class="lg"><i style="background:rgba(127,142,116,.35)"></i>роутер не на связи</span></div>
+      <div class="chart-keys"><span class="lg"><i style="background:var(--lime)"></i>задержка через VPN</span><span class="lg"><i style="background:var(--red)"></i>VPN не прошёл</span><span class="lg"><i style="background:rgba(127,142,116,.35)"></i>роутер не на связи</span></div>
     </section>
 
     <section class="panel" id="tgts">
@@ -534,8 +534,9 @@ function renderStatus(s){
   $('#cur-ping').innerHTML = cur ? pingHtml(cur.ms) : '';
   const real = $('#real');
   if(!s.ping || !s.ping.socks){ real.className = ''; real.textContent = 'Проверка через VPN не настроена: нужен SOCKS на порту 1080.'; }
-  else if(s.ping.real > 0){ real.className = ''; real.innerHTML = `Отклик через VPN: <b>${s.ping.real}</b> ms`; }
-  else { real.className = 'bad'; real.innerHTML = 'Отклик через VPN: <b>не проходит</b>'; }
+  else if(s.ping.real > 0){ real.className = ''; real.innerHTML = `Задержка через VPN: <b>${s.ping.real}</b> ms`; }
+  else { real.className = 'bad'; real.innerHTML = 'Задержка через VPN: <b>не проходит</b>'; }
+  real.title = 'Как пинг: ответ сайта gstatic.com через VPN по уже открытому соединению. Раз в 5 минут.';
   $('#updated').textContent = s.ping ? 'Проверено ' + ago(s.ping.updated) + ', автопроверка раз в 5 минут' : 'Проверок ещё не было.';
   $('#warn').hidden = s.split_active;
   renderTargets(s.targets);

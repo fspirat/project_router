@@ -40,16 +40,16 @@ for id in $(uci show passwall2 | grep "\.group='$GROUP'" | cut -d. -f2); do
 done
 wait
 
-# 2. Настоящая проверка: реальный запрос в интернет через текущий сервер
+# 2. Настоящая проверка: реальный запрос в интернет через текущий сервер.
+#    Задержка — как пинг: два запроса по одному соединению, считаем второй (без подключения через VPN и рукопожатий).
+#    Если второй не прошёл, а первый прошёл — VPN работает, задержку берём из первого (с подключением, она больше).
 REAL=0; SOCKS_OK=1
 for try in 1 2; do
-  out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 8 -x "socks5h://$SOCKS" "$TEST_URL"); rc=$?
+  out=$(curl -s -o /dev/null -o /dev/null -w '%{http_code} %{time_starttransfer} %{time_pretransfer}\n' --max-time 8 -x "socks5h://$SOCKS" "$TEST_URL" "$TEST_URL"); rc=$?
   if [ $rc -eq 7 ]; then SOCKS_OK=0; break; fi
-  set -- $out
-  if [ "$1" = "204" ]; then
-    ms=$(awk -v t="$2" 'BEGIN{printf "%d", t*1000}')
-    { [ $REAL -eq 0 ] || [ $ms -lt $REAL ]; } && REAL=$ms
-  fi
+  ms=$(echo "$out" | awk '$1 == "204" { v = int(($2 - $3) * 1000 + 0.5); if (v < 1) v = 1; if (NR == 2) b = v; else f = int($2 * 1000) }
+    END { print (b ? b : f + 0) }')
+  [ "${ms:-0}" -gt 0 ] && { [ $REAL -eq 0 ] || [ $ms -lt $REAL ]; } && REAL=$ms
 done
 
 if [ $SOCKS_OK -eq 1 ]; then
