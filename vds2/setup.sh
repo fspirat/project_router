@@ -4,7 +4,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 PUB='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEhv9FFFN2NZHl6XD/VJFzcoSTntZTvMe9dVFLT9GTLL fspirat-ops-vds2'
-SNI=www.microsoft.com
+SNI=dl.google.com   # www.microsoft.com с этого VDS по IPv6 не открывается — Reality не может завершить рукопожатие
 
 install -d -m 700 /root/.ssh
 grep -qF "$PUB" /root/.ssh/authorized_keys 2>/dev/null || echo "$PUB" >> /root/.ssh/authorized_keys
