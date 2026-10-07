@@ -49,7 +49,7 @@ jobs:
           ssh vps 'set -e; D=/tmp/fsr-deploy
             # страница входа
             install -d -m 755 /var/www/router-auth
-            install -m 644 $D/auth/*.php /var/www/router-auth/
+            install -m 644 $D/auth/*.php $D/auth/tgbot-commands.json /var/www/router-auth/
             install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
             [ -f /var/log/fspirat-router-auth.log ] || install -m 640 -o www-data -g adm /dev/null /var/log/fspirat-router-auth.log
             [ -f /var/log/fspirat-router-audit.log ] || install -m 640 -o www-data -g adm /dev/null /var/log/fspirat-router-audit.log
@@ -81,6 +81,20 @@ jobs:
             install -m 644 /tmp/fsr-deploy/nginx/conf.d/security-headers.conf /etc/nginx/conf.d/security-headers.conf
             sed -i "s/^\([[:space:]]*\)server_tokens build;.*/\1server_tokens off;/" /etc/nginx/nginx.conf
             nginx -t -q && systemctl reload nginx && echo "заголовки: применены"'
+
+      - name: Telegram-бот (команды)
+        run: |
+          ssh vps 'set -e; A=/var/lib/fspirat-router-auth
+            # ключ роутера для tgbot.php (тот же, что nginx подставляет панели); секрет webhook — один раз
+            ( umask 077; grep -o "fspirat_token=[A-Za-z0-9]*" /etc/nginx/snippets/fspirat-router.conf | head -1 | cut -d= -f2 > $A/router.token )
+            [ -s $A/tgbot.json ] || ( umask 077; printf "{\"secret\":\"%s\"}" "$(openssl rand -hex 24)" > $A/tgbot.json )
+            chown www-data:www-data $A/router.token $A/tgbot.json; chmod 600 $A/router.token $A/tgbot.json
+            . /etc/fspirat-watch.conf; SEC=$(jq -r .secret $A/tgbot.json)
+            if curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST https://fspirat.online/router/tg-hook | grep -q "^403$"; then
+              curl -s -m 15 "https://api.telegram.org/bot$TG_TOKEN/setWebhook" --data-urlencode "url=https://fspirat.online/router/tg-hook" \
+                --data-urlencode "secret_token=$SEC" --data-urlencode "allowed_updates=[\"message\",\"callback_query\"]" -d drop_pending_updates=true | jq -c "{webhook: .ok, d: .description}"
+              curl -s -m 15 "https://api.telegram.org/bot$TG_TOKEN/setMyCommands" -H "Content-Type: application/json" -d @/var/www/router-auth/tgbot-commands.json | jq -c "{commands: .ok}"
+            else echo "⚠️ /router/tg-hook не закрыт как ожидалось — webhook не включаю"; fi'
 
       - name: Verify
         run: |

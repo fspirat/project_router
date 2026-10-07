@@ -230,8 +230,10 @@ if [ "${exp:-0}" -gt 0 ] 2>/dev/null; then
 fi
 
 # Отчёт за сутки — каждый день в 9:00 по Самаре (05:00 UTC на сервере)
-if [ "$(date -u +%H%M)" = 0500 ] && [ "$(get report_day)" != "$(date +%F)" ]; then
-  put report_day "$(date +%F)"
+RNOW=/var/lib/fspirat-router-auth/report_now      # команда /report в Telegram-боте
+force=0; [ -f $RNOW ] && { rm -f $RNOW; force=1; }
+if { [ "$(date -u +%H%M)" = 0500 ] && [ "$(get report_day)" != "$(date +%F)" ]; } || [ $force = 1 ]; then
+  [ $force = 1 ] || put report_day "$(date +%F)"
   from=$((NOW - 86400))
   read -r okn avg fails offm <<<"$(awk -v t=$from '$1 >= t { if ($2 > 0) { n++; s += $2 } else if ($2 == 0) f++; else o++ } END { printf "%d %d %d %d", n, (n ? s / n : 0), f, o }' $S/history.tsv 2>/dev/null)"
   sw=$(awk -F'\t' -v t=$from '$1 >= t && ($2 == "auto" || $2 == "manual")' $S/events.tsv 2>/dev/null | wc -l)

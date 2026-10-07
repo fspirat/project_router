@@ -1,0 +1,12 @@
+{"commands":[
+ {"command":"status","description":"Состояние VPN, сервера и сервисов"},
+ {"command":"servers","description":"Серверы с пингом, подключение кнопкой"},
+ {"command":"vpn","description":"Подключить сервер: /vpn германия"},
+ {"command":"devices","description":"Кто в сети и сколько скачал"},
+ {"command":"block","description":"Выключить интернет устройству: /block имя"},
+ {"command":"unblock","description":"Включить интернет устройству: /unblock имя"},
+ {"command":"speed","description":"Тест скорости без VPN"},
+ {"command":"restart","description":"Перезапустить VPN"},
+ {"command":"reboot","description":"Перезагрузить роутер"},
+ {"command":"report","description":"Отчёт за сутки сейчас"},
+ {"command":"help","description":"Список команд"}]}

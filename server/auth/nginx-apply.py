@@ -89,7 +89,18 @@ def harden2(s):
         s = s.replace(loc, loc + hdr, 1)
     return s.rstrip('\n') + '\n' + FONTS
 
+# Этап 6: команды из Telegram — webhook без входа в панель, но только с адресов Telegram (и с секретом — проверяет tgbot.php)
+TGHOOK = ('\n# --- Telegram-бот: команды роутеру (server/auth/tgbot.php) ---\n'
+          'location = /router/tg-hook {\n    allow 149.154.160.0/20;\n    allow 91.108.4.0/22;\n    deny all;\n'
+          '    client_max_body_size 64k;\n    limit_req zone=fsr_api burst=30 nodelay;\n' + fcgi('tgbot.php') + '}\n')
+
+def tghook(s):
+    return s if 'location = /router/tg-hook' in s else s.rstrip('\n') + '\n' + TGHOOK
+
 def snippet(s):
+    return tghook(snippet_auth(s))
+
+def snippet_auth(s):
     if 'auth_request /_fsr_auth' in s:
         s = s if 'location = /router/data' in s else s.rstrip('\n') + '\n' + EXTRA
         return harden2(harden(s))
