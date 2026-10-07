@@ -1,0 +1,74 @@
+#!/usr/bin/lua
+-- FSPIRAT: пинг сервера Minecraft так же, как в игре (Server List Ping): handshake → status → ping/pong.
+-- Через SOCKS PassWall (тот же путь, что у устройств дома) или напрямую.
+-- Запуск: fspirat-mcping host [port] [socks_host:port]   → печатает задержку в ms или 0 (нет ответа)
+local nixio = require "nixio"
+local host, port, socks = arg[1], tonumber(arg[2] or "25565"), arg[3]
+
+local function now() local s, us = nixio.gettimeofday(); return s * 1000 + us / 1000 end
+local function varint(n)
+  local out = {}
+  if n < 0 then n = n + 4294967296 end
+  repeat
+    local b = n % 128; n = math.floor(n / 128)
+    if n > 0 then b = b + 128 end
+    out[#out + 1] = string.char(b)
+  until n == 0
+  return table.concat(out)
+end
+local function packet(id, body) local d = varint(id) .. body; return varint(#d) .. d end
+
+local sock
+local function recvn(n)
+  local buf = ""
+  while #buf < n do
+    local chunk = sock:recv(n - #buf)
+    if not chunk or #chunk == 0 then return nil end
+    buf = buf .. chunk
+  end
+  return buf
+end
+local function readvarint()
+  local n, shift = 0, 0
+  for _ = 1, 5 do
+    local c = recvn(1); if not c then return nil end
+    local b = c:byte(); n = n + (b % 128) * 2 ^ shift; shift = shift + 7
+    if b < 128 then return n end
+  end
+end
+
+local function run()
+  if socks then
+    local sh, sp = socks:match("^(.+):(%d+)$")
+    sock = nixio.connect(sh, tonumber(sp)); if not sock then return 0 end
+    sock:setopt("socket", "rcvtimeo", 4); sock:setopt("socket", "sndtimeo", 4)
+    sock:send("\5\1\0")
+    local r = recvn(2); if not r or r:byte(2) ~= 0 then return 0 end
+    sock:send("\5\1\0\3" .. string.char(#host) .. host .. string.char(math.floor(port / 256), port % 256))
+    r = recvn(4); if not r or r:byte(2) ~= 0 then return 0 end
+    local atyp = r:byte(4)
+    local skip = atyp == 1 and 6 or atyp == 4 and 18 or (recvn(1) or "\0"):byte() + 2
+    if not recvn(skip) then return 0 end
+  else
+    sock = nixio.connect(host, port); if not sock then return 0 end
+    sock:setopt("socket", "rcvtimeo", 4); sock:setopt("socket", "sndtimeo", 4)
+  end
+  -- handshake (протокол -1 = «любой»), next state 1 = status
+  sock:send(packet(0, varint(-1) .. varint(#host) .. host .. string.char(math.floor(port / 256), port % 256) .. varint(1)))
+  sock:send(packet(0, ""))
+  local len = readvarint(); if not len or len <= 0 or len > 1048576 then return 0 end
+  if not recvn(len) then return 0 end                       -- JSON статуса (MOTD, игроки) — пропускаем
+  local best = 0
+  for i = 1, 3 do                                           -- три ping/pong, берём лучший
+    local t = now()
+    sock:send(packet(1, "FSPIRAT" .. string.char(i)))
+    local l = readvarint(); if not l or not recvn(l) then break end
+    local ms = math.floor(now() - t + 0.5)
+    if best == 0 or ms < best then best = ms end
+  end
+  return best
+end
+
+local ok, ms = pcall(run)
+if sock then sock:close() end
+print(ok and ms or 0)

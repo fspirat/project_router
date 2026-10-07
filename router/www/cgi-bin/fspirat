@@ -137,14 +137,16 @@ status_json() {
   log=$(tail -n 8 $DIR/switch.log 2>/dev/null | jesc | sed 's/.*/"&"/' | tr '\n' ',' | sed 's/,$//')
   sv=$(cat $DIR/speed_vpn.json 2>/dev/null); [ -n "$sv" ] || sv=null
   sd=$(cat $DIR/speed_direct.json 2>/dev/null); [ -n "$sd" ] || sd=null
+  tg=$(cat $DIR/targets.json 2>/dev/null); [ -n "$tg" ] || tg=null
   hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
-  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
 }
 
 case "$action" in
   status) reply "200 OK" "$(status_json)" ;;
   net) reply "200 OK" "$(net_only)" ;;
   ping) /usr/bin/fspirat-ping >/dev/null 2>&1; reply "200 OK" "$(status_json)" ;;
+  targets) reply "200 OK" "$(/usr/bin/fspirat-targets 2>/dev/null)" ;;
   pingone)   # TCP-пинг одного сервера (лучший из трёх), заодно обновляет его в ping.json
     [ -n "$id" ] && [ "$(uci -q get passwall2.$id.group)" = "$GROUP" ] || reply "400 Bad Request" '{"error":"bad node"}'
     addr=$(uci -q get passwall2.$id.address); port=$(uci -q get passwall2.$id.port)

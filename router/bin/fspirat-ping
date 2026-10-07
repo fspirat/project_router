@@ -104,3 +104,6 @@ if [ $FAILS -ge $FAILS_TO_SWITCH ]; then
     echo "$(date '+%d.%m %H:%M') авто $CUR -> $BEST ${BEST_MS}ms" >> $DIR/switch.log
   fi
 fi
+
+# 5. Задержка до сервисов (YouTube, Discord, серверы Minecraft) — для блока под текущим сервером
+/usr/bin/fspirat-targets >/dev/null 2>&1

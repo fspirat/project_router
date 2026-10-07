@@ -1,0 +1,34 @@
+#!/bin/sh
+# FSPIRAT: задержка до важных сервисов «как у устройств дома» — через PassWall (SOCKS 1070, те же правила Split).
+#   web — время ответа на HTTP-запрос по уже открытому TLS-соединению (чистая задержка, без рукопожатий)
+#   mc  — Server List Ping, как в списке серверов Minecraft (fspirat-mcping), плюс напрямую для сравнения
+# Список: /etc/fspirat/targets (строки «вид|имя|адрес»), иначе — по умолчанию ниже. Результат: /tmp/fspirat/targets.json
+DIR=/tmp/fspirat; mkdir -p $DIR
+SOCKS=127.0.0.1:1070
+LIST=/etc/fspirat/targets
+[ -s $LIST ] || LIST=$DIR/targets.default
+[ -s $DIR/targets.default ] || cat > $DIR/targets.default <<'L'
+web|YouTube|https://www.youtube.com/generate_204
+web|Discord|https://discord.com/api/v10/gateway
+mc|AgeMagic|mc.agemagic.net:25565
+mc|LostVale|fixfuckingdpi.lostvale.fun:25565
+L
+jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
+web_ms() { # лучшая из двух: ttfb - tls
+  for k in 1 2; do
+    curl -s -m 8 -x socks5h://$SOCKS -o /dev/null -w '%{http_code} %{time_appconnect} %{time_starttransfer}\n' "$1"
+  done | awk '$1 != "000" && $3 > $2 {ms = int(($3 - $2) * 1000 + 0.5); if (!b || ms < b) b = ms} END {print b + 0}'
+}
+out=""
+while IFS='|' read -r kind name addr; do
+  case "$kind" in web|mc) ;; *) continue ;; esac
+  if [ "$kind" = web ]; then
+    v=$(web_ms "$addr"); d=null; host=$(echo "$addr" | sed 's#^[a-z]*://##; s#/.*##')
+  else
+    host=${addr%:*}; port=${addr##*:}; [ "$port" = "$addr" ] && port=25565
+    v=$(/usr/bin/fspirat-mcping "$host" "$port" $SOCKS); d=$(/usr/bin/fspirat-mcping "$host" "$port")
+  fi
+  out="$out${out:+,}{\"kind\":\"$kind\",\"name\":\"$(echo "$name" | jesc)\",\"host\":\"$(echo "$host" | jesc)\",\"vpn\":${v:-0},\"direct\":${d:-null}}"
+done < $LIST
+echo "{\"ts\":$(date +%s),\"list\":[$out]}" > $DIR/targets.json.tmp && mv $DIR/targets.json.tmp $DIR/targets.json
+cat $DIR/targets.json
