@@ -182,6 +182,15 @@ i.ok,b.ok{color:var(--green)} i.mid,b.mid{color:var(--amber)} i.slow,b.slow{colo
 .series button[aria-pressed="true"]{color:var(--lime);border-color:var(--green);background:#122009}
 .chart{width:100%;height:150px;display:block;background:var(--well);border:2px solid #000;box-shadow:inset 0 0 0 1px #1f2c17}
 .chart.small{height:110px}
+/* подсказка при наведении: линия, точка и время с задержкой */
+.chart-box{position:relative;touch-action:pan-y;cursor:crosshair}
+.cline{position:absolute;top:2px;bottom:2px;width:1px;margin-left:-.5px;background:rgba(217,231,205,.4);pointer-events:none}
+.cdot{position:absolute;width:8px;height:8px;margin:-4px 0 0 -4px;background:var(--lime);box-shadow:0 0 0 2px #000;pointer-events:none}
+.ctip{position:absolute;top:6px;z-index:2;pointer-events:none;padding:4px 8px;background:#0c110a;border:2px solid var(--green);box-shadow:3px 3px 0 #000;
+  font-size:12px;color:var(--dim);white-space:nowrap}
+.ctip span{display:block;font-size:11px}
+.ctip b{font-family:var(--pixel);font-size:11px;font-weight:400;line-height:1.9;color:var(--lime)}
+.ctip b.bad{font-family:var(--body);font-size:12px;font-weight:600;color:var(--pink)}
 .chart .grid{stroke:#16210f;stroke-width:1}
 .chart .line{fill:none;stroke:var(--lime);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:bevel}
 .chart .area{fill:rgba(155,224,82,.08)}

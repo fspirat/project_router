@@ -72,7 +72,7 @@
       <div class="h2row"><h2>Серверы</h2>
         <div class="h2btns"><button class="btn small" id="tg-edit" title="Какие сервисы мерить">✎ Сервисы</button><button class="btn small" id="ping-all" title="Пинг всех серверов и сервисов через каждый">↻ Пинг всех</button></div></div>
       <div class="tbl-wrap"><table class="srv-tbl" id="srv"><tbody><tr><td class="empty">Загружаю список серверов…</td></tr></tbody></table></div>
-      <p class="tbl-hint">Лучшее значение в столбце обведено. Нажми строку, чтобы подключить сервер. Сервисы через другие серверы меряются раз в 30 минут.</p>
+      <p class="tbl-hint">Числа — задержка в ms, лучшее в столбце обведено. Нажми строку, чтобы подключить сервер. Сервисы через другие серверы меряются раз в 30 минут.</p>
       <div class="best-list" id="best"></div>
       <div class="svcdir" id="svcdir"></div>
       <details id="dead-box" hidden><summary id="dead-sum"></summary><ul class="dead" id="dead"></ul></details>
@@ -92,7 +92,10 @@
             <button data-range="day" aria-pressed="true">24 ч</button><button data-range="week" aria-pressed="false">7 дней</button><button data-range="month" aria-pressed="false">30 дней</button>
           </div></div>
         <div class="series" id="series" role="group" aria-label="Что показать"></div>
-        <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График задержки"></svg>
+        <div class="chart-box" id="chart-box">
+          <svg class="chart" id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="График задержки"></svg>
+          <i class="cline" id="cline" hidden></i><i class="cdot" id="cdot" hidden></i><div class="ctip" id="ctip" role="status" hidden></div>
+        </div>
         <div class="chart-legend"><span id="chart-from">24 ч назад</span><span id="chart-max"></span><span>сейчас</span></div>
         <div class="stats" id="stats"></div>
       </section>

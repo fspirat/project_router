@@ -162,7 +162,7 @@ function renderHero(){
     const kp = [['Задержка', p.socks ? (p.real > 0 ? `<i class="${msCls(p.real)}">${num(p.real)} ms</i>` : '<i class="slow">нет</i>') : '—',
                  'Как пинг: ответ сайта через VPN по уже открытому соединению. Раз в 5 минут.']];
     services().forEach(x => { const v = svcVal(r, x.name);
-      kp.push([`${svcIcon(x)}${esc(x.name)}`, v ? `<i class="${msCls(v)}">${v}</i>` : '<i class="slow">—</i>', x.host]); });
+      kp.push([`${svcIcon(x)}${esc(x.name)}`, v ? `<i class="${msCls(v)}">${v} ms</i>` : '<i class="slow">—</i>', x.host]); });
     if(today) kp.push(['Сегодня ↓', `<i>${bytes(today)}</i>`, 'Все устройства дома, с полуночи']);
     $('#kpis').innerHTML = kp.map(([k, v, t]) => `<div title="${esc(t || '')}"><span>${k}</span>${v}</div>`).join('');
     $('#updated').textContent = p.updated ? 'Проверено ' + ago(p.updated) : '';
@@ -255,6 +255,7 @@ function renderChart(){
       if(p[1] > 0) seg.push(`${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`); else fails += `<rect class="fail" x="${x(p[0])-1.5}" y="${H-14}" width="3" height="14"/>`; prev = p[0]; });
     flush();
     svg.innerHTML = grid(W, H) + lines + fails;
+    chartView = {from, span, max, H, pts, step: hist && hist.range === range ? hist.step : 0, kind: 'svc'}; hideTip();
     $('#chart-max').textContent = ok.length ? `шкала до ${Math.round(max)} ms` : 'истории пока нет — она копится на сервере';
     $('#stats').innerHTML = fact('Средняя', ok.length ? Math.round(ok.reduce((a, b) => a + b, 0) / ok.length) + ' ms' : '—')
       + fact('Лучшая', ok.length ? Math.min(...ok) + ' ms' : '—') + fact('Худшая', ok.length ? Math.max(...ok) + ' ms' : '—')
@@ -285,6 +286,7 @@ function renderChart(){
   });
   flush();
   svg.innerHTML = grid(W, H) + off + areas + lines + fails;
+  chartView = {from, span, max, H, pts, step: hist && hist.range === range ? hist.step : 0, kind: 'link'}; hideTip();
   $('#chart-max').textContent = pts.length ? `шкала до ${Math.round(max)} ms` : 'данных за этот период пока нет';
   const st = hist && hist.range === range ? hist.stats : {avg: ok.length ? Math.round(ok.reduce((a,b) => a+b, 0) / ok.length) : null,
     min: ok.length ? Math.min(...ok) : null, max: ok.length ? Math.max(...ok) : null, fails: pts.filter(p => p[1] === 0).length, offline_min: null};
@@ -292,6 +294,34 @@ function renderChart(){
     + fact('Худшая', st.max ? st.max + ' ms' : '—') + fact('Сбоев VPN', st.fails)
     + fact('Без связи', st.offline_min == null ? '—' : st.offline_min ? minutes(st.offline_min) : 'ни разу');
 }
+
+/* Подсказка на графике: время и задержка в точке под курсором (на телефоне — нажать или вести пальцем).
+   За 7 и 30 дней точка — среднее за 30 минут / 2 часа, поэтому показывается промежуток. */
+let chartView = null;
+const hm = ts => { const d = new Date(ts * 1000); return two(d.getHours()) + ':' + two(d.getMinutes()); };
+function hideTip(){ ['#ctip', '#cline', '#cdot'].forEach(s => $(s).hidden = true); }
+function chartTip(e){
+  const v = chartView, svg = $('#chart');
+  if(!v || !v.pts.length) return hideTip();
+  const r = svg.getBoundingClientRect(), w = svg.clientWidth, h = svg.clientHeight;
+  const t = v.from + Math.min(Math.max(e.clientX - r.left - svg.clientLeft, 0), w) / w * v.span;
+  let p = null, d = Infinity;
+  for(const q of v.pts){ const k = Math.abs(q[0] - t); if(k < d){ d = k; p = q; } }
+  if(!p || d > Math.max(v.step, 300) * 1.5) return hideTip();          // в дыре между данными — ничего не показывать
+  const x = svg.clientLeft + (p[0] - v.from) / v.span * w, ms = p[1];
+  const val = ms > 0 ? `<b>${ms} ms</b>${v.step ? ' в среднем' : ''}${v.kind === 'link' && p[2] ? ` · сбоев VPN: ${p[2]}` : ''}`
+    : ms < 0 ? '<b class="bad">роутер не на связи</b>' : `<b class="bad">${v.kind === 'link' ? 'сбой VPN' : 'нет ответа'}</b>`;
+  const tip = $('#ctip');
+  tip.innerHTML = `<span>${v.step ? `${when(p[0] - v.step / 2)}–${hm(p[0] + v.step / 2)}` : when(p[0])}</span>${val}`;
+  tip.hidden = false;
+  tip.style.left = Math.min(Math.max(x - tip.offsetWidth / 2, 0), r.width - tip.offsetWidth) + 'px';
+  const line = $('#cline'); line.hidden = false; line.style.left = x + 'px';
+  const dot = $('#cdot'); dot.hidden = !(ms > 0);
+  if(ms > 0){ dot.style.left = x + 'px'; dot.style.top = svg.clientTop + (v.H - ms / v.max * (v.H - 8)) / v.H * h + 'px'; }
+}
+$('#chart-box').addEventListener('pointermove', chartTip);
+$('#chart-box').addEventListener('pointerdown', chartTip);
+$('#chart-box').addEventListener('pointerleave', e => { if(e.pointerType === 'mouse') hideTip(); });
 
 /* ---------- журнал ---------- */
 const two = n => String(n).padStart(2, '0');
