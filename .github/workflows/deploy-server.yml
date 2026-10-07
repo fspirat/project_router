@@ -75,6 +75,7 @@ jobs:
         run: |
           ssh vps 'set -e
             install -m 644 /tmp/fsr-deploy/nginx/conf.d/fsr-luci-cookie.conf /etc/nginx/conf.d/fsr-luci-cookie.conf
+            install -m 644 /tmp/fsr-deploy/nginx/conf.d/fsr-limits.conf /etc/nginx/conf.d/fsr-limits.conf   # зона limit_req для API (до nginx-apply)
             python3 /tmp/fsr-deploy/auth/nginx-apply.py
             # HSTS и без версии nginx в ответах
             install -m 644 /tmp/fsr-deploy/nginx/conf.d/security-headers.conf /etc/nginx/conf.d/security-headers.conf
