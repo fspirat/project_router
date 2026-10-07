@@ -201,12 +201,16 @@ function renderServers(s){
   const head = `<tr><th>Сервер</th><th title="Пинг до самого сервера">Пинг</th>${sv.map(x => `<th title="${esc(x.name)} · ${esc(x.host || '')}">${svcIcon(x)}<span>${esc(x.name)}</span></th>`).join('')}<th class="act"></th></tr>`;
   const row = n => { const r = svcOf(n.id), cur = n.id === s.current;
     return `<tr class="${cur ? 'cur' : ''}" data-node="${esc(n.id)}" ${cur ? '' : 'tabindex="0"'} title="${cur ? 'Подключён сейчас' : 'Нажми, чтобы подключить'}">
-      <th scope="row">${esc(n.name.trim())}</th>${cell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
+      <th scope="row">${esc(n.name.trim())}${n.own ? ' <span class="tag own">свой</span>' : ''}</th>${cell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
       <td class="act">${cur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>`; };
   const dir = s.svc && s.svc.direct;
   const drow = dir ? `<tr class="direct" title="Без VPN: так открываются сайты из списка MyDirect. Пинг — до ya.ru">
       <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${cell(num(dir.base))}${sv.map(x => cell(svcVal(dir, x.name), false, x.kind === 'web')).join('')}<td class="act"></td></tr>` : '';
-  $('#srv').innerHTML = `<thead>${head}</thead><tbody>${alive.map(row).join('') || `<tr><td class="empty" colspan="${sv.length + 3}">Ни один сервер не ответил. Нажми «↻ Пинг всех».</td></tr>`}${drow}</tbody>`;
+  // свои серверы (ярлык fspirat в PassWall) — отдельным разделом сверху, подписка — ниже
+  const own = alive.filter(n => n.own), sub = alive.filter(n => !n.own);
+  const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${t}</th></tr>`;
+  const body = own.length ? grp('Свои серверы') + own.map(row).join('') + (sub.length ? grp('Подписка nosok') + sub.map(row).join('') : '') : sub.map(row).join('');
+  $('#srv').innerHTML = `<thead>${head}</thead><tbody>${body || `<tr><td class="empty" colspan="${sv.length + 3}">Ни один сервер не ответил. Нажми «↻ Пинг всех».</td></tr>`}${drow}</tbody>`;
   // «лучший для …» — с кнопкой подключить
   const chips = sv.map(x => {
     const b = alive.filter(n => svcVal(svcOf(n.id), x.name) > 0).sort((a, c) => svcVal(svcOf(a.id), x.name) - svcVal(svcOf(c.id), x.name))[0];

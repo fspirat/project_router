@@ -2,7 +2,7 @@
 # FSPIRAT: CGI для страницы fspirat.online/router/
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 SHUNT=9DxG2j8l
-GROUP=nosok
+GROUP="nosok|fspirat"     # подписка и свои серверы
 DIR=/tmp/fspirat
 mkdir -p $DIR
 TOKEN=$(cat /etc/fspirat.token 2>/dev/null)
@@ -176,7 +176,7 @@ case "$action" in
   ping) /usr/bin/fspirat-ping all >/dev/null 2>&1; reply "200 OK" "$(status_json)" ;;
   targets) reply "200 OK" "$(/usr/bin/fspirat-targets 2>/dev/null)" ;;
   pingone)   # TCP-пинг одного сервера (лучший из трёх), заодно обновляет его в ping.json
-    [ -n "$id" ] && [ "$(uci -q get passwall2.$id.group)" = "$GROUP" ] || reply "400 Bad Request" '{"error":"bad node"}'
+    [ -n "$id" ] && uci -q get passwall2.$id.group | grep -qxE "$GROUP" || reply "400 Bad Request" '{"error":"bad node"}'
     addr=$(uci -q get passwall2.$id.address); port=$(uci -q get passwall2.$id.port)
     best=0
     for k in 1 2 3; do
@@ -186,7 +186,7 @@ case "$action" in
     [ -f $DIR/ping.json ] && sed -i "s/\(\"id\":\"$id\",\"name\":\"[^\"]*\",\"ms\":\)[0-9]*/\1$best/" $DIR/ping.json
     reply "200 OK" "{\"id\":\"$id\",\"ms\":$best,\"ts\":$(date +%s)}" ;;
   switch)
-    [ -n "$id" ] && [ "$(uci -q get passwall2.$id.group)" = "$GROUP" ] || reply "400 Bad Request" '{"error":"bad node"}'
+    [ -n "$id" ] && uci -q get passwall2.$id.group | grep -qxE "$GROUP" || reply "400 Bad Request" '{"error":"bad node"}'
     uci set passwall2.$SHUNT.default_node="$id"
     uci commit passwall2
     echo 0 > $DIR/fails
