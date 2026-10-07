@@ -79,7 +79,7 @@
   #real b{font-family:var(--pixel);font-size:10px;font-weight:400;color:var(--text)}
   #real.bad,#real.bad b{color:var(--red)}
   #cur-svc{grid-column:2}
-  #cur-svc .svc{display:block;font-size:13px;color:var(--dim)}
+  #cur-svc .svc{font-size:13px;color:var(--dim)}
   #cur-svc .svc span{white-space:nowrap}
   #cur-svc .svc b{font-weight:500;color:var(--text)}
   #cur-svc .svc b.ok{color:var(--green)} #cur-svc .svc b.mid{color:var(--amber)} #cur-svc .svc b.slow{color:var(--red)}
@@ -160,8 +160,11 @@
   .srv.is-cur{border-color:var(--green);background:#122009}
   .srv.is-off .srv-name{color:var(--dim)}
   .srv-name{overflow-wrap:anywhere}
-  .srv .svc{display:block;margin-top:3px;font-size:11.5px;color:var(--dim);letter-spacing:.01em}
-  .srv .svc span{white-space:nowrap}
+  .svc{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:11.5px;color:var(--dim);letter-spacing:.01em}
+  .svc span{white-space:nowrap}
+  .srv{grid-template-areas:"name ping rp act" "svc ping rp act";row-gap:3px}
+  .srv-name{grid-area:name} .srv .svc{grid-area:svc} .srv .ping{grid-area:ping} .srv .rp{grid-area:rp}
+  .srv .btn,.srv .tag{grid-area:act}
   .si{width:13px;height:10px;vertical-align:-1px;margin-right:4px}
   .si.sq{width:10px;height:10px;image-rendering:pixelated}
   .tg-keys .si{width:15px;height:11px;margin-right:0} .tg-keys .si.sq{width:11px;height:11px}
@@ -294,10 +297,14 @@
   @media (max-width:560px){
     .meters,.speed,.st-grid,.down-cols,.bands{grid-template-columns:1fr}
     .tab{flex:1;text-align:center;padding:12px 8px}
-    .srv{grid-template-columns:1fr auto auto;gap:8px 12px}
+    .srv{grid-template-columns:1fr auto auto;grid-template-areas:"name ping rp" "svc svc svc" "act act act";gap:6px 12px}
+    .svc{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px}
+    .controls{display:grid;grid-template-columns:1fr 1fr}
+    .controls .btn{width:100%;min-height:48px;display:flex;align-items:center;justify-content:center;text-align:center;padding-left:8px;padding-right:8px}
+    .controls .primary{grid-column:1/-1}
     .tg-row{grid-template-columns:22px 1fr 1fr auto}
     .tg-row input.addr{grid-column:2/-1;grid-row:2}
-    .srv .btn,.srv .tag{grid-column:1/-1;justify-self:start}
+    .srv .btn,.srv .tag{justify-self:start}
     .srv .ping{min-width:0}
     #cur-name{font-size:18px}
   }
@@ -788,11 +795,11 @@ function svcLine(n){
   if(!n.ms) return '';
   if(!r || !r.list) return state && state.svc_running ? '<small class="svc">измеряю…</small>' : '';
   return `<small class="svc" title="Задержка через этот сервер · ${esc(ago(r.ts))}">${r.list.map(x =>
-    `<span>${svcIcon(x)}${esc(x.name)} ${svcMs(x.vpn)}</span>`).join(' · ')}</small>`;
+    `<span>${svcIcon(x)}${esc(x.name)} ${svcMs(x.vpn)}</span>`).join('')}</small>`;
 }
 function srvRow(n, cur){
   return `<li class="srv${n.id === cur ? ' is-cur' : ''}${n.ms ? '' : ' is-off'}">
-    <span class="srv-name">${esc(n.name)}${svcLine(n)}</span>
+    <span class="srv-name">${esc(n.name)}</span>${svcLine(n)}
     <span class="ping">${pingHtml(n.ms)}</span>
     <button class="rp" data-ping="${esc(n.id)}" title="Пингануть этот сервер" aria-label="Пингануть ${esc(n.name)}">↻</button>
     ${n.id === cur ? '<span class="tag">Сейчас</span>'
@@ -803,8 +810,8 @@ function directRow(s){
   const r = s.svc && s.svc.direct;
   if(!r) return '';
   return `<li class="srv is-direct" title="Без VPN: так открываются сайты из списка MyDirect (Россия). Пинг — TCP до ya.ru">
-    <span class="srv-name">🇷🇺 Напрямую (MyDirect)${svcLine({id: 'direct', ms: 1})}</span>
-    <span class="ping">${pingHtml(r.base)}</span><span></span><span class="tag dim">без VPN</span>
+    <span class="srv-name">🇷🇺 Напрямую (MyDirect)</span>${svcLine({id: 'direct', ms: 1})}
+    <span class="ping">${pingHtml(r.base)}</span><span class="tag dim">без VPN</span>
   </li>`;
 }
 function renderServers(s){
