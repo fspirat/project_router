@@ -47,6 +47,7 @@ jobs:
           push router/bin/fspirat-svcping /usr/bin/fspirat-svcping
           push router/bin/fspirat-fw      /usr/bin/fspirat-fw
           push router/bin/fspirat-wake    /usr/bin/fspirat-wake
+          push router/bin/fspirat-pc      /usr/bin/fspirat-pc
           ssh vps "$R '/usr/bin/fspirat-fw && nft list table inet fspirat >/dev/null && echo \"  таблица inet fspirat на месте\"'"
           ssh vps "$R 'grep -q fspirat-ping /etc/crontabs/root || { echo \"*/5 * * * * /usr/bin/fspirat-ping\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
 

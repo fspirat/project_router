@@ -270,6 +270,13 @@
   .fold-panel summary{border:0;padding:6px 0;font-family:var(--pixel);font-size:11px;color:var(--green);letter-spacing:1px}
   .fold-panel summary span{font-family:var(--body);font-size:13px;letter-spacing:0;color:var(--dim)}
   .fold-panel summary span.up{color:var(--lime)} .fold-panel summary span.down{color:var(--red)}
+  .pc-pick{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
+  .pc-pick label{display:flex;gap:10px;align-items:center;color:var(--dim);font-size:14px;flex:1 1 260px;min-width:0}
+  .pc-pick select{flex:1;min-width:0;max-width:100%;font:inherit;font-size:14px;color:var(--text);background:#0a0f08;border:2px solid var(--edge);padding:6px 8px}
+  .pc-steps{margin:0 0 10px;padding-left:20px;color:var(--dim);font-size:14px} .pc-steps b{color:var(--text);font-weight:600}
+  .pc-acts{display:flex;gap:8px}
+  .pc-code{margin:10px 0 0;max-height:220px;overflow:auto;background:#0a0f08;border:2px solid var(--edge);padding:10px;font-size:11px;color:var(--text);white-space:pre}
+  .note code{font-size:11px;overflow-wrap:anywhere;color:var(--text)}
   .fold-body{padding:10px 0 4px}
 
   /* Устройства: 5 ГГц и 2,4 ГГц — два столбца, ниже кабель и «не в сети» */
@@ -419,6 +426,23 @@
       </div>
     </section>
 
+    <section class="panel fold-panel needs-router" id="pc-box">
+      <details id="pc-fold">
+        <summary>Компьютер: усыпить и разбудить · <span id="pc-sum">не настроено</span></summary>
+        <div class="fold-body">
+          <div class="pc-pick"><label>Твой компьютер <select id="pc-dev"></select></label><button class="btn small" id="pc-save">Сохранить</button></div>
+          <ol class="pc-steps">
+            <li>Нажми «Показать команду», затем «Скопировать».</li>
+            <li>На компьютере: Пуск → набери <b>PowerShell</b> → правой кнопкой → <b>Запуск от имени администратора</b>.</li>
+            <li>Вставь команду (правая кнопка мыши в окне) и нажми Enter. В конце появится зелёное «Готово».</li>
+          </ol>
+          <div class="pc-acts"><button class="btn small" id="pc-show">Показать команду</button><button class="btn small" id="pc-copy" hidden>Скопировать</button></div>
+          <pre class="pc-code" id="pc-code" hidden></pre>
+          <p class="note">Скрипт запускается вместе с Windows и ждёт команду только от роутера и только с секретным ключом — он уже вставлен в команду, никому её не показывай. «☾ Усыпить» включает обычный сон, из него ПК будит «⏻ Разбудить» (по Wi-Fi — если адаптер умеет). Удалить скрипт: <code>Stop-ScheduledTask 'FSPIRAT sleep'; Unregister-ScheduledTask 'FSPIRAT sleep' -Confirm:$false; Remove-NetFirewallRule -DisplayName 'FSPIRAT sleep'; Remove-Item -Recurse -Force "$env:ProgramData\FSPIRAT"</code></p>
+        </div>
+      </details>
+    </section>
+
     <section class="panel fold-panel" id="mtg-box" hidden>
       <details id="mtg-fold">
         <summary>Telegram-прокси · <span id="mtg-sum">—</span></summary>
@@ -476,6 +500,36 @@
   </div>
 </div>
 
+<script type="text/plain" id="pc-agent">
+# FSPIRAT: усыпить компьютер по команде с роутера (кнопка «☾ Усыпить» на fspirat.online/router/).
+# Ждёт на TCP 47321. Принимает только от роутера 192.168.7.1 и только с ключом из token.txt рядом.
+#   «PING ключ» → PONG (панель видит, что скрипт стоит); «SLEEP ключ» → OK и обычный сон (S3, не гибернация).
+# Запускается планировщиком при старте Windows от SYSTEM (задача «FSPIRAT sleep»).
+$Port = 47321
+$Router = '192.168.7.1'
+$Token = (Get-Content (Join-Path $PSScriptRoot 'token.txt') -Raw).Trim()
+Add-Type -Namespace FSP -Name Power -MemberDefinition '[DllImport("powrprof.dll")] public static extern bool SetSuspendState(bool hibernate, bool force, bool disableWake);'
+$l = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Any, $Port)
+$l.Start()
+while ($true) {
+  $c = $l.AcceptTcpClient()
+  $sleep = $false
+  try {
+    $c.ReceiveTimeout = 3000; $c.SendTimeout = 3000
+    $ip = $c.Client.RemoteEndPoint.Address.ToString()
+    if ($ip -eq $Router) {
+      $st = $c.GetStream()
+      $r = New-Object System.IO.StreamReader($st)
+      $w = New-Object System.IO.StreamWriter($st); $w.AutoFlush = $true
+      $p = "$($r.ReadLine())".Split(' ')
+      if ($p.Count -ne 2 -or $p[1] -ne $Token) { $w.WriteLine('DENY') }
+      elseif ($p[0] -eq 'PING') { $w.WriteLine('PONG') }
+      elseif ($p[0] -eq 'SLEEP') { $w.WriteLine('OK'); $sleep = $true }
+    }
+  } catch {} finally { $c.Close() }
+  if ($sleep) { Start-Sleep -Seconds 1; [FSP.Power]::SetSuspendState($false, $false, $false) | Out-Null }
+}
+</script>
 <script>
 const API = '/router/api';
 // Свой заголовок в каждом запросе: nginx без него отвечает 403. Чужой сайт или ссылка его подставить не могут,
@@ -732,6 +786,7 @@ function renderSys(y){
   renderNet(y.net);
 }
 
+const isPc = d => !!(state && state.pc && state.pc.mac === (d.mac || '').toLowerCase());
 const BANDS = {'5g': ['g5', '5 ГГц'], '2g': ['g2', '2,4 ГГц'], wired: ['', 'кабель']};
 function renderDevices(list){
   if(editing) return;                      // не мешать, пока пользователь вводит имя
@@ -751,7 +806,8 @@ function renderDevices(list){
         <button class="ed" data-edit="${esc(d.mac)}" title="Переименовать" aria-label="Переименовать">✎</button>
         ${own && d.name ? `<small>в сети называется ${esc(d.name)}</small>` : ''}
         ${d.blocked ? '<span class="band cut">без интернета</span>' : ''}
-        ${!d.online || d.wake ? `<button class="blk wk" data-wake="${esc(d.mac)}" title="Wake-on-LAN: разбудить компьютер из сна">⏻ Разбудить</button>` : ''}
+        ${isPc(d) && d.online ? `<button class="blk wk" data-sleep="${esc(d.mac)}" title="${state.pc.agent ? 'Отправить компьютер в сон' : 'Скрипт на ПК не отвечает — см. блок «Компьютер» выше'}">☾ Усыпить</button>` : ''}
+        ${!d.online || isPc(d) ? `<button class="blk wk" data-wake="${esc(d.mac)}" title="Wake-on-LAN: разбудить компьютер из сна">⏻ Разбудить</button>` : ''}
         <button class="blk" data-block="${esc(d.mac)}" title="${d.blocked ? 'Вернуть интернет' : 'Выключить интернет этому устройству'}">${d.blocked ? 'Включить интернет' : 'Выкл. интернет'}</button>
         ${info ? `<small class="band-info">${esc(info)}</small>` : ''}
         ${traf ? `<small class="dev-traf">${traf}</small>` : ''}
@@ -859,6 +915,7 @@ function renderSpeedCard(via, r){
 function renderSpeedtest(sp){ if(!sp) return; renderSpeedCard('vpn', sp.vpn); renderSpeedCard('direct', sp.direct); }
 
 function render(){
+  renderPc(state);
   renderStatus(state); renderChart(); renderSys(state.sys); renderSpeedtest(state.speed);
   renderDevices(state.devices); renderServers(state); renderLog(state);
 }
@@ -937,6 +994,71 @@ $('#range').addEventListener('click', e => {
   range = b.dataset.range;
   document.querySelectorAll('#range button').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderChart(); renderTChart(); loadData();
+});
+
+/* Компьютер: какой — выбрать, команда установки скрипта (скрипт для ПК встроен выше как #pc-agent), усыпить */
+function renderPc(s){
+  const pc = s.pc, sel = $('#pc-dev');
+  const nm = d => names[(d.mac || '').toLowerCase()] || d.name || d.mac;
+  if(document.activeElement !== sel){
+    const devs = (s.devices || []).slice().sort((a, b) => nm(a).localeCompare(nm(b)));
+    const want = pc ? pc.mac : ((devs.find(d => /shvrf|desktop|pc/i.test(d.name || '')) || {}).mac || '');
+    sel.innerHTML = '<option value="">— не выбран —</option>' + devs.map(d => `<option value="${esc(d.mac)}"${d.mac === want ? ' selected' : ''}>${esc(nm(d))} · ${esc(d.ip)}</option>`).join('');
+  }
+  const sum = $('#pc-sum');
+  if(!pc){ sum.textContent = 'не настроено'; sum.className = ''; return; }
+  const d = (s.devices || []).find(x => x.mac === pc.mac) || {mac: pc.mac};
+  sum.textContent = `${nm(d)} · ` + (pc.agent ? 'скрипт отвечает' : d.online ? 'скрипт не отвечает' : 'не в сети');
+  sum.className = pc.agent ? 'up' : d.online ? 'down' : '';
+}
+function pcInstall(tok){
+  const agent = $('#pc-agent').textContent.trim();
+  return [
+    '$d = Join-Path $env:ProgramData "FSPIRAT"',
+    'New-Item -ItemType Directory -Force $d | Out-Null',
+    "icacls $d /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null",
+    `Set-Content (Join-Path $d 'token.txt') '${tok}' -Encoding ASCII`,
+    "Set-Content (Join-Path $d 'fsp-sleep.ps1') -Encoding UTF8 -Value @'", agent, "'@",
+    "$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"' + (Join-Path $d 'fsp-sleep.ps1') + '\"')",
+    '$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)',
+    "Stop-ScheduledTask -TaskName 'FSPIRAT sleep' -ErrorAction SilentlyContinue",
+    "Register-ScheduledTask -TaskName 'FSPIRAT sleep' -Action $a -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $s -User 'SYSTEM' -RunLevel Highest -Force | Out-Null",
+    "Remove-NetFirewallRule -DisplayName 'FSPIRAT sleep' -ErrorAction SilentlyContinue",
+    "New-NetFirewallRule -DisplayName 'FSPIRAT sleep' -Direction Inbound -Protocol TCP -LocalPort 47321 -RemoteAddress 192.168.7.1 -Action Allow -Profile Any | Out-Null",
+    "Start-ScheduledTask -TaskName 'FSPIRAT sleep'",
+    "Write-Host 'Готово' -ForegroundColor Green", ''].join('\r\n');
+}
+$('#pc-save').addEventListener('click', async e => {
+  const b = e.currentTarget, mac = $('#pc-dev').value; b.disabled = true;
+  try { await api('pcset', '&mac=' + encodeURIComponent(mac)); state.pc = mac ? {mac, agent: false} : null; render(); toast(mac ? 'Компьютер выбран. Теперь установи на него скрипт.' : 'Компьютер больше не выбран.'); setTimeout(load, 3000); }
+  catch(err){ toast(err.message, true); }
+  finally { b.disabled = false; }
+});
+$('#pc-show').addEventListener('click', async e => {
+  const b = e.currentTarget; b.disabled = true;
+  try {
+    const r = await api('pcinfo');
+    $('#pc-code').textContent = pcInstall(r.token); $('#pc-code').hidden = false; $('#pc-copy').hidden = false;
+  } catch(err){ toast(err.message, true); }
+  finally { b.disabled = false; }
+});
+$('#pc-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#pc-code').textContent); toast('Команда скопирована. Вставь её в PowerShell от имени администратора.'); }
+  catch { const r = document.createRange(); r.selectNodeContents($('#pc-code')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Выделил команду — нажми Ctrl+C.'); }
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button[data-sleep]'); if(!b) return;
+  const mac = b.dataset.sleep, d = (state.devices || []).find(x => x.mac === mac) || {};
+  const nm = names[mac.toLowerCase()] || d.name || mac;
+  if(!confirm(`Отправить «${nm}» в сон?`)) return;
+  b.disabled = true;
+  try { await api('sleep', '&mac=' + encodeURIComponent(mac)); toast(`«${nm}» засыпает. Разбудить — кнопкой «⏻ Разбудить».`); setTimeout(load, 15000); }
+  catch(err){
+    const m = /NOAGENT|NOREPLY/.test(err.message) ? 'Скрипт на ПК не отвечает: он не установлен, или ПК уже спит.'
+      : /DENY/.test(err.message) ? 'Ключ не совпал — установи скрипт заново командой из блока «Компьютер».' : err.message;
+    toast(m, true);
+  }
+  finally { setTimeout(() => b.disabled = false, 5000); }
 });
 
 /* Разбудить компьютер (Wake-on-LAN). По Wi-Fi — только из сна и если адаптер умеет. */

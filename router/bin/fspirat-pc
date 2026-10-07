@@ -1,0 +1,21 @@
+#!/usr/bin/lua
+-- FSPIRAT: команда скрипту на компьютере (pc/fsp-sleep.ps1): fspirat-pc PING|SLEEP IP
+-- Ключ — /etc/fspirat/pc.token (его же панель вставляет в команду установки). Печатает ответ ПК:
+-- PONG / OK / DENY, NOAGENT — порт не отвечает (скрипта нет или ПК спит), NOREPLY — соединился, но ответа нет.
+local nixio = require 'nixio'
+local cmd, ip = arg[1], arg[2]
+local f = io.open('/etc/fspirat/pc.token'); local tok = f and f:read('*l'); if f then f:close() end
+if not tok or not ip or not ip:match('^%d+%.%d+%.%d+%.%d+$') or (cmd ~= 'PING' and cmd ~= 'SLEEP') then print('ERR'); os.exit(1) end
+local s = nixio.socket('inet', 'stream')
+s:setblocking(false)
+s:connect(ip, 47321)
+local fds = {{fd = s, events = nixio.poll_flags('out')}}
+local n = nixio.poll(fds, cmd == 'PING' and 800 or 2500)
+local ok, err = pcall(function() return s:getopt('socket', 'error') end)
+if not n or n < 1 or not ok or err ~= 0 then s:close(); print('NOAGENT'); os.exit(0) end
+s:setblocking(true)
+pcall(function() s:setopt('socket', 'rcvtimeo', 3) end)
+s:send(cmd .. ' ' .. tok .. '\n')
+local line = (s:recv(64) or ''):gsub('%s+$', '')
+s:close()
+print(line ~= '' and line or 'NOREPLY')
