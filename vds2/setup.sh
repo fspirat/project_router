@@ -36,7 +36,7 @@ fi
     streamSettings: {network: "raw", security: "reality",
       realitySettings: {dest: ($sni + ":443"), serverNames: [$sni], privateKey: $pk, shortIds: [$sid]}},
     sniffing: {enabled: true, destOverride: ["http", "tls", "quic"], routeOnly: true}}],
-  outbounds: [{protocol: "freedom", tag: "direct"}, {protocol: "blackhole", tag: "block"}],
+  outbounds: [{protocol: "freedom", tag: "direct", settings: {domainStrategy: "UseIPv4"}}, {protocol: "blackhole", tag: "block"}],
   routing: {rules: [{type: "field", ip: ["geoip:private"], outboundTag: "block"}, {type: "field", protocol: ["bittorrent"], outboundTag: "block"}]}
 }' > /usr/local/etc/xray/config.json )
 chown nobody:nogroup /usr/local/etc/xray/config.json 2>/dev/null || true; chmod 640 /usr/local/etc/xray/config.json; chgrp nogroup /usr/local/etc/xray/config.json 2>/dev/null || true
