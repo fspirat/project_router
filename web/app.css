@@ -35,7 +35,10 @@ body{
 a{color:var(--lime)}
 :focus-visible{outline:2px solid var(--lime);outline-offset:2px}
 
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+.top-links{display:flex;gap:8px}
+.btn.ghost{background:none;box-shadow:none;border-color:var(--edge);color:var(--dim)}
+.btn.ghost:hover:not(:disabled){background:#0f170b;color:var(--text);border-color:#2c4a17}
 .logo{font-family:var(--pixel);font-size:22px;color:var(--lime);text-decoration:none;text-shadow:3px 3px 0 #1f3a10;letter-spacing:1px}
 .logo small{display:block;font-size:10px;color:var(--dim);text-shadow:none;margin-top:8px;letter-spacing:3px}
 
@@ -62,18 +65,20 @@ h2{font-family:var(--pixel);font-size:11px;color:var(--green);font-weight:400;ma
 .btn.danger-outline{background:none;color:#f08a73;border-color:#5a2216;box-shadow:none}
 .btn.danger-outline:hover:not(:disabled){background:#1c0b06}
 
-/* Общее состояние — одна строка: заголовок, пункты, «обновлено …» (зелёный — ок, жёлтый — внимание, красный — проблема) */
-.overall{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;margin:0 0 12px;padding:10px 14px;
-  background:var(--panel);border:2px solid var(--edge);border-left-width:6px;transition:border-color .3s}
+/* Общее состояние — заголовок с «обновлено», пункты, главная кнопка (зелёный — ок, жёлтый — внимание, красный — проблема) */
+.overall{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px 22px;margin:0 0 18px;padding:12px 16px;
+  background:var(--panel);border:2px solid var(--edge);border-left-width:6px;box-shadow:4px 4px 0 #000;transition:border-color .3s}
 .overall.ok{border-left-color:var(--green)} .overall.warn{border-left-color:var(--amber)} .overall.err{border-left-color:var(--red)}
-.ov-title{font-family:var(--pixel);font-size:11px;font-weight:400;letter-spacing:1px}
+.ov-head{display:flex;flex-direction:column;gap:6px}
+.ov-title{font-family:var(--pixel);font-size:12px;font-weight:400;letter-spacing:1px;white-space:nowrap}
 .overall.ok .ov-title{color:var(--lime)} .overall.warn .ov-title{color:var(--amber)} .overall.err .ov-title{color:var(--red)}
-.ov-items{display:flex;flex-wrap:wrap;gap:4px 16px;list-style:none;margin:0;padding:0;font-size:13px;color:var(--dim)}
-.ov-items li{display:inline-flex;align-items:center;gap:6px}
+.ov-upd{color:var(--dim);font-size:12px}
+.ov-items{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:0;padding:0;font-size:13px;color:var(--dim)}
+.ov-items li{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .ov-items i{width:8px;height:8px;background:var(--green)}
 .ov-items .warn i{background:var(--amber)} .ov-items .err i{background:var(--red)}
 .ov-items b{font-weight:500;color:var(--text)} .ov-items .err b{color:#f08a73} .ov-items .warn b{color:var(--amber)}
-.ov-upd{margin-left:auto;color:var(--dim);font-size:12px}
+.meta-acts{display:flex;gap:8px;flex-wrap:wrap}
 
 /* Окно подтверждения */
 .dlg{max-width:min(420px,calc(100vw - 32px));padding:20px;color:var(--text);background:var(--panel);border:2px solid var(--green);
@@ -212,8 +217,6 @@ details[open] summary::before{content:"− "}
 .dev-ip{color:var(--dim);font-size:13px;text-align:right}
 .dev-ip small{display:block;font-size:11px;opacity:.7}
 
-.controls{display:flex;gap:10px;flex-wrap:wrap}
-.topbar{padding:12px}
 
 /* Вкладки страниц */
 .tabs{display:flex;gap:6px;margin:0 0 18px}
@@ -249,7 +252,7 @@ details[open] summary::before{content:"− "}
 .down-cols ul{margin:0;padding-left:18px}
 .down-cols li{margin:2px 0}
 .down .note{margin-top:14px}
-body.is-down .controls button{opacity:.45;pointer-events:none}
+body.is-down [data-act],body.is-down #ping-btn{opacity:.45;pointer-events:none}
 body.is-down.no-state .needs-router{display:none}
 
 /* Переключатель периода графика */
@@ -296,12 +299,6 @@ body.is-down.no-state .needs-router{display:none}
 .fold-panel summary{border:0;padding:6px 0;font-family:var(--pixel);font-size:11px;color:var(--green);letter-spacing:1px}
 .fold-panel summary span{font-family:var(--body);font-size:13px;letter-spacing:0;color:var(--dim)}
 .fold-panel summary span.up{color:var(--lime)} .fold-panel summary span.down{color:var(--red)}
-.pc-pick{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
-.pc-pick label{display:flex;gap:10px;align-items:center;color:var(--dim);font-size:14px;flex:1 1 260px;min-width:0}
-.pc-pick select{flex:1;min-width:0;max-width:100%;font:inherit;font-size:14px;color:var(--text);background:#0a0f08;border:2px solid var(--edge);padding:6px 8px}
-.pc-steps{margin:0 0 10px;padding-left:20px;color:var(--dim);font-size:14px} .pc-steps b{color:var(--text);font-weight:600}
-.pc-acts{display:flex;gap:8px}
-.pc-code{margin:10px 0 0;max-height:220px;overflow:auto;background:#0a0f08;border:2px solid var(--edge);padding:10px;font-size:11px;color:var(--text);white-space:pre}
 .note code{font-size:11px;overflow-wrap:anywhere;color:var(--text)}
 .fold-body{padding:10px 0 4px}
 
@@ -328,17 +325,17 @@ body.is-down.no-state .needs-router{display:none}
 .toast.err{border-color:var(--red);background:#22100b}
 
 @media (max-width:560px){
-  .overall{padding:10px 12px;gap:6px 12px}
-  .ov-upd{margin-left:0;width:100%}
+  .overall{grid-template-columns:1fr auto;padding:12px;gap:10px 12px}
+  .ov-items{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+  .ov-items li{white-space:normal}
+  .ov-btn{grid-row:1;grid-column:2}
   .log li{grid-template-columns:auto 1fr} .log .lv{display:none}
   .dlg-acts .btn{flex:1}
   .meters,.speed,.st-grid,.down-cols,.bands{grid-template-columns:1fr}
   .tab{flex:1;text-align:center;padding:12px 8px}
   .srv{grid-template-columns:1fr auto auto;grid-template-areas:"name ping rp" "svc svc svc" "act act act";gap:6px 12px}
   .svc{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px}
-  .controls{display:grid;grid-template-columns:1fr 1fr}
-  .controls .btn{width:100%;min-height:48px;display:flex;align-items:center;justify-content:center;text-align:center;padding-left:8px;padding-right:8px}
-  .controls .primary{grid-column:1/-1}
+  .meta-acts{width:100%} .meta-acts .btn{flex:1}
   .tg-row{grid-template-columns:22px 1fr 1fr auto}
   .tg-row input.addr{grid-column:2/-1;grid-row:2}
   .srv .btn,.srv .tag{justify-self:start}

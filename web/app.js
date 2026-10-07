@@ -75,8 +75,6 @@ const ERR = {
   'bad mac': 'неверный адрес устройства (MAC)', 'bad node': 'такого сервера нет — обнови список', 'bad via': 'неизвестный вид теста',
   name: 'недопустимое имя', url: 'нужна ссылка вида https://сайт/путь', host: 'неверный адрес сервера', many: 'не больше 8 строк',
   inner: 'адрес ведёт внутрь домашней сети или на сам роутер — так нельзя', long: 'слишком длинный список',
-  NOAGENT: 'скрипт на ПК не отвечает: он не установлен, или ПК уже спит', NOREPLY: 'скрипт на ПК не ответил',
-  DENY: 'ключ не совпал — установи скрипт на ПК заново', 'not pc': 'это устройство не выбрано как компьютер', 'no ip': 'у устройства нет адреса',
 };
 async function api(action, extra = ''){
   const post = !READ.has(action), url = `${API}?action=${action}${extra}`;
@@ -297,7 +295,6 @@ function renderSys(y){
   renderNet(y.net);
 }
 
-const isPc = d => !!(state && state.pc && state.pc.mac === (d.mac || '').toLowerCase());
 const BANDS = {'5g': ['g5', '5 ГГц'], '2g': ['g2', '2,4 ГГц'], wired: ['', 'кабель']};
 function renderDevices(list){
   if(editing) return;                      // не мешать, пока пользователь вводит имя
@@ -317,8 +314,6 @@ function renderDevices(list){
         <button class="ed" data-edit="${esc(d.mac)}" title="Переименовать" aria-label="Переименовать">✎</button>
         ${own && d.name ? `<small>в сети называется ${esc(d.name)}</small>` : ''}
         ${d.blocked ? '<span class="band cut">без интернета</span>' : ''}
-        ${isPc(d) && d.online ? `<button class="blk wk" data-sleep="${esc(d.mac)}" title="${state.pc.agent ? 'Отправить компьютер в сон' : 'Скрипт на ПК не отвечает — см. блок «Компьютер» выше'}">☾ Усыпить</button>` : ''}
-        ${!d.online || isPc(d) ? `<button class="blk wk" data-wake="${esc(d.mac)}" title="Wake-on-LAN: разбудить компьютер из сна">⏻ Разбудить</button>` : ''}
         <button class="blk" data-block="${esc(d.mac)}" title="${d.blocked ? 'Вернуть интернет' : 'Выключить интернет этому устройству'}">${d.blocked ? 'Включить интернет' : 'Выкл. интернет'}</button>
         ${info ? `<small class="band-info">${esc(info)}</small>` : ''}
         ${traf ? `<small class="dev-traf">${traf}</small>` : ''}
@@ -465,7 +460,6 @@ function tickUpdated(){
 }
 
 function render(){
-  renderPc(state);
   renderStatus(state); renderChart(); renderSys(state.sys); renderSpeedtest(state.speed);
   renderDevices(state.devices); renderServers(state); renderLog(state); renderOverall();
 }
@@ -547,81 +541,6 @@ $('#range').addEventListener('click', e => {
   renderChart(); renderTChart(); loadData();
 });
 
-/* Компьютер: какой — выбрать, команда установки скрипта (скрипт для ПК встроен выше как #pc-agent), усыпить */
-function renderPc(s){
-  const pc = s.pc, sel = $('#pc-dev');
-  const nm = d => names[(d.mac || '').toLowerCase()] || d.name || d.mac;
-  if(document.activeElement !== sel){
-    const devs = (s.devices || []).slice().sort((a, b) => nm(a).localeCompare(nm(b)));
-    const want = pc ? pc.mac : ((devs.find(d => /shvrf|desktop|pc/i.test(d.name || '')) || {}).mac || '');
-    sel.innerHTML = '<option value="">— не выбран —</option>' + devs.map(d => `<option value="${esc(d.mac)}"${d.mac === want ? ' selected' : ''}>${esc(nm(d))} · ${esc(d.ip)}</option>`).join('');
-  }
-  const sum = $('#pc-sum');
-  if(!pc){ sum.textContent = 'не настроено'; sum.className = ''; return; }
-  const d = (s.devices || []).find(x => x.mac === pc.mac) || {mac: pc.mac};
-  sum.textContent = `${nm(d)} · ` + (pc.agent ? 'скрипт отвечает' : d.online ? 'скрипт не отвечает' : 'не в сети');
-  sum.className = pc.agent ? 'up' : d.online ? 'down' : '';
-}
-function pcInstall(tok){
-  const agent = $('#pc-agent').textContent.trim();
-  return [
-    '$d = Join-Path $env:ProgramData "FSPIRAT"',
-    'New-Item -ItemType Directory -Force $d | Out-Null',
-    "icacls $d /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null",
-    `Set-Content (Join-Path $d 'token.txt') '${tok}' -Encoding ASCII`,
-    "Set-Content (Join-Path $d 'fsp-sleep.ps1') -Encoding UTF8 -Value @'", agent, "'@",
-    "$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"' + (Join-Path $d 'fsp-sleep.ps1') + '\"')",
-    '$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)',
-    "Stop-ScheduledTask -TaskName 'FSPIRAT sleep' -ErrorAction SilentlyContinue",
-    "Register-ScheduledTask -TaskName 'FSPIRAT sleep' -Action $a -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $s -User 'SYSTEM' -RunLevel Highest -Force | Out-Null",
-    "Remove-NetFirewallRule -DisplayName 'FSPIRAT sleep' -ErrorAction SilentlyContinue",
-    "New-NetFirewallRule -DisplayName 'FSPIRAT sleep' -Direction Inbound -Protocol TCP -LocalPort 47321 -RemoteAddress 192.168.7.1 -Action Allow -Profile Any | Out-Null",
-    "Start-ScheduledTask -TaskName 'FSPIRAT sleep'",
-    "Write-Host 'Готово' -ForegroundColor Green", ''].join('\r\n');
-}
-$('#pc-save').addEventListener('click', async e => {
-  const b = e.currentTarget, mac = $('#pc-dev').value; b.disabled = true;
-  try { await api('pcset', '&mac=' + encodeURIComponent(mac)); state.pc = mac ? {mac, agent: false} : null; render(); toast(mac ? 'Компьютер выбран. Теперь установи на него скрипт.' : 'Компьютер больше не выбран.'); setTimeout(load, 3000); }
-  catch(err){ toast(err.message, true); }
-  finally { b.disabled = false; }
-});
-$('#pc-show').addEventListener('click', async e => {
-  const b = e.currentTarget; b.disabled = true;
-  try {
-    const r = await api('pcinfo');
-    $('#pc-code').textContent = pcInstall(r.token); $('#pc-code').hidden = false; $('#pc-copy').hidden = false;
-  } catch(err){ toast(err.message, true); }
-  finally { b.disabled = false; }
-});
-$('#pc-copy').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText($('#pc-code').textContent); toast('Команда скопирована. Вставь её в PowerShell от имени администратора.'); }
-  catch { const r = document.createRange(); r.selectNodeContents($('#pc-code')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Выделил команду — нажми Ctrl+C.'); }
-});
-document.addEventListener('click', async e => {
-  const b = e.target.closest('button[data-sleep]'); if(!b) return;
-  const mac = b.dataset.sleep, d = (state.devices || []).find(x => x.mac === mac) || {};
-  const nm = names[mac.toLowerCase()] || d.name || mac;
-  if(!await ask({title: `Усыпить «${nm}»?`, text: 'Компьютер уйдёт в обычный сон. Разбудить — кнопкой «⏻ Разбудить».', ok: 'Усыпить'})) return;
-  const done = busy(b, 'Усыпляю…');
-  try { await api('sleep', '&mac=' + encodeURIComponent(mac)); toast(`«${nm}» засыпает.`); setTimeout(load, 15000); }
-  catch(err){ toast(err.message, true); }
-  finally { done(5000); }
-});
-
-/* Разбудить компьютер (Wake-on-LAN). По Wi-Fi — только из сна и если адаптер умеет. */
-document.addEventListener('click', async e => {
-  const b = e.target.closest('button[data-wake]'); if(!b) return;
-  const mac = b.dataset.wake, d = (state.devices || []).find(x => x.mac === mac) || {};
-  const nm = names[mac.toLowerCase()] || d.name || mac;
-  const done = busy(b, 'Бужу…');
-  try {
-    await api('wake', '&mac=' + encodeURIComponent(mac));
-    toast(`Сигнал «проснись» отправлен на «${nm}». Если компьютер умеет просыпаться по сети, он появится в сети через 10–30 секунд.`);
-    setTimeout(load, 20000); setTimeout(load, 45000);
-  } catch(err){ toast(err.message, true); }
-  finally { done(5000); }
-});
-
 /* Выключить / включить интернет устройству (fspirat-fw на роутере: MAC в наборе block) */
 document.addEventListener('click', async e => {
   const b = e.target.closest('button[data-block]'); if(!b) return;
@@ -671,7 +590,7 @@ async function loadNet(){
 
 /* ---------- действия ---------- */
 async function pingAll(){
-  const undo = [$('#ping-btn'), $('#ping-all')].map(b => busy(b, 'Проверяю, ~20 сек…'));
+  const undo = [busy($('#ping-btn'), 'Проверяю…'), busy($('#ping-all'), 'Проверяю, ~20 сек…')];
   try { state = await api('ping'); render(); toast('Проверка серверов завершена.'); }
   catch(err){ toast(err.message, true); }
   finally { undo.forEach(f => f()); }
@@ -722,7 +641,7 @@ const ACTIONS = {
   update:  { title: 'Обновить подписку?', text: 'Список серверов nosok скачается заново, это займёт до минуты.', ok: 'Обновить', busy: 'Обновляю…', done: 'Подписка обновляется, список серверов обновится примерно через минуту.', quiet: 0 },
   reboot:  { title: 'Перезагрузить роутер?', text: 'Интернет дома пропадёт на 1–2 минуты, панель будет недоступна, пока роутер не вернётся.', ok: 'Перезагрузить', danger: true, busy: 'Перезагружаю…', done: 'Роутер перезагружается. Страница сама обновится, когда он вернётся.', quiet: 150000 },
 };
-document.querySelector('.controls').addEventListener('click', async e => {
+document.addEventListener('click', async e => {     // кнопки data-act: в блоке VPN и в блоке «Роутер»
   const b = e.target.closest('button[data-act]'); if(!b) return;
   const a = ACTIONS[b.dataset.act];
   if(!await ask(a)) return;

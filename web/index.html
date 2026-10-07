@@ -15,25 +15,19 @@
 </head>
 <body>
 <div class="wrap">
-  <header>
+  <header class="top">
     <a class="logo" href="/">FSPIRAT<small>ROUTER</small></a>
-    <a class="btn" href="https://router.fspirat.online" target="_blank" rel="noopener">Открыть LuCI</a>
+    <nav class="top-links" aria-label="Ссылки">
+      <a class="btn ghost small" href="https://router.fspirat.online" target="_blank" rel="noopener" title="Полные настройки роутера (LuCI)">LuCI ↗</a>
+      <a class="btn ghost small" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
+    </nav>
   </header>
 
+  <!-- Общее состояние: заголовок и «обновлено», пункты, одна главная кнопка. Остальные действия — в своих блоках ниже. -->
   <section class="overall" id="overall" aria-live="polite">
-    <b class="ov-title" id="ov-title">ПРОВЕРЯЮ…</b>
+    <div class="ov-head"><b class="ov-title" id="ov-title">ПРОВЕРЯЮ…</b><small class="ov-upd" id="ov-upd"></small></div>
     <ul class="ov-items" id="ov-items"></ul>
-    <small class="ov-upd" id="ov-upd"></small>
-  </section>
-
-  <section class="panel topbar">
-    <div class="controls">
-      <button class="btn primary" id="ping-btn">Проверить серверы</button>
-      <button class="btn" data-act="restart">Перезапустить VPN</button>
-      <button class="btn" data-act="update">Обновить подписку</button>
-      <button class="btn danger" data-act="reboot">Перезагрузить роутер</button>
-      <a class="btn" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
-    </div>
+    <button class="btn primary small ov-btn" id="ping-btn" title="Пинг всех серверов, проверка VPN и сервисов">↻ Проверить</button>
   </section>
 
   <section class="panel down" id="down" role="alert" hidden>
@@ -68,7 +62,8 @@
         <div id="cur-svc"></div>
       </div>
       <div class="warn" id="warn" hidden>В PassWall выбран не узел Split: правило прямых сайтов не работает, а смена сервера здесь ни на что не повлияет. Выбери Split в Basic Settings → Node.</div>
-      <div class="meta"><span id="updated"></span></div>
+      <div class="meta"><span id="updated"></span>
+        <span class="meta-acts"><button class="btn small" data-act="restart">Перезапустить VPN</button><button class="btn small" data-act="update">Обновить подписку</button></span></div>
     </section>
 
     <section class="panel">
@@ -127,23 +122,6 @@
       </div>
     </section>
 
-    <section class="panel fold-panel needs-router" id="pc-box">
-      <details id="pc-fold">
-        <summary>Компьютер: усыпить и разбудить · <span id="pc-sum">не настроено</span></summary>
-        <div class="fold-body">
-          <div class="pc-pick"><label>Твой компьютер <select id="pc-dev"></select></label><button class="btn small" id="pc-save">Сохранить</button></div>
-          <ol class="pc-steps">
-            <li>Нажми «Показать команду», затем «Скопировать».</li>
-            <li>На компьютере: Пуск → набери <b>PowerShell</b> → правой кнопкой → <b>Запуск от имени администратора</b>.</li>
-            <li>Вставь команду (правая кнопка мыши в окне) и нажми Enter. В конце появится зелёное «Готово».</li>
-          </ol>
-          <div class="pc-acts"><button class="btn small" id="pc-show">Показать команду</button><button class="btn small" id="pc-copy" hidden>Скопировать</button></div>
-          <pre class="pc-code" id="pc-code" hidden></pre>
-          <p class="note">Скрипт запускается вместе с Windows и ждёт команду только от роутера и только с секретным ключом — он уже вставлен в команду, никому её не показывай. «☾ Усыпить» включает обычный сон, из него ПК будит «⏻ Разбудить» (по Wi-Fi — если адаптер умеет). Удалить скрипт: <code>Stop-ScheduledTask 'FSPIRAT sleep'; Unregister-ScheduledTask 'FSPIRAT sleep' -Confirm:$false; Remove-NetFirewallRule -DisplayName 'FSPIRAT sleep'; Remove-Item -Recurse -Force "$env:ProgramData\FSPIRAT"</code></p>
-        </div>
-      </details>
-    </section>
-
     <section class="panel fold-panel" id="mtg-box" hidden>
       <details id="mtg-fold">
         <summary>Telegram-прокси · <span id="mtg-sum">—</span></summary>
@@ -180,7 +158,7 @@
     </section>
 
     <section class="panel">
-      <h2>Роутер</h2>
+      <div class="h2row"><h2>Роутер</h2><button class="btn small danger" data-act="reboot">Перезагрузить роутер</button></div>
       <div class="sys-head"><span id="sys-model">—</span><span id="sys-fw"></span></div>
       <div class="meters">
         <div class="meter"><div class="m-top"><span>Процессор</span><b id="m-cpu">—</b></div><div class="xp"><i id="x-cpu"></i></div><small id="s-cpu"></small></div>
@@ -217,36 +195,6 @@
   <div class="dlg-acts"><button class="btn" id="dlg-cancel" type="button">Отмена</button><button class="btn primary" id="dlg-ok" type="button">Да</button></div>
 </dialog>
 
-<script type="text/plain" id="pc-agent">
-# FSPIRAT: усыпить компьютер по команде с роутера (кнопка «☾ Усыпить» на fspirat.online/router/).
-# Ждёт на TCP 47321. Принимает только от роутера 192.168.7.1 и только с ключом из token.txt рядом.
-#   «PING ключ» → PONG (панель видит, что скрипт стоит); «SLEEP ключ» → OK и обычный сон (S3, не гибернация).
-# Запускается планировщиком при старте Windows от SYSTEM (задача «FSPIRAT sleep»).
-$Port = 47321
-$Router = '192.168.7.1'
-$Token = (Get-Content (Join-Path $PSScriptRoot 'token.txt') -Raw).Trim()
-Add-Type -Namespace FSP -Name Power -MemberDefinition '[DllImport("powrprof.dll")] public static extern bool SetSuspendState(bool hibernate, bool force, bool disableWake);'
-$l = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Any, $Port)
-$l.Start()
-while ($true) {
-  $c = $l.AcceptTcpClient()
-  $sleep = $false
-  try {
-    $c.ReceiveTimeout = 3000; $c.SendTimeout = 3000
-    $ip = $c.Client.RemoteEndPoint.Address.ToString()
-    if ($ip -eq $Router) {
-      $st = $c.GetStream()
-      $r = New-Object System.IO.StreamReader($st)
-      $w = New-Object System.IO.StreamWriter($st); $w.AutoFlush = $true
-      $p = "$($r.ReadLine())".Split(' ')
-      if ($p.Count -ne 2 -or $p[1] -ne $Token) { $w.WriteLine('DENY') }
-      elseif ($p[0] -eq 'PING') { $w.WriteLine('PONG') }
-      elseif ($p[0] -eq 'SLEEP') { $w.WriteLine('OK'); $sleep = $true }
-    }
-  } catch {} finally { $c.Close() }
-  if ($sleep) { Start-Sleep -Seconds 1; [FSP.Power]::SetSuspendState($false, $false, $false) | Out-Null }
-}
-</script>
 <script src="app.js"></script>
 </body>
 </html>

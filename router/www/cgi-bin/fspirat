@@ -156,14 +156,7 @@ status_json() {
   svc=$(for f in $DIR/svc/*.json; do [ -f "$f" ] && printf '"%s":%s,' "$(basename "$f" .json)" "$(cat "$f")"; done | sed 's/,$//')
   [ -f $DIR/svc/lock ] && kill -0 "$(cat $DIR/svc/lock)" 2>/dev/null && svcrun=true || svcrun=false
   hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
-  pc=null
-  pcmac=$(cat /etc/fspirat/pc.mac 2>/dev/null)
-  if [ -n "$pcmac" ]; then      # компьютер со скриптом «Усыпить» (pc/fsp-sleep.ps1): стоит ли скрипт и отвечает ли
-    pcip=$(awk -v m="$pcmac" 'tolower($2)==m{print $3; exit}' /tmp/dhcp.leases)
-    a=$( [ -n "$pcip" ] && [ -s /etc/fspirat/pc.token ] && /usr/bin/fspirat-pc PING "$pcip" 2>/dev/null)
-    pc="{\"mac\":\"$pcmac\",\"agent\":$([ "$a" = PONG ] && echo true || echo false)}"
-  fi
-  echo "{\"running\":$run,\"pc\":$pc,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
 }
 
 case "$action" in
@@ -215,30 +208,6 @@ case "$action" in
     /usr/bin/fspirat-fw $action "$mac" || reply "500 Internal Server Error" '{"error":"nft"}'
     echo "$(date '+%d.%m %H:%M') $([ $action = block ] && echo 'интернет выключен' || echo 'интернет включён'): $mac" >> $DIR/switch.log
     reply "200 OK" "{\"ok\":true,\"mac\":\"$mac\",\"blocked\":$([ $action = block ] && echo true || echo false)}" ;;
-  wake)   # разбудить компьютер (Wake-on-LAN) — fspirat-wake
-    echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || reply "400 Bad Request" '{"error":"bad mac"}'
-    wip=$(awk -v m="$mac" 'tolower($2)==m{print $3; exit}' /tmp/dhcp.leases)
-    n=$(/usr/bin/fspirat-wake "$mac" $wip 2>/dev/null)
-    [ "${n:-0}" -gt 0 ] || reply "500 Internal Server Error" '{"error":"send"}'
-    reply "200 OK" "{\"ok\":true,\"sent\":$n}" ;;
-  pcinfo)   # ключ для скрипта на ПК (создаётся при первом запросе) — только здесь, в логи и статус не попадает
-    mkdir -p /etc/fspirat
-    [ -s /etc/fspirat/pc.token ] || { (umask 077; head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > /etc/fspirat/pc.token); }
-    reply "200 OK" "{\"token\":\"$(cat /etc/fspirat/pc.token)\",\"mac\":\"$(cat /etc/fspirat/pc.mac 2>/dev/null)\"}" ;;
-  pcset)    # какое устройство — компьютер (пустой mac — убрать)
-    [ -n "$(param mac)" ] && [ -z "$mac" ] && reply "400 Bad Request" '{"error":"bad mac"}'
-    mkdir -p /etc/fspirat
-    if [ -z "$mac" ]; then rm -f /etc/fspirat/pc.mac
-    else echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || reply "400 Bad Request" '{"error":"bad mac"}'; echo "$mac" > /etc/fspirat/pc.mac; fi
-    reply "200 OK" '{"ok":true}' ;;
-  sleep)    # усыпить компьютер (только тот, что выбран как ПК)
-    [ -n "$mac" ] && [ "$mac" = "$(cat /etc/fspirat/pc.mac 2>/dev/null)" ] || reply "400 Bad Request" '{"error":"not pc"}'
-    pcip=$(awk -v m="$mac" 'tolower($2)==m{print $3; exit}' /tmp/dhcp.leases)
-    [ -n "$pcip" ] || reply "400 Bad Request" '{"error":"no ip"}'
-    r=$(/usr/bin/fspirat-pc SLEEP "$pcip" 2>/dev/null)
-    [ "$r" = OK ] || reply "400 Bad Request" "{\"error\":\"$r\"}"
-    echo "$(date '+%d.%m %H:%M') компьютер усыплён: $mac" >> $DIR/switch.log
-    reply "200 OK" '{"ok":true}' ;;
   settargets)   # свой список для пинга: list=вид~имя~адрес!вид~имя~адрес… (до 8 строк); пусто — список по умолчанию
     res=$(lua - "$QUERY_STRING" <<'L'
 local q = ('&' .. arg[1]):match('&list=([^&]*)') or ''
