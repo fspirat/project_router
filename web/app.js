@@ -116,6 +116,9 @@ function svcIcon(x){
   return x.kind === 'mc' ? ICONS.mc : ICONS.web;
 }
 const msCls = ms => ms < 120 ? 'ok' : ms < 250 ? 'mid' : 'slow';
+// Значок «палочки пинга» (img/ping-0…5.svg): 5 — до 60 ms, 4 — до 120, 3 — до 250, 2 — до 400, 1 — дольше, 0 — нет ответа
+const pingLv = ms => !(ms > 0) ? 0 : ms < 60 ? 5 : ms < 120 ? 4 : ms < 250 ? 3 : ms < 400 ? 2 : 1;
+const pingIcon = (ms, cls = 'pi') => `<img class="${cls}" src="img/ping-${pingLv(ms)}.svg" width="20" height="16" alt="">`;
 // Список сервисов (что мерим): из последнего замера, иначе из списка на роутере
 function services(){
   const t = state && state.targets && state.targets.list;
@@ -159,7 +162,7 @@ function renderHero(){
     // текущий сервер и показатели
     $('#cur-name').textContent = nodeName(s.current);
     const r = svcOf(s.current), today = Object.values((hist && hist.traffic) || {}).reduce((a, v) => a + v.d[1], 0);
-    const kp = [['Задержка', p.socks ? (p.real > 0 ? `<i class="${msCls(p.real)}">${num(p.real)} ms</i>` : '<i class="slow">нет</i>') : '—',
+    const kp = [[`${pingIcon(p.socks ? p.real : 0)}Задержка`, p.socks ? (p.real > 0 ? `<i class="${msCls(p.real)}">${num(p.real)} ms</i>` : '<i class="slow">нет</i>') : '—',
                  'Как пинг: ответ сайта через VPN по уже открытому соединению. Раз в 5 минут.']];
     services().forEach(x => { const v = svcVal(r, x.name);
       kp.push([`${svcIcon(x)}${esc(x.name)}`, v ? `<i class="${msCls(v)}">${v} ms</i>` : '<i class="slow">—</i>', x.host]); });
@@ -195,17 +198,18 @@ function renderServers(s){
   const sv = services();
   const cell = (v, best, web) => v == null ? '<td class="na" title="ещё не мерили">·</td>' : v ? `<td class="${msCls(v)}${best ? ' best' : ''}"><b>${v}</b></td>`
     : web ? '<td class="blk" title="Без VPN этот сайт в России не открывается">блок</td>' : '<td class="slow"><b>—</b></td>';
+  const pcell = (v, best) => v > 0 ? `<td class="${msCls(v)}${best ? ' best' : ''} pcol"><b>${pingIcon(v)}${v}</b></td>` : `<td class="slow pcol"><b>${pingIcon(0)}—</b></td>`;
   // лучшее значение в каждом столбце (только среди VPN-серверов)
   const best = {ping: Math.min(...alive.map(n => n.ms))};
   sv.forEach(x => { const v = alive.map(n => svcVal(svcOf(n.id), x.name)).filter(v => v > 0); best[x.name] = v.length ? Math.min(...v) : 0; });
-  const head = `<tr><th>Сервер</th><th title="Пинг до самого сервера">Пинг</th>${sv.map(x => `<th title="${esc(x.name)} · ${esc(x.host || '')}">${svcIcon(x)}<span>${esc(x.name)}</span></th>`).join('')}<th class="act"></th></tr>`;
+  const head = `<tr><th>Сервер</th><th title="Пинг до самого сервера"><img class="pi" src="img/ping-5.svg" width="20" height="16" alt=""><span>Пинг</span></th>${sv.map(x => `<th title="${esc(x.name)} · ${esc(x.host || '')}">${svcIcon(x)}<span>${esc(x.name)}</span></th>`).join('')}<th class="act"></th></tr>`;
   const row = n => { const r = svcOf(n.id), cur = n.id === s.current;
     return `<tr class="${cur ? 'cur' : ''}" data-node="${esc(n.id)}" ${cur ? '' : 'tabindex="0"'} title="${cur ? 'Подключён сейчас' : 'Нажми, чтобы подключить'}">
-      <th scope="row">${esc(n.name.trim())}${n.own ? ' <span class="tag own">свой</span>' : ''}</th>${cell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
+      <th scope="row">${esc(n.name.trim())}${n.own ? ' <span class="tag own">свой</span>' : ''}</th>${pcell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
       <td class="act">${cur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>`; };
   const dir = s.svc && s.svc.direct;
   const drow = dir ? `<tr class="direct" title="Без VPN: так открываются сайты из списка MyDirect. Пинг — до ya.ru">
-      <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${cell(num(dir.base))}${sv.map(x => cell(svcVal(dir, x.name), false, x.kind === 'web')).join('')}<td class="act"></td></tr>` : '';
+      <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${pcell(num(dir.base))}${sv.map(x => cell(svcVal(dir, x.name), false, x.kind === 'web')).join('')}<td class="act"></td></tr>` : '';
   // свои серверы (ярлык fspirat в PassWall) — отдельным разделом сверху, подписка — ниже
   const own = alive.filter(n => n.own), sub = alive.filter(n => !n.own);
   const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${t}</th></tr>`;
@@ -227,7 +231,7 @@ function renderServers(s){
   }).join('') : '';
   $('#dead-box').hidden = !dead.length;
   $('#dead-sum').textContent = `Не отвечают: ${dead.length}`;
-  $('#dead').innerHTML = dead.map(n => `<li>${esc(n.name.trim())}</li>`).join('');
+  $('#dead').innerHTML = dead.map(n => `<li>${pingIcon(0)} ${esc(n.name.trim())}</li>`).join('');
   renderSeries();
 }
 
