@@ -7,3 +7,6 @@ fspirat-watch.conf
 fspirat-router.conf
 !*.example
 __pycache__/
+
+# скриншоты стенда
+scripts/shots/out/
