@@ -86,6 +86,41 @@ def build_direct_ctx(prekey_iv: bytes, relay_init: bytes) -> CryptoCtx:
     return CryptoCtx(clt_dec, clt_enc, tg_enc, tg_dec)
 
 
+class _Plain:
+    """«Шифр» для необфусцированного транспорта (Telegram Desktop и др.): данные как есть, первый вызов
+    подставляет уже прочитанные байты потока после тега."""
+    __slots__ = ('pre',)
+
+    def __init__(self, pre=b''):
+        self.pre = pre
+
+    def update(self, data):
+        if self.pre:
+            data, self.pre = self.pre + data, b''
+        return data
+
+
+def build_plain_ctx(relay_init: bytes, leftover: bytes) -> CryptoCtx:
+    r_enc_key = relay_init[SKIP_LEN:SKIP_LEN + PREKEY_LEN]
+    r_enc_iv = relay_init[SKIP_LEN + PREKEY_LEN:SKIP_LEN + PREKEY_LEN + IV_LEN]
+    r_rev = relay_init[SKIP_LEN:SKIP_LEN + PREKEY_LEN + IV_LEN][::-1]
+    tg_enc = Cipher(algorithms.AES(r_enc_key), modes.CTR(r_enc_iv)).encryptor()
+    tg_dec = Cipher(algorithms.AES(r_rev[:KEY_LEN]), modes.CTR(r_rev[KEY_LEN:])).encryptor()
+    tg_enc.update(ZERO_64)
+    return CryptoCtx(_Plain(leftover), _Plain(), tg_enc, tg_dec)
+
+
+def plain_tag(head4: bytes):
+    """Необфусцированный транспорт по первым байтам -> (тег, остаток потока) | None."""
+    if head4[:1] == b'\xef':
+        return PROTO_TAG_ABRIDGED, head4[1:]
+    if head4 == PROTO_TAG_INTERMEDIATE:
+        return PROTO_TAG_INTERMEDIATE, b''
+    if head4 == PROTO_TAG_SECURE:
+        return PROTO_TAG_SECURE, b''
+    return None
+
+
 async def handle_transparent(reader, writer):
     stats.connections_total += 1
     stats.connections_active += 1
@@ -94,23 +129,29 @@ async def handle_transparent(reader, writer):
     label = f"auto {peer[0]}:{peer[1]}->{dst}" if peer else "auto"
     set_sock_opts(writer.transport, proxy_config.buffer_size)
     try:
-        handshake = await asyncio.wait_for(reader.readexactly(HANDSHAKE_LEN), timeout=10)
-        res = parse_direct_handshake(handshake)
-        if res is None:
-            stats.connections_bad += 1
-            log.warning("[%s] не обфусцированный MTProto — пропускаю", label)
-            return
-        dc, is_media, tag, prekey_iv = res
-        if dc == 0 or (dc > 5 and dc < 200):
-            dc = _dc_from_ip(dst)
+        head = await asyncio.wait_for(reader.readexactly(4), timeout=10)
+        plain = plain_tag(head)
+        if plain:   # открытый транспорт: DC — по адресу, к которому подключались
+            tag, leftover = plain
+            dc, is_media, prekey_iv = _dc_from_ip(dst), False, None
+        else:
+            handshake = head + await asyncio.wait_for(reader.readexactly(HANDSHAKE_LEN - 4), timeout=10)
+            res = parse_direct_handshake(handshake)
+            if res is None:
+                stats.connections_bad += 1
+                log.warning("[%s] неизвестный транспорт (начало %s) — пропускаю", label, head.hex())
+                return
+            dc, is_media, tag, prekey_iv = res
+            if dc == 0 or (dc > 5 and dc < 200):
+                dc = _dc_from_ip(dst)
         is_test = dc >= 10000
         if is_test:
             dc -= 10000
         proto_int = (T.PROTO_ABRIDGED_INT if tag == PROTO_TAG_ABRIDGED else
                      T.PROTO_INTERMEDIATE_INT if tag == PROTO_TAG_INTERMEDIATE else T.PROTO_PADDED_INTERMEDIATE_INT)
         relay_init = T._generate_relay_init(tag, -dc if is_media else dc)
-        ctx = build_direct_ctx(prekey_iv, relay_init)
-        media = " media" if is_media else ""
+        ctx = build_plain_ctx(relay_init, leftover) if plain else build_direct_ctx(prekey_iv, relay_init)
+        media = (" media" if is_media else "") + (" plain" if plain else "")
         try:
             splitter = MsgSplitter(proto_int)
         except Exception:
