@@ -1,0 +1,104 @@
+name: TG WS Proxy install
+
+# Telegram через tg-ws-proxy (Flowseal) на роутере — режим остаётся ВЫКЛЮЧЕННЫМ.
+#  1) требует свежую резервную копию (workflow «Router backup», не старше 24 ч);
+#  2) берёт tg-ws-proxy на закреплённом коммите (router/tgws/VERSION) и библиотеки по SHA-256 (router/tgws/requirements.txt);
+#     строку лога с секретом прокси вырезает — секрет в логи не попадает;
+#  3) ставит python3-light и нужные модули (apk), пакет — в /usr/share/fspirat-tgws, скрипт, службу, CGI;
+#  4) проверяет импорт и пробный запуск на 127.0.0.1 (порт 14430, 6 с), показывает состояние.
+# PassWall, firewall, DNS и маршруты не меняет. Включение — переключатель в панели (блок zapret) или `fspirat-tgws on`.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checks
+        run: |
+          for f in router/bin/fspirat-tgws router/etc/init.d/fspirat-tgws router/www/cgi-bin/fspirat; do sh -n "$f"; done
+          for f in router/bin/fspirat-tgws router/etc/init.d/fspirat-tgws router/tgws/*; do
+            ! grep -q $'\r' "$f" || { echo "CRLF в $f"; exit 1; }
+          done
+
+      - name: Fetch tg-ws-proxy (pinned) and wheels (hashed)
+        run: |
+          . router/tgws/VERSION
+          git init -q src && cd src && git remote add origin "$TGWS_REPO"
+          git fetch -q --depth 1 origin "$TGWS_COMMIT" && git checkout -q FETCH_HEAD
+          [ "$(git rev-parse HEAD)" = "$TGWS_COMMIT" ] || { echo "коммит не совпал"; exit 1; }
+          grep -q "__version__ = \"$TGWS_VERSION\"" proxy/__init__.py || { echo "версия не совпала"; exit 1; }
+          # секрет прокси не печатаем в лог: строка «Secret» — первые 4 символа, ссылки tg://proxy (с секретом) — без secret=
+          sed -i -e 's|log.info("  Secret:        %s", proxy_config.secret)|log.info("  Secret:        %s…", proxy_config.secret[:4])|' \
+                 -e 's|log.info("    %s", ee_link)|log.info("    %s", ee_link.split("\&secret=")[0])|' \
+                 -e 's|log.info("    %s", dd_link)|log.info("    %s", dd_link.split("\&secret=")[0])|' proxy/tg_ws_proxy.py
+          ! grep -qF 'log.info("  Secret:        %s", proxy_config.secret)' proxy/tg_ws_proxy.py || { echo "секрет остался в логе"; exit 1; }
+          ! grep -nE 'log\.info\("    %s", (dd|ee)_link\)' proxy/tg_ws_proxy.py || { echo "ссылка с секретом осталась в логе"; exit 1; }
+          grep -c 'split("&secret=")' proxy/tg_ws_proxy.py | grep -qx 2 || { echo "патч ссылок не применился"; exit 1; }
+          cd ..
+          python3 -m pip download -q --require-hashes --no-deps --only-binary=:all: --python-version 3.13 \
+            --implementation py --abi none --platform any -r router/tgws/requirements.txt -d wheels
+          mkdir -p pkg/lib
+          for w in wheels/*.whl; do python3 -m zipfile -e "$w" pkg/lib/; done
+          rm -rf pkg/lib/*.dist-info/RECORD
+          cp -r src/proxy src/utils pkg/
+          find pkg -name '__pycache__' -prune -exec rm -rf {} +
+          cp router/tgws/VERSION router/tgws/LICENSE-tg-ws-proxy.txt pkg/
+          tar -czf pkg.tgz -C pkg . && ls -l pkg.tgz && du -sh pkg
+
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+
+      - name: Require fresh backup
+        run: |
+          ssh vps 'f=$(ls -1t /root/fspirat-backups/router/router-*.tar.gz 2>/dev/null | head -1)
+            [ -n "$f" ] || { echo "Нет резервной копии — сначала запусти workflow «Router backup»"; exit 1; }
+            age=$(( $(date +%s) - $(stat -c %Y "$f") )); echo "последняя копия: $f ($((age/60)) мин назад)"
+            [ $age -lt 86400 ] || { echo "Копия старше 24 ч — запусти «Router backup» заново"; exit 1; }'
+
+      - name: Install on router (tg-ws-proxy stays OFF)
+        run: |
+          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          PKGS="python3-light python3-asyncio python3-openssl python3-ctypes python3-logging python3-urllib python3-email python3-codecs"
+          ssh vps "$R 'df -h /overlay | tail -1; apk update >/dev/null && apk add $PKGS >/dev/null && echo \"пакеты: ok\"; python3 --version; df -h /overlay | tail -1'"
+          ssh vps "$R 'rm -rf /tmp/fst && mkdir -p /tmp/fst && cat > /tmp/fst/pkg.tgz'" < pkg.tgz
+          ssh vps "$R 'set -e; rm -rf /usr/share/fspirat-tgws.new; mkdir -p /usr/share/fspirat-tgws.new && tar -xzf /tmp/fst/pkg.tgz -C /usr/share/fspirat-tgws.new
+            chmod -R a+rX /usr/share/fspirat-tgws.new
+            rm -rf /usr/share/fspirat-tgws.old; [ -d /usr/share/fspirat-tgws ] && mv /usr/share/fspirat-tgws /usr/share/fspirat-tgws.old
+            mv /usr/share/fspirat-tgws.new /usr/share/fspirat-tgws; rm -rf /usr/share/fspirat-tgws.old /tmp/fst; du -sh /usr/share/fspirat-tgws'"
+          push() { tr -d '\r' < "$1" | ssh vps "$R 'cat > $2.new && chmod 755 $2.new && mv $2.new $2'"; echo "  -> $2"; }
+          push router/bin/fspirat-tgws         /usr/bin/fspirat-tgws
+          push router/etc/init.d/fspirat-tgws  /etc/init.d/fspirat-tgws
+          push router/www/cgi-bin/fspirat      /www/cgi-bin/fspirat
+          # секрет создаётся на роутере один раз (в лог не печатается); служба в автозапуске, но работает только при ENABLED=1
+          ssh vps "$R '/usr/bin/fspirat-tgws init && /etc/init.d/fspirat-tgws enable && ls -l /etc/fspirat/tgws | cut -c1-10'"
+
+      - name: Verify
+        run: |
+          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          cat > /tmp/v.sh <<'EOF2'
+          cd /tmp
+          export PYTHONPATH=/usr/share/fspirat-tgws/lib:/usr/share/fspirat-tgws PYTHONDONTWRITEBYTECODE=1
+          python3 -c 'import httpx, h2, certifi, proxy.tg_ws_proxy; print("импорт: ok")'
+          python3 -u -m proxy.tg_ws_proxy --host 127.0.0.1 --port 14430 --secret 00000000000000000000000000000000 --pool-size 0 > /tmp/tgws-test.log 2>&1 &
+          p=$!; sleep 8
+          if netstat -ltn | grep -q '127.0.0.1:14430 '; then echo "пробный запуск: слушает 127.0.0.1:14430"; else echo "пробный запуск: НЕ слушает"; fi
+          kill $p 2>/dev/null; sleep 1; tail -25 /tmp/tgws-test.log; rm -f /tmp/tgws-test.log
+          echo; free -m | sed -n 2p; df -h /overlay | tail -1; /usr/bin/fspirat-tgws status
+          EOF2
+          sed 's/^          //' /tmp/v.sh | ssh vps "$R 'cat > /tmp/fst-v.sh'"
+          ssh vps "$R 'sh /tmp/fst-v.sh; rm -f /tmp/fst-v.sh'"

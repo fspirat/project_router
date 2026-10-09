@@ -19,7 +19,7 @@ jobs:
 
       - name: Checks
         run: |
-          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret; do sh -n "$f"; done
+          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/bin/fspirat-tgws router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret router/etc/init.d/fspirat-tgws; do sh -n "$f"; done
 
       - name: SSH
         env:
@@ -48,6 +48,10 @@ jobs:
           push router/bin/fspirat-fw      /usr/bin/fspirat-fw
           push router/bin/fspirat-sub     /usr/bin/fspirat-sub
           # zapret: скрипт, служба и списки; сам движок (nfqws) ставит workflow «Zapret install». Режим не включается.
+          if ssh vps "$R '[ -d /usr/share/fspirat-tgws ]'"; then   # Telegram через tg-ws-proxy (если установлен)
+            push router/bin/fspirat-tgws        /usr/bin/fspirat-tgws
+            push router/etc/init.d/fspirat-tgws /etc/init.d/fspirat-tgws
+          fi
           if ssh vps "$R '[ -d /usr/share/fspirat-zapret ]'"; then
             push router/bin/fspirat-zapret        /usr/bin/fspirat-zapret
             push router/etc/init.d/fspirat-zapret /etc/init.d/fspirat-zapret

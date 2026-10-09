@@ -1,0 +1,4 @@
+# tg-ws-proxy (Flowseal) — закреплённая версия; workflow «TG WS Proxy install» проверяет коммит
+TGWS_REPO=https://github.com/Flowseal/tg-ws-proxy
+TGWS_COMMIT=a232472cbe2baf0a328af06a9c23904ed961e68d
+TGWS_VERSION=1.11.1

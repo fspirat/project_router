@@ -1,0 +1,56 @@
+#!/bin/sh
+# FSPIRAT: Telegram через tg-ws-proxy (Flowseal) на роутере.
+# MTProto-прокси для устройств дома: <IP роутера>:1443. Прямые адреса Telegram провайдер блокирует,
+# поэтому прокси ходит к Telegram через Cloudflare (CF-прокси проекта) — мимо VPN, с IP провайдера.
+# Трафик самого роутера PassWall не трогает (localhost_proxy=0), правила PassWall и firewall не меняются.
+#   fspirat-tgws on | off | status | link | init
+# /etc/fspirat/tgws (600): ENABLED=0|1, SECRET=<32 hex> — секрет создаётся один раз и в логи не пишется.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+CONF=/etc/fspirat/tgws
+SHARE=/usr/share/fspirat-tgws
+PORT=1443
+
+conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | head -1; }
+read_conf() {
+  ENABLED=$(conf_get ENABLED); [ "$ENABLED" = 1 ] || ENABLED=0
+  SECRET=$(conf_get SECRET | grep -E '^[0-9a-f]{32}$')
+}
+write_conf() {
+  mkdir -p /etc/fspirat
+  ( umask 077; printf 'ENABLED=%s\nSECRET=%s\n' "$1" "$2" > "$CONF.tmp" ) && mv "$CONF.tmp" "$CONF"
+}
+ensure_secret() {
+  read_conf
+  [ -n "$SECRET" ] && return 0
+  SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  write_conf "$ENABLED" "$SECRET"
+}
+lan_ip() { ip=$(uci -q get network.lan.ipaddr); ip=${ip%%/*}; echo "${ip:-192.168.1.1}"; }
+installed() { [ -f $SHARE/proxy/tg_ws_proxy.py ] && [ -d $SHARE/lib/httpx ] && command -v python3 >/dev/null; }
+running() { pgrep -f "proxy.tg_ws_proxy" >/dev/null; }
+listening() { netstat -ltn 2>/dev/null | grep -q "[.:]$PORT "; }
+log() { logger -t fspirat-tgws "$*"; }
+
+case "$1" in
+  on)
+    installed || { echo "tg-ws-proxy не установлен" >&2; exit 1; }
+    ensure_secret; write_conf 1 "$SECRET"
+    /etc/init.d/fspirat-tgws enable; /etc/init.d/fspirat-tgws restart
+    log "включён"; echo ok ;;
+  off)
+    read_conf; write_conf 0 "$SECRET"
+    /etc/init.d/fspirat-tgws stop
+    log "выключен"; echo ok ;;
+  init)  # при установке: конфиг с секретом (ENABLED=0), права 600; секрет не печатается
+    ensure_secret; chmod 600 "$CONF"; echo ok ;;
+  link)  # ссылка для Telegram (содержит секрет) — только для панели и SSH, не в логи
+    ensure_secret
+    echo "tg://proxy?server=$(lan_ip)&port=$PORT&secret=dd$SECRET" ;;
+  status)
+    read_conf
+    i=false; installed && i=true
+    r=false; running && r=true
+    l=false; listening && l=true
+    echo "{\"installed\":$i,\"enabled\":$([ "$ENABLED" = 1 ] && echo true || echo false),\"running\":$r,\"listening\":$l,\"host\":\"$(lan_ip)\",\"port\":$PORT,\"version\":\"$(sed -n 's/^TGWS_VERSION=//p' $SHARE/VERSION 2>/dev/null)\"}" ;;
+  *) echo "usage: fspirat-tgws on|off|status|link|init" >&2; exit 2 ;;
+esac

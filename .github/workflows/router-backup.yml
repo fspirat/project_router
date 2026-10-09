@@ -43,7 +43,7 @@ jobs:
           umask 077
           # постоянные конфигурации — по ним восстанавливаем
           FILES="/etc/config/passwall2 /etc/config/firewall /etc/config/dhcp /etc/config/network /etc/config/system /etc/config/wireless
-                 /etc/init.d/fstunnel /etc/init.d/fspirat-zapret /etc/crontabs/root /etc/dropbear/authorized_keys
+                 /etc/init.d/fstunnel /etc/init.d/fspirat-zapret /etc/init.d/fspirat-tgws /etc/crontabs/root /etc/dropbear/authorized_keys
                  /etc/fspirat /etc/fspirat.token /www/cgi-bin/fspirat /usr/share/fspirat-zapret"
           for f in /usr/bin/fspirat-*; do FILES="$FILES $f"; done
           for f in $FILES; do [ -e "$f" ] || continue; mkdir -p "$W/files$(dirname "$f")"; cp -a "$f" "$W/files$f"; done

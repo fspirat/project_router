@@ -1,7 +1,7 @@
 // Скриншоты панели (web/) на демо-данных, без роутера и сервера. Запуск — см. README.md рядом.
 const fs = require('fs'), path = require('path');
 let chromium; try { ({ chromium } = require('playwright')); } catch(e){ ({ chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright')); }
-const { status, data, MD, ZAP } = require('./demo_data.js');
+const { status, data, MD, ZAP, TGWS } = require('./demo_data.js');
 if(process.env.DIRECT_MODE) status.current = '_direct';   // режим «Напрямую (без VPN)»
 const WEB = path.resolve(__dirname, '../../web');
 const OUT = path.resolve(process.env.OUT || path.join(__dirname, 'out')); fs.mkdirSync(OUT, {recursive: true});
@@ -26,7 +26,7 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
         return r.fulfill({body: fs.readFileSync(WEB + u.pathname.slice(7)), contentType: TYPES[path.extname(u.pathname)] || 'application/octet-stream'});
       if(u.pathname === '/router/api'){
         const a = u.searchParams.get('action');
-        const body = a === 'zapret' ? ZAP[process.env.ZAP_STATE || 'ok'] : a === 'net' ? status.sys.net : a === 'mydirect' ? MD : READ.has(a) ? status : {ok: true};
+        const body = a === 'zapret' ? ZAP[process.env.ZAP_STATE || 'ok'] : a === 'tgws' ? TGWS : a === 'tgwslink' ? {link: 'tg://proxy?server=192.168.1.1&port=1443&secret=dd00000000000000000000000000000000'} : a === 'net' ? status.sys.net : a === 'mydirect' ? MD : READ.has(a) ? status : {ok: true};
         return r.fulfill({body: JSON.stringify(body), contentType: 'application/json'});
       }
       if(u.pathname === '/router/data'){
@@ -51,8 +51,8 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
     const p = await page(1440, 900, '#vpn'); await p.click('#dead-sum'); await p.waitForTimeout(300);
     const bb = await p.locator('#dead-box').boundingBox(); await p.screenshot({path: `${OUT}/${PFX}dead.png`, clip: {x: bb.x - 10, y: bb.y - 10, width: bb.width + 20, height: bb.height + 20}}); await p.close();
   }
-  if(process.env.ZAPSHOT){   // только блок zapret
-    const p = await page(1440, 900, '#vpn'); const bb = await p.locator('#zap').boundingBox();
+  if(process.env.ZAPSHOT){   // только блок zapret (с Telegram)
+    const p = await page(1440, 1400, '#vpn'); if(process.env.TGLINK){ await p.click('#tgws-link'); await p.waitForTimeout(400); } const bb = await p.locator('#zap').boundingBox();
     await p.screenshot({path: `${OUT}/${PFX}zapret.png`, clip: {x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16}}); await p.close();
   }
   if(process.env.SIDE){   // правая колонка вкладки VPN: график, zapret, журнал, устройства

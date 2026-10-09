@@ -27,7 +27,7 @@ mac=$(param mac | sed 's/%3[Aa]/:/g' | tr A-F a-f | grep -E '^([0-9a-f]{2}:){5}[
 
 # Чтение — GET; всё, что меняет состояние или запускает работу, — только POST (nginx пускает POST только с CSRF-токеном).
 case "$action" in
-  status|net|pingone|mydirect|zapret) ;;
+  status|net|pingone|mydirect|zapret|tgws) ;;
   *) [ "$REQUEST_METHOD" = POST ] || reply "405 Method Not Allowed" '{"error":"method"}' ;;
 esac
 
@@ -374,5 +374,17 @@ L
     [ -f /tmp/fspirat/zapret/checking ] && reply "409 Conflict" '{"error":"busy"}'
     bg "mkdir -p /tmp/fspirat/zapret; touch /tmp/fspirat/zapret/checking; /usr/bin/fspirat-zapret check; rm -f /tmp/fspirat/zapret/checking"
     reply "200 OK" '{"ok":true}' ;;
+  # Telegram через tg-ws-proxy (/usr/bin/fspirat-tgws): MTProto-прокси для устройств дома, переключатель в блоке zapret
+  tgws)         # состояние: установлен, включён, процесс, порт
+    [ -x /usr/bin/fspirat-tgws ] || reply "200 OK" '{"installed":false,"absent":true}'
+    reply "200 OK" "$(/usr/bin/fspirat-tgws status)" ;;
+  tgwsset)      # включить / выключить (только служба прокси; PassWall и firewall не трогает)
+    on=$(param on | grep -E '^[01]$'); [ -n "$on" ] || reply "400 Bad Request" '{"error":"bad on"}'
+    [ -x /usr/bin/fspirat-tgws ] || reply "503 Service Unavailable" '{"error":"not installed"}'
+    bg "/usr/bin/fspirat-tgws $([ "$on" = 1 ] && echo on || echo off)"
+    reply "200 OK" '{"ok":true}' ;;
+  tgwslink)     # ссылка tg://proxy с секретом — только POST (не кэшируется и не попадает в историю)
+    [ -x /usr/bin/fspirat-tgws ] || reply "503 Service Unavailable" '{"error":"not installed"}'
+    reply "200 OK" "{\"link\":\"$(/usr/bin/fspirat-tgws link | jesc)\"}" ;;
   *) reply "400 Bad Request" '{"error":"unknown action"}' ;;
 esac

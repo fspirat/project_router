@@ -55,4 +55,5 @@ const ZAP = {
   off: {installed: true, enabled: false, strategy: 1, engine: false, nft: false, route_cfg: false, route_live: false, fallback: false, error: '',
        pkts_tcp: 0, pkts_udp: 0, vpn_excluded: 0, version: 'v72.13', busy: false, checking: false, check: null},
 };
-module.exports = {status, data, now, MD, ZAP};
+const TGWS = {installed: true, enabled: true, running: true, listening: true, host: '192.168.1.1', port: 1443, version: '1.11.1'};
+module.exports = {status, data, now, MD, ZAP, TGWS};

@@ -3,7 +3,7 @@ const API = '/router/api';
 // Чтение (status, net, pingone) — GET. Всё остальное меняет что-то на роутере — только POST с CSRF-токеном сессии
 // в заголовке X-FSR: сервер (check.php) без верного токена и нашего Origin отвечает 403, роутер на GET — 405.
 // Токен — из /router/data?csrf=1 (ответ чужому сайту не прочитать), меняется с каждой новой сессией.
-const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret']);
+const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret', 'tgws']);
 let csrf = '';
 let state = null, hist = null, names = {}, range = 'day', series = 'link', logLv = 'all', toastTimer, quietUntil = 0, editing = null, lastOk = 0, md = null;
 const $ = s => document.querySelector(s);
@@ -900,6 +900,42 @@ $('#zap-check').addEventListener('click', async () => {
   catch(err){ toast(err.message, true); }
 });
 
+/* Telegram через tg-ws-proxy: MTProto-прокси на роутере для устройств дома (ходит к Telegram через Cloudflare, мимо VPN) */
+let tgws = null;
+function renderTgws(){
+  const box = $('#tgws'); if(!box) return;
+  if(!tgws || tgws.absent || !tgws.installed){ box.hidden = true; return; }
+  box.hidden = false;
+  const on = !!tgws.enabled, t = $('#tgws-tgl'), ok = tgws.running && tgws.listening;
+  t.textContent = on ? 'включён' : 'выключен'; t.setAttribute('aria-checked', on); t.classList.toggle('on', on);
+  $('#tgws-link').hidden = !on;
+  if(!on) $('#tgws-out').hidden = true;
+  $('#tgws-sum').innerHTML = !on ? '<i class="off">●</i> Выключен — Telegram идёт как обычно (через VPN)'
+    : ok ? `<i class="ok">●</i> Прокси <b>${esc(tgws.host)}:${num(tgws.port)}</b> — Telegram через Cloudflare, мимо VPN`
+    : '<i class="mid">●</i> Запускается… (если не пройдёт — служба перезапустится сама)';
+}
+async function loadTgws(){ try { tgws = await api('tgws'); } catch(err){ return; } renderTgws(); }
+$('#tgws-tgl').addEventListener('click', async () => {
+  if(!tgws) return;
+  const on = !tgws.enabled;
+  const ok = await ask(on
+    ? {title: 'Включить прокси Telegram?', text: 'На роутере запустится MTProto-прокси для устройств дома. Telegram на устройствах с этим прокси пойдёт через Cloudflare с IP провайдера, а не через VPN. VPN и остальные сайты не меняются.', ok: 'Включить'}
+    : {title: 'Выключить прокси Telegram?', text: 'Устройства, где он указан, перестанут подключаться через него — в Telegram нужно будет выключить прокси.', ok: 'Выключить'});
+  if(!ok) return;
+  const done = busy($('#tgws-tgl'), on ? 'Включаю…' : 'Выключаю…');
+  try { await api('tgwsset', '&on=' + (on ? 1 : 0)); } catch(err){ toast(err.message, true); }
+  finally { done(); setTimeout(loadTgws, 3000); setTimeout(loadTgws, 8000); }
+});
+$('#tgws-link').addEventListener('click', async () => {
+  try { const r = await api('tgwslink'); $('#tgws-url').textContent = r.link; $('#tgws-out').hidden = false; }
+  catch(err){ toast(err.message, true); }
+});
+$('#tgws-copy').addEventListener('click', async () => {
+  const t = $('#tgws-url').textContent;
+  try { await navigator.clipboard.writeText(t); toast('Ссылка скопирована — открой её на устройстве дома или отправь себе в «Избранное».'); }
+  catch { toast('Не удалось скопировать — выдели ссылку вручную.', true); }
+});
+
 /* Опрос: один запрос каждого вида за раз (медленный ответ не копит очередь), во вкладке в фоне — пауза,
    при возврате на вкладку — сразу свежие данные. Таймеры заводятся один раз, слушатели — делегированные. */
 function every(ms, fn){
@@ -908,13 +944,14 @@ function every(ms, fn){
   setInterval(tick, ms);
   return tick;
 }
-const tLoad = every(30000, load), tData = every(60000, loadData), tZap = every(30000, loadZap);
+const tLoad = every(30000, load), tData = every(60000, loadData), tZap = every(30000, loadZap), tTg = every(60000, loadTgws);
 every(3000, loadNet);
 setInterval(tickUpdated, 5000);
-document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); tZap(); } });
+document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); tZap(); tTg(); } });
 
 showTab();
 tLoad();
 tZap();
+tTg();
 tData();
 csrfToken().catch(() => {});

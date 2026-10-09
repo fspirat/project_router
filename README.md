@@ -90,6 +90,8 @@
 - **Telegram-прокси** (mtg) на 443-м порту, общий с сайтами через разбор SNI в nginx stream (`server/mtproxy/`).
 - **YouTube и Discord через zapret** (по желанию, переключатель в панели): только эти два сервиса идут напрямую с IP провайдера
   с обработкой nfqws, VPN и остальные маршруты не меняются — подробности и ограничения в [`docs/zapret.md`](docs/zapret.md).
+- **Telegram через tg-ws-proxy** (переключатель в блоке zapret): MTProto-прокси на роутере для устройств дома, ходит к Telegram
+  через Cloudflare мимо VPN — [`docs/tgws.md`](docs/tgws.md).
 - **Свои VPN-серверы** — Xray VLESS + Reality в режиме «сам у себя»: соединение маскируется под собственный сайт сервера с настоящим сертификатом.
 
 ## Скриншоты
@@ -126,6 +128,7 @@
 | **Rotate router token** | вручную | новый токен CGI на роутере и сервере |
 | **Router backup** | вручную | архив конфигураций роутера и файлов панели с датой (на роутере и на сервере), `RESTORE.txt` внутри |
 | **Zapret install** | вручную | движок zapret (nfqws) для YouTube/Discord; требует свежую копию, режим оставляет выключенным |
+| **TG WS Proxy install** | вручную | tg-ws-proxy (Python) для Telegram через Cloudflare; требует свежую копию, режим оставляет выключенным |
 | **SSH hardening**, **Restrict deploy key** | вручную | вход на сервер только по ключу; ключ выкладки — только rsync в папку сайта |
 | **Server ops** | вручную | выполнить служебную команду на сервере и показать вывод |
 
@@ -161,6 +164,7 @@ bash scripts/check.sh           # быстрая проверка, что всё
 - [`docs/infrastructure.md`](docs/infrastructure.md) — домены, сервер, роутер, PassWall и восстановление с нуля
 - [`docs/history.md`](docs/history.md) — какие проблемы решались и почему сделано именно так
 - [`docs/zapret.md`](docs/zapret.md) — YouTube и Discord через zapret: путь пакета, списки, ограничения, откат
+- [`docs/tgws.md`](docs/tgws.md) — Telegram через tg-ws-proxy на роутере
 - [`docs/audit-2026-10.md`](docs/audit-2026-10.md) — аудит безопасности и интерфейса
 - [`web/fonts/README.md`](web/fonts/README.md) — шрифты панели и их лицензии
 

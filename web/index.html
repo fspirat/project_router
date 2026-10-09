@@ -118,6 +118,14 @@
         </div>
         <div class="facts zap-ck" id="zap-ck"></div>
         <p class="zap-when" id="zap-when" hidden></p>
+        <!-- Telegram через tg-ws-proxy на роутере (/usr/bin/fspirat-tgws, CGI tgws*) -->
+        <div class="tgws" id="tgws" hidden>
+          <div class="tgws-row"><span class="tgws-name">Telegram <small>tg-ws-proxy</small></span>
+            <button class="btn small ghost" id="tgws-link" type="button" hidden>Ссылка</button>
+            <button class="btn small zap-tgl" id="tgws-tgl" type="button" role="switch" aria-checked="false" aria-label="Telegram через tg-ws-proxy">выключен</button></div>
+          <p class="zap-sum" id="tgws-sum"></p>
+          <div class="tgws-out" id="tgws-out" hidden><code id="tgws-url"></code><button class="btn small" id="tgws-copy" type="button">Копировать</button></div>
+        </div>
         <details class="zap-more"><summary>Подробнее</summary>
           <ul class="zap-st" id="zap-st"></ul>
           <p class="note">Когда включено, YouTube и Discord идут <b>напрямую через провайдера, с IP провайдера</b>, а не через VPN.
