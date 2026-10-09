@@ -304,8 +304,8 @@ function renderChart(){
   const st = hist && hist.range === range ? hist.stats : {avg: ok.length ? Math.round(ok.reduce((a,b) => a+b, 0) / ok.length) : null,
     min: ok.length ? Math.min(...ok) : null, max: ok.length ? Math.max(...ok) : null, fails: pts.filter(p => p[1] === 0).length, offline_min: null};
   $('#stats').innerHTML = fact('Средняя', st.avg ? st.avg + ' ms' : '—') + fact('Лучшая', st.min ? st.min + ' ms' : '—')
-    + fact('Худшая', st.max ? st.max + ' ms' : '—') + fact('Сбоев VPN', st.fails)
-    + fact('Без связи', st.offline_min == null ? '—' : st.offline_min ? minutes(st.offline_min) : 'ни разу');
+    + fact('Худшая', st.max ? st.max + ' ms' : '—') + fact('Сбоев', st.fails)
+    + fact('Без связи', st.offline_min == null ? '—' : st.offline_min ? minutes(st.offline_min) : '0 мин');
 }
 
 /* Подсказка на графике: время и задержка в точке под курсором (на телефоне — нажать или вести пальцем).
@@ -349,9 +349,9 @@ function when(ts){
 const LEVEL = {offline: 'err', vpn_down: 'err', auto: 'warn', reboot: 'warn', newdev: 'warn', online: 'ok', vpn_up: 'ok'};
 const LEVEL_TXT = {err: 'ОШИБКА', warn: 'ВНИМАНИЕ', ok: 'УСПЕХ', info: 'ДЕЙСТВИЕ'};
 function events(){
-  if(hist && hist.events && hist.events.length) return hist.events.map(e => ({ts: e[0], kind: e[1], text: e[2]}));
+  if(hist && hist.events && hist.events.length) return hist.events.map(e => ({ts: e[0], kind: e[1], text: String(e[2]).replace(/\b_direct\b/g, DIRECT_NAME)}));
   const byId = Object.fromEntries(((state && state.ping && state.ping.nodes) || []).map(n => [n.id, n.name]));
-  return ((state && state.log) || []).slice().reverse().map(l => ({ts: 0, kind: 'router', text: l.replace(/\b[A-Za-z0-9]{8}\b/g, id => byId[id] || id)}));
+  return ((state && state.log) || []).slice().reverse().map(l => ({ts: 0, kind: 'router', text: l.replace(/\b[A-Za-z0-9]{8}\b/g, id => byId[id] || id).replace(/\b_direct\b/g, DIRECT_NAME)}));
 }
 function logItem(e){
   const lv = LEVEL[e.kind] || 'info';
@@ -839,21 +839,25 @@ function renderZap(){
   if(!zap || zap.absent){ box.hidden = true; return; }
   box.hidden = false;
   const z = zap, on = !!z.enabled, t = $('#zap-tgl');
-  t.textContent = 'Zapret: ' + (on ? 'включён' : 'выключен');
+  t.textContent = on ? 'включён' : 'выключен';
   t.setAttribute('aria-checked', on); t.classList.toggle('on', on);
   t.disabled = !z.installed || z.busy;
-  $('#zap-strat').value = String(z.strategy || 1); $('#zap-strat').disabled = !z.installed || z.busy;
+  $('#zap-strat').value = String(z.strategy || 3); $('#zap-strat').disabled = !z.installed || z.busy;
   $('#zap-check').disabled = !z.installed || z.checking;
-  $('#zap-check').textContent = z.checking ? 'Проверяю…' : 'Проверить доступность';
+  $('#zap-check').textContent = z.checking ? 'Проверяю…' : 'Проверить';
   const work = z.engine && z.nft && z.route_live;
+  // одна строка вместо таблицы: что сейчас происходит с YouTube и Discord
+  $('#zap-sum').innerHTML = z.busy ? '<i class="mid">●</i> Применяю… PassWall перезапускается'
+    : on && work ? `<i class="ok">●</i> YouTube и Discord — <b>напрямую</b>, с IP провайдера${z.nft ? ` <small>${num(z.pkts_tcp)} TCP · ${num(z.pkts_udp)} QUIC</small>` : ''}`
+    : on ? '<i class="mid">●</i> Включён, но работает не полностью'
+    : '<i class="off">●</i> YouTube и Discord — через VPN, как всё остальное';
   const items = [
     ['Выбрано', on ? '<b>включить</b>' : '<b>выключить</b>'],
     ['Служба nfqws', yes(z.engine, 'работает', on ? 'не работает' : 'остановлена')],
     ['Правила nftables', yes(z.nft, 'есть', 'нет')],
-    ['Маршрут', z.route_live ? '<b class="ok">YouTube и Discord — напрямую (IP провайдера)</b>' : '<b>YouTube и Discord — через VPN</b>'],
+    ['Маршрут', z.route_live ? '<b class="ok">напрямую (IP провайдера)</b>' : '<b>через VPN</b>'],
   ];
   if(z.nft) items.push(['Обработано пакетов', `<b>${num(z.pkts_tcp)} TCP · ${num(z.pkts_udp)} QUIC</b>`]);
-  if(z.busy) items.unshift(['Сейчас', '<b class="mid">применяю… (PassWall перезапускается)</b>']);
   $('#zap-st').innerHTML = items.map(([k, v]) => `<li><span>${k}</span>${v}</li>`).join('');
   let e = '';
   if(!z.installed) e = 'zapret не установлен на роутере (нет nfqws, списков или модуля ядра).';
@@ -861,9 +865,12 @@ function renderZap(){
   else if(!z.busy && on && !work) e = 'Расхождение: режим включён, но ' + [!z.engine && 'служба не работает', !z.nft && 'нет правил nftables', !z.route_live && 'маршрут PassWall не применён'].filter(Boolean).join(', ') + '. Сторож попробует исправить в течение минуты.';
   else if(!z.busy && !on && (z.engine || z.nft || z.route_cfg)) e = 'Расхождение: режим выключен, но часть правил ещё активна. Сторож уберёт их в течение минуты.';
   $('#zap-err').hidden = !e; $('#zap-err').textContent = e;
-  const c = z.check;
-  $('#zap-ck').innerHTML = !c || !c.list ? '' : `<li><span>Проверено ${when(c.ts)}</span><b>${c.via === 'isp' ? 'Discord видит IP провайдера' : c.via === 'vpn' ? 'Discord видит IP VPN' : 'IP не определён'}</b></li>`
-    + c.list.map(x => `<li><span>${esc(x.name)}</span>${x.ok ? `<b class="ok">открывается · ${num(x.ms)} ms</b>` : '<b class="slow">не открывается</b>'}${x.queued ? ` <small>обработано zapret: ${x.queued}</small>` : x.ok ? ' <small>без обработки zapret</small>' : ''}</li>`).join('');
+  // результат проверки — плитки как под графиком: имя и задержка, подробности в подсказке
+  const c = z.check, has = c && c.list && c.list.length;
+  $('#zap-ck').innerHTML = !has ? '' : c.list.map(x => `<div class="fact" title="${x.ok ? (x.queued ? 'обработано zapret: ' + num(x.queued) + ' пак.' : 'без обработки zapret') : 'не открывается'}"><span>${esc(x.name)}</span>`
+    + (x.ok ? `<b class="ok">${num(x.ms)} ms</b>` : '<b class="slow">нет</b>') + '</div>').join('');
+  $('#zap-when').hidden = !has;
+  if(has) $('#zap-when').textContent = 'Проверено ' + when(c.ts) + (c.via === 'isp' ? ' · Discord видит IP провайдера' : c.via === 'vpn' ? ' · Discord видит IP VPN' : '');
 }
 async function loadZap(){
   try { zap = await api('zapret'); } catch(err){ if(!zap) return; zap = {...zap, error: err.message}; }

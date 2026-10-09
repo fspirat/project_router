@@ -55,6 +55,10 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
     const p = await page(1440, 900, '#vpn'); const bb = await p.locator('#zap').boundingBox();
     await p.screenshot({path: `${OUT}/${PFX}zapret.png`, clip: {x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16}}); await p.close();
   }
+  if(process.env.SIDE){   // правая колонка вкладки VPN: график, zapret, журнал, устройства
+    const p = await page(+(process.env.SIDE_W || 1440), 1800, '#vpn'); const bb = await p.locator('[data-page="vpn"] .side').boundingBox();
+    await p.screenshot({path: `${OUT}/${PFX}side.png`, fullPage: true, clip: {x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16}}); await p.close();
+  }
   if(process.env.EXTRA){
     const p = await page(1440, 900, '#dev');
     await p.click('.dev .more'); await p.waitForTimeout(300);

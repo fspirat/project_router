@@ -205,7 +205,7 @@ i.ok,b.ok{color:var(--green)} i.mid,b.mid{color:var(--amber)} i.slow,b.slow{colo
 .series{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 10px}
 .series button{font-size:12px;padding:4px 9px;color:var(--dim)}
 .series button[aria-pressed="true"]{color:var(--lime);border-color:var(--green);background:var(--sel)}
-.chart{width:100%;height:150px;display:block;background:var(--well);border:2px solid var(--frame);box-shadow:inset 0 0 0 1px var(--frame-in)}
+.chart{width:100%;height:130px;display:block;background:var(--well);border:2px solid var(--frame);box-shadow:inset 0 0 0 1px var(--frame-in)}
 .chart.small{height:110px}
 /* подсказка при наведении: линия, точка и время с задержкой */
 .chart-box{position:relative;touch-action:pan-y;cursor:crosshair}
@@ -233,6 +233,10 @@ i.ok,b.ok{color:var(--green)} i.mid,b.mid{color:var(--amber)} i.slow,b.slow{colo
 .seg button[aria-pressed="true"]{color:var(--lime);border-color:var(--green);background:var(--sel)}
 .seg button[aria-pressed="true"]+button{border-left:2px solid var(--green)}
 .stats,.facts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:10px}
+.stats .fact{padding:5px 8px;min-width:0}
+.stats .fact span{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:420px){.stats{grid-template-columns:repeat(6,minmax(0,1fr))} .stats .fact{grid-column:span 2} .stats .fact:nth-child(n+4){grid-column:span 3}}
 .fact{flex:1 1 84px;padding:6px 10px;border:2px solid var(--edge);background:var(--well)}
 .fact span{display:block;color:var(--dim);font-size:12px;white-space:nowrap}
 .fact b{font-family:var(--pixel);font-size:12px;font-weight:400;line-height:2.2;white-space:nowrap}
@@ -442,22 +446,30 @@ body.is-down.no-state .needs-router{display:none}
   .srv-tbl td.blk{font-size:10px}
 }
 /* ---------- YouTube и Discord через zapret ---------- */
-.zap-tgl{min-width:170px}
+.zap-tgl{min-width:96px}
 .zap-tgl.on{color:var(--lime);border-color:var(--green);background:var(--sel)}
-.zap-warn{margin:0 0 12px;padding:8px 10px;border:2px solid var(--amber-bd);background:var(--amber-bg);color:var(--text);font-size:13px}
-.zap-warn b{color:var(--amber)}
-.zap-st,.zap-ck{list-style:none;margin:0;padding:0;font-size:13px}
-.zap-st li,.zap-ck li{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 12px;padding:4px 0;border-bottom:1px solid var(--line)}
-.zap-st span,.zap-ck span{color:var(--dim)}
-.zap-st b,.zap-ck b{font-weight:600}
-.zap-ck small{flex-basis:100%;text-align:right;color:var(--dim);font-size:12px}
-.zap-ck:empty{display:none}
-.zap-ck{margin-top:10px}
-.zap-err{margin:10px 0 0;padding:8px 10px;border:2px solid var(--red-bd);background:var(--red-bg);color:var(--pink);font-size:13px}
-.zap-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
-.zap-row label{color:var(--dim);font-size:13px}
-.zap-row select{font:inherit;font-size:13px;color:var(--text);background:var(--well);border:2px solid var(--edge);padding:5px 8px}
+.zap-sum{margin:0;font-size:13px;line-height:1.5}
+.zap-sum i{font-style:normal;margin-right:4px} .zap-sum i.off{color:var(--dim)}
+.zap-sum b{color:var(--text);font-weight:600}
+.zap-sum small{color:var(--dim);font-size:12px;white-space:nowrap;margin-left:6px}
+.zap-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.zap-row select{flex:1 1 180px;min-width:0;font:inherit;font-size:13px;color:var(--text);background:var(--well);border:2px solid var(--edge);padding:5px 8px}
 .zap-row select:focus{outline:none;border-color:var(--green)}
+.zap-ck{margin-top:10px}
+.zap-ck:empty{display:none}
+.zap-ck{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.zap-ck .fact{padding:5px 8px;min-width:0}
+.zap-ck .fact span{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:420px){.zap-ck{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.zap-when{margin:6px 0 0;color:var(--dim);font-size:12px}
+.zap-err{margin:10px 0 0;padding:8px 10px;border:2px solid var(--red-bd);background:var(--red-bg);color:var(--pink);font-size:13px}
+.zap-more{margin-top:10px}
+.zap-more summary{padding:4px 0;border:0;font-size:13px}
+.zap-st{list-style:none;margin:4px 0 0;padding:0;font-size:13px}
+.zap-st li{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 12px;padding:4px 0;border-bottom:1px solid var(--line)}
+.zap-st span{color:var(--dim)}
+.zap-st b{font-weight:600}
+.zap-more .note{margin:8px 0 0}
 
 /* ---------- дневная тема: по выбору (кнопка в шапке) или как в системе ---------- */
 :root[data-theme="light"]{

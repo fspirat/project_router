@@ -89,8 +89,8 @@ foreach ($tpoints as $n => $bs) {
     ksort($bs);
     $out = [];
     foreach ($bs as $b => $v) {
-        $ok = array_filter($v, fn($x) => $x > 0);
-        $out[] = [$step ? $b + intdiv($step, 2) : $b, $ok ? (int)round(array_sum($ok) / count($ok)) : 0];
+        $good = array_filter($v, fn($x) => $x > 0);
+        $out[] = [$step ? $b + intdiv($step, 2) : $b, $good ? (int)round(array_sum($good) / count($good)) : 0];
     }
     $tpoints[$n] = $out;
 }

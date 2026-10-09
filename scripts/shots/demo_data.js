@@ -46,7 +46,7 @@ function data(range){
 }
 // «YouTube и Discord через zapret» (CGI zapret): ZAP_STATE=ok|fallback|off
 const ZAP = {
-  ok: {installed: true, enabled: true, strategy: 1, engine: true, nft: true, route_cfg: true, route_live: true, fallback: false, error: '',
+  ok: {installed: true, enabled: true, strategy: 3, engine: true, nft: true, route_cfg: true, route_live: true, fallback: false, error: '',
        pkts_tcp: 1842, pkts_udp: 637, vpn_excluded: 1, version: 'v72.13', busy: false, checking: false,
        check: {ts: now - 120, via: 'isp', list: [{name: 'YouTube', ok: true, code: '204', ms: 182, queued: 6}, {name: 'YouTube видео', ok: true, code: '200', ms: 241, queued: 6},
                                               {name: 'Discord API', ok: true, code: '200', ms: 214, queued: 5}, {name: 'Discord CDN', ok: true, code: '404', ms: 196, queued: 5}]}},

@@ -190,6 +190,7 @@ jq -r '.log[]?' <<<"$J" | while IFS= read -r line; do
     nm=$(jq -r --arg c "$id" '[.ping.nodes[]? | select(.id==$c) | .name][0] // empty' <<<"$J")
     [ -n "$nm" ] && rest=${rest//$id/$nm}
   done
+  rest=${rest//_direct/Напрямую (без VPN)}
   case "$rest" in
     авто*) kind=auto; rest="Автопереключение: ${rest#авто }" ;;
     вручную*) kind=manual; rest="Сервер выбран вручную: ${rest#вручную -> }" ;;
