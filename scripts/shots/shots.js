@@ -2,6 +2,7 @@
 const fs = require('fs'), path = require('path');
 let chromium; try { ({ chromium } = require('playwright')); } catch(e){ ({ chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright')); }
 const { status, data, MD, ZAP } = require('./demo_data.js');
+if(process.env.DIRECT_MODE) status.current = '_direct';   // режим «Напрямую (без VPN)»
 const WEB = path.resolve(__dirname, '../../web');
 const OUT = path.resolve(process.env.OUT || path.join(__dirname, 'out')); fs.mkdirSync(OUT, {recursive: true});
 // цифры — Minecraft-шрифт сайта (лежит в project_hex); нет файла — цифры будут шрифтом Press Start 2P

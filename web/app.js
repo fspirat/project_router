@@ -129,12 +129,14 @@ function services(){
 // Замер сервисов через сервер: текущий — свежий (раз в 5 минут), остальные — fspirat-svcping (раз в 30 минут)
 function svcOf(id){
   if(!state) return null;
-  const r = id === state.current && state.targets ? state.targets : state.svc && state.svc[id];
+  if(id === 'direct') id = '_direct';
+  const r = id === state.current && state.targets ? state.targets : state.svc && state.svc[id === '_direct' ? 'direct' : id];
   return r && r.list ? r : null;
 }
 const svcVal = (r, name) => { const x = r && r.list.find(v => v.name === name); return x ? num(x.vpn) : null; };
 const hostOf = a => String(a).replace(/^[a-z]+:\/\//i, '').replace(/[/:].*$/, '');
-const nodeName = id => { const n = ((state && state.ping && state.ping.nodes) || []).find(x => x.id === id); return n ? n.name.trim() : id; };
+const DIRECT_NAME = 'Напрямую (без VPN)';
+const nodeName = id => { if(id === '_direct' || id === 'direct') return DIRECT_NAME; const n = ((state && state.ping && state.ping.nodes) || []).find(x => x.id === id); return n ? n.name.trim() : id; };
 
 /* ---------- главная карточка ---------- */
 function renderHero(){
@@ -150,7 +152,8 @@ function renderHero(){
     const hot = y.temp != null && y.temp >= 85;
     items.push(['Роутер', ram > .9 || disk > .9 || hot ? 'warn' : 'ok', hot ? `${y.temp}°C` : ram > .9 ? 'мало памяти' : disk > .9 ? 'флеш почти полон' : 'в сети']);
     const vpnOk = s.running && (!p.socks || p.real > 0);
-    items.push(['VPN', !s.running || !vpnOk ? 'err' : p.real > 250 ? 'warn' : 'ok', !s.running ? 'остановлен' : !vpnOk ? 'не проходит' : 'работает']);
+    if(s.current === '_direct') items.push(['VPN', 'warn', 'выключен — всё напрямую']);
+    else items.push(['VPN', !s.running || !vpnOk ? 'err' : p.real > 250 ? 'warn' : 'ok', !s.running ? 'остановлен' : !vpnOk ? 'не проходит' : 'работает']);
     const dir = s.svc && s.svc.direct;
     const net = vpnOk || (dir && dir.base > 0);
     items.push(['Интернет', net ? 'ok' : 'err', net ? 'есть' : 'нет']);
@@ -209,8 +212,9 @@ function renderServers(s){
       <th scope="row">${esc(n.name.trim())}${n.own ? ' <span class="tag own">свой</span>' : ''}</th>${pcell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
       <td class="act">${cur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>`; };
   const dir = s.svc && s.svc.direct;
-  const drow = dir ? `<tr class="direct" title="Без VPN: так открываются сайты из списка MyDirect. Пинг — до ya.ru">
-      <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${pcell(num(dir.base))}${sv.map(x => cell(svcVal(dir, x.name), false, x.kind === 'web')).join('')}<td class="act"></td></tr>` : '';
+  const dcur = s.current === '_direct';
+  const drow = dir || dcur ? `<tr class="direct${dcur ? ' cur' : ''}" data-node="direct" ${dcur ? '' : 'tabindex="0"'} title="${dcur ? 'Подключено: весь трафик без VPN' : 'Без VPN: так открываются сайты из списка MyDirect. Нажми, чтобы пустить весь трафик напрямую. Пинг — до ya.ru'}">
+      <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${pcell(num(dir && dir.base))}${sv.map(x => cell(dir ? svcVal(dcur && state.targets ? state.targets : dir, x.name) : null, false, x.kind === 'web' && !dcur)).join('')}<td class="act">${dcur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>` : '';
   // свои серверы (ярлык fspirat в PassWall) — отдельным разделом сверху, подписка — ниже
   const own = alive.filter(n => n.own), sub = alive.filter(n => !n.own);
   const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${t}</th></tr>`;
@@ -577,11 +581,13 @@ document.addEventListener('click', async e => {
 
 /* ---------- кнопки серверов ---------- */
 async function connect(id){
-  const nm = nodeName(id);
-  if(!await ask({title: `Подключить «${nm}»?`, text: 'VPN перезапустится, связь пропадёт на несколько секунд.', ok: 'Подключить'})) return;
+  const nm = nodeName(id), direct = id === 'direct';
+  if(!await ask(direct
+    ? {title: 'Пустить весь трафик напрямую, без VPN?', ok: 'Напрямую', text: 'Все сайты и сервисы пойдут через провайдера, с IP провайдера. Правила Split остаются: MyDirect — напрямую, YouTube и Discord — через zapret, если он включён. Автопереключение на VPN не сработает, вернуть VPN — выбери сервер в таблице. Связь пропадёт на несколько секунд.'}
+    : {title: `Подключить «${nm}»?`, text: 'VPN перезапустится, связь пропадёт на несколько секунд.', ok: 'Подключить'})) return;
   try {
     await api('switch', '&id=' + encodeURIComponent(id));
-    state.current = id; render(); quietUntil = Date.now() + 15000;
+    state.current = direct ? '_direct' : id; render(); quietUntil = Date.now() + 15000;
     toast(`Подключаю «${nm}». Статус обновится через 10 секунд.`);
     setTimeout(load, 10000);
   } catch(err){ toast(err.message, true); }

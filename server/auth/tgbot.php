@@ -53,7 +53,7 @@ function router(string $action, array $q = [], bool $post = false, int $timeout 
 }
 function names(): array { $j = json_decode((string)@file_get_contents(fsr_dir() . '/names.json'), true); return is_array($j) ? $j : []; }
 function dev_name(array $d): string { $n = names()[strtolower($d['mac'] ?? '')] ?? ''; return $n !== '' ? $n : (($d['name'] ?? '') !== '' ? $d['name'] : ($d['ip'] ?? $d['mac'])); }
-function node_name(array $s, string $id): string { foreach ($s['ping']['nodes'] ?? [] as $n) if ($n['id'] === $id) return trim($n['name']); return $id; }
+function node_name(array $s, string $id): string { if ($id === '_direct' || $id === 'direct') return 'Напрямую (без VPN)'; foreach ($s['ping']['nodes'] ?? [] as $n) if ($n['id'] === $id) return trim($n['name']); return $id; }
 function gb(float $b): string { return $b >= 1073741824 ? round($b / 1073741824, 1) . ' ГБ' : round($b / 1048576) . ' МБ'; }
 function mbit(float $bps): string { return $bps >= 1e6 ? round($bps / 1e6, $bps >= 1e8 ? 0 : 1) . ' Мбит/с' : round($bps / 1e3) . ' кбит/с'; }
 function down_msg(): string { return '⚠️ Роутер не отвечает: туннель до сервера оборван или дома нет интернета. Попробуй через пару минут.'; }
@@ -94,6 +94,9 @@ function cmd_servers(): void {
         $lines[] = ($cur ? '▶️ ' : '') . $h(trim($n['name'])) . (($n['own'] ?? false) ? ' (свой)' : '') . ' — ' . ($n['ms'] > 0 ? $n['ms'] . ' ms' : 'не отвечает');
         if (!$cur && $n['ms'] > 0) $kb[] = [['text' => 'Подключить ' . trim($n['name']), 'callback_data' => $cb('sw:' . $n['id'])]];
     }
+    $dcur = ($s['current'] ?? '') === '_direct';
+    $lines[] = ($dcur ? '▶️ ' : '') . 'Напрямую (без VPN) — весь трафик с IP провайдера';
+    if (!$dcur) $kb[] = [['text' => 'Напрямую (без VPN)', 'callback_data' => $cb('sw:direct')]];
     say("<b>Серверы</b> (▶️ — сейчас)\n" . implode("\n", $lines) . "\n\nНажми кнопку — сервер подключится, VPN перезапустится на ~5 секунд.", array_slice($kb, 0, 14));
 }
 function cmd_vpn(string $q): void {
@@ -101,6 +104,12 @@ function cmd_vpn(string $q): void {
     $s = router('status');
     if (!$s) { say(down_msg()); return; }
     if (trim($q) === '') { cmd_servers(); return; }
+    if (preg_match('/^(напрям|без\s*vpn|direct)/iu', trim($q))) {
+        if (($s['current'] ?? '') === '_direct') { say('Уже всё напрямую, без VPN.'); return; }
+        say("Пустить <b>весь трафик напрямую, без VPN</b> (с IP провайдера)?\nMyDirect и zapret продолжат работать. Связь пропадёт на ~5 секунд.",
+            [[['text' => 'Да, напрямую', 'callback_data' => $cb('sw:direct')], ['text' => 'Отмена', 'callback_data' => 'no']]]);
+        return;
+    }
     $m = pick($s['ping']['nodes'] ?? [], $q, fn($n) => trim($n['name']));
     if (!$m) { say('Не нашёл сервер «' . $h($q) . '». Список — /servers'); return; }
     if (count($m) > 1) { say('Подходят несколько: ' . implode(', ', array_map(fn($n) => $h(trim($n['name'])), $m)) . '. Уточни название или выбери в /servers'); return; }

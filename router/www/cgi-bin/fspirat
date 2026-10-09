@@ -185,8 +185,9 @@ case "$action" in
     done
     [ -f $DIR/ping.json ] && sed -i "s/\(\"id\":\"$id\",\"name\":\"[^\"]*\",\"ms\":\)[0-9]*/\1$best/" $DIR/ping.json
     reply "200 OK" "{\"id\":\"$id\",\"ms\":$best,\"ts\":$(date +%s)}" ;;
-  switch)
-    [ -n "$id" ] && uci -q get passwall2.$id.group | grep -qxE "$GROUP" || reply "400 Bad Request" '{"error":"bad node"}'
+  switch)       # id=direct — без VPN: всё, кроме правил Split, идёт напрямую (default_node=_direct)
+    if [ "$id" = direct ]; then id=_direct
+    else [ -n "$id" ] && uci -q get passwall2.$id.group | grep -qxE "$GROUP" || reply "400 Bad Request" '{"error":"bad node"}'; fi
     uci set passwall2.$SHUNT.default_node="$id"
     uci commit passwall2
     echo 0 > $DIR/fails

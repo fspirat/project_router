@@ -166,8 +166,8 @@ i.ok,b.ok{color:var(--green)} i.mid,b.mid{color:var(--amber)} i.slow,b.slow{colo
 .srv-tbl .go{color:var(--lime);opacity:0;transition:opacity .15s}
 .srv-tbl tr:hover .go,.srv-tbl tr:focus-visible .go{opacity:1}
 .srv-tbl .now{font-family:var(--pixel-s);font-size:8px;color:var(--lime);border:2px solid var(--green);padding:4px 6px;letter-spacing:1px}
-.srv-tbl tr.direct{cursor:default;border-top:2px dashed var(--edge);border-bottom:0}
-.srv-tbl tr.direct:hover{background:none}
+.srv-tbl tr.direct{border-top:2px dashed var(--edge);border-bottom:0}
+.srv-tbl tr.direct.cur th{color:var(--hot)}
 .srv-tbl tr.direct th{color:var(--dim)}
 .srv-tbl tr.direct td.ok,.srv-tbl tr.direct td.mid{opacity:.85}
 .tag{font-family:var(--body);font-size:11px;font-weight:400;color:var(--dim);padding:0 6px;border:1px solid var(--edge);white-space:nowrap;vertical-align:1px}
