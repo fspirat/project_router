@@ -89,7 +89,7 @@ jobs:
 
       - name: Copy off-router + panel files, verify
         run: |
-          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          R='ssh -n -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
           ssh vps "set -e; umask 077; mkdir -p /root/fspirat-backups/router /root/fspirat-backups/server
             $R 'cat /root/fspirat-backup/router-$STAMP.tar.gz' > /root/fspirat-backups/router/router-$STAMP.tar.gz
             a=\$($R 'sha256sum /root/fspirat-backup/router-$STAMP.tar.gz' | cut -d' ' -f1); b=\$(sha256sum /root/fspirat-backups/router/router-$STAMP.tar.gz | cut -d' ' -f1)
