@@ -911,16 +911,17 @@ function renderTgws(){
   $('#tgws-link').hidden = !on;
   if(!on) $('#tgws-out').hidden = true;
   $('#tgws-sum').innerHTML = !on ? '<i class="off">●</i> Выключен — Telegram идёт как обычно (через VPN)'
-    : ok ? `<i class="ok">●</i> Прокси <b>${esc(tgws.host)}:${num(tgws.port)}</b> — Telegram через Cloudflare, мимо VPN`
-    : '<i class="mid">●</i> Запускается… (если не пройдёт — служба перезапустится сама)';
+    : ok && tgws.auto ? `<i class="ok">●</i> Telegram на всех устройствах дома — <b>через Cloudflare, мимо VPN</b>, без настройки <small>${num(tgws.redirected)} подкл.</small>`
+    : ok ? '<i class="mid">●</i> Прокси работает, перехват ещё не включён (сторож включит в течение минуты)'
+    : '<i class="mid">●</i> Запускается… Пока прокси не работает, Telegram идёт через VPN';
 }
 async function loadTgws(){ try { tgws = await api('tgws'); } catch(err){ return; } renderTgws(); }
 $('#tgws-tgl').addEventListener('click', async () => {
   if(!tgws) return;
   const on = !tgws.enabled;
   const ok = await ask(on
-    ? {title: 'Включить прокси Telegram?', text: 'На роутере запустится MTProto-прокси для устройств дома. Telegram на устройствах с этим прокси пойдёт через Cloudflare с IP провайдера, а не через VPN. VPN и остальные сайты не меняются.', ok: 'Включить'}
-    : {title: 'Выключить прокси Telegram?', text: 'Устройства, где он указан, перестанут подключаться через него — в Telegram нужно будет выключить прокси.', ok: 'Выключить'});
+    ? {title: 'Включить прокси Telegram?', text: 'Telegram на всех устройствах дома пойдёт через Cloudflare с IP провайдера, а не через VPN — настраивать ничего не нужно. Если прокси перестанет работать, Telegram сам вернётся на VPN. Остальные сайты не меняются. Режим экспериментальный.', ok: 'Включить'}
+    : {title: 'Выключить прокси Telegram?', text: 'Telegram снова пойдёт через VPN. Если на каком-то устройстве прокси указан вручную — его нужно выключить в настройках Telegram.', ok: 'Выключить'});
   if(!ok) return;
   const done = busy($('#tgws-tgl'), on ? 'Включаю…' : 'Выключаю…');
   try { await api('tgwsset', '&on=' + (on ? 1 : 0)); } catch(err){ toast(err.message, true); }

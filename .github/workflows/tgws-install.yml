@@ -6,7 +6,8 @@ name: TG WS Proxy install
 #     строку лога с секретом прокси вырезает — секрет в логи не попадает;
 #  3) ставит python3-light и нужные модули (apk), пакет — в /usr/share/fspirat-tgws, скрипт, службу, CGI;
 #  4) проверяет импорт и пробный запуск на 127.0.0.1 (порт 14430, 6 с), показывает состояние.
-# PassWall, firewall, DNS и маршруты не меняет. Включение — переключатель в панели (блок zapret) или `fspirat-tgws on`.
+# PassWall, fw4, DNS и маршруты не меняет. Включение — переключатель в панели (блок zapret) или `fspirat-tgws on`:
+# тогда своя таблица nftables inet fspirat_tg перехватывает Telegram устройств дома (сторож в cron снимает её, если прокси не слушает).
 on:
   workflow_dispatch:
 
@@ -50,7 +51,7 @@ jobs:
           rm -rf pkg/lib/*.dist-info/RECORD
           cp -r src/proxy src/utils pkg/
           find pkg -name '__pycache__' -prune -exec rm -rf {} +
-          cp router/tgws/VERSION router/tgws/LICENSE-tg-ws-proxy.txt pkg/
+          cp router/tgws/VERSION router/tgws/LICENSE-tg-ws-proxy.txt router/tgws/fspirat_transparent.py pkg/
           tar -czf pkg.tgz -C pkg . && ls -l pkg.tgz && du -sh pkg
 
       - name: SSH
@@ -86,6 +87,10 @@ jobs:
           push router/www/cgi-bin/fspirat      /www/cgi-bin/fspirat
           # секрет создаётся на роутере один раз (в лог не печатается); служба в автозапуске, но работает только при ENABLED=1
           ssh vps "$R '/usr/bin/fspirat-tgws init && /etc/init.d/fspirat-tgws enable && ls -l /etc/fspirat/tgws | cut -c1-10'"
+          # сторож перехвата (автоматический режим): раз в минуту — перехват есть только пока прокси слушает
+          ssh vps "$R 'grep -q \"fspirat-tgws ensure\" /etc/crontabs/root || { echo \"* * * * * /usr/bin/fspirat-tgws ensure\" >> /etc/crontabs/root; /etc/init.d/cron restart; }; grep -c \"fspirat-tgws ensure\" /etc/crontabs/root'"
+          # если режим уже был включён — перезапустить службу с новым кодом (перехват вернёт сторож / on)
+          ssh vps "$R 'grep -qx ENABLED=1 /etc/fspirat/tgws && /usr/bin/fspirat-tgws on || true'"
 
       - name: Verify
         run: |
@@ -93,10 +98,10 @@ jobs:
           cat > /tmp/v.sh <<'EOF2'
           cd /tmp
           export PYTHONPATH=/usr/share/fspirat-tgws/lib:/usr/share/fspirat-tgws PYTHONDONTWRITEBYTECODE=1
-          python3 -c 'import httpx, h2, certifi, proxy.tg_ws_proxy; print("импорт: ok")'
-          python3 -u -m proxy.tg_ws_proxy --host 127.0.0.1 --port 14430 --secret 00000000000000000000000000000000 --pool-size 0 > /tmp/tgws-test.log 2>&1 &
+          python3 -c 'import httpx, h2, certifi, proxy.tg_ws_proxy, fspirat_transparent; print("импорт: ok")'
+          python3 -u -m fspirat_transparent --transparent-port 14431 --host 127.0.0.1 --port 14430 --secret 00000000000000000000000000000000 --pool-size 0 > /tmp/tgws-test.log 2>&1 &
           p=$!; sleep 8
-          if netstat -ltn | grep -q '127.0.0.1:14430 '; then echo "пробный запуск: слушает 127.0.0.1:14430"; else echo "пробный запуск: НЕ слушает"; fi
+          for pt in 14430 14431; do if netstat -ltn | grep -q "127.0.0.1:$pt "; then echo "пробный запуск: слушает 127.0.0.1:$pt"; else echo "пробный запуск: НЕ слушает $pt"; fi; done
           kill $p 2>/dev/null; sleep 1; tail -25 /tmp/tgws-test.log; rm -f /tmp/tgws-test.log
           echo; free -m | sed -n 2p; df -h /overlay | tail -1; /usr/bin/fspirat-tgws status
           EOF2
