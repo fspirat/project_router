@@ -34,7 +34,7 @@ err() { printf '%s' "$*" > "$RUN/error"; log "ошибка: $*"; }
 conf_get() { sed -n "s/^$1=\([0-9]\{1,2\}\)\$/\1/p" "$CONF" 2>/dev/null | tail -1; }
 read_conf() {
   ENABLED=$(conf_get ENABLED); [ "$ENABLED" = 1 ] || ENABLED=0
-  STRATEGY=$(conf_get STRATEGY); case "$STRATEGY" in 1|2|3) ;; *) STRATEGY=1 ;; esac
+  STRATEGY=$(conf_get STRATEGY); case "$STRATEGY" in 1|2|3) ;; *) STRATEGY=3 ;; esac
 }
 write_conf() { mkdir -p /etc/fspirat; printf 'ENABLED=%s\nSTRATEGY=%s\n' "$1" "$2" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; }
 

@@ -78,7 +78,7 @@ jobs:
           push router/etc/init.d/fspirat-zapret  /etc/init.d/fspirat-zapret
           push router/www/cgi-bin/fspirat        /www/cgi-bin/fspirat
           # служба включена в автозапуск, но nfqws стартует только при ENABLED=1; режим по умолчанию — выключен
-          ssh vps "$R '[ -f /etc/fspirat/zapret ] || printf \"ENABLED=0\nSTRATEGY=1\n\" > /etc/fspirat/zapret
+          ssh vps "$R '[ -f /etc/fspirat/zapret ] || printf \"ENABLED=0\nSTRATEGY=3\n\" > /etc/fspirat/zapret
             /etc/init.d/fspirat-zapret enable
             grep -q \"fspirat-zapret ensure\" /etc/crontabs/root || { echo \"* * * * * /usr/bin/fspirat-zapret ensure\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
 
