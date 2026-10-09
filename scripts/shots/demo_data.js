@@ -44,4 +44,15 @@ function data(range){
     offline_since: null, last_ok: now - 40, mtg: {active: true, conns: 2, since: now - 5 * 86400, ts: now - 30},
     names: {}, speed: SPEED, traffic: {'02:00:00:00:00:01': {d: [0.4e9, 7.8e9], m: [9e9, 164e9]}, '02:00:00:00:00:02': {d: [0.1e9, 1.9e9], m: [2.2e9, 41e9]}, '02:00:00:00:00:04': {d: [0.05e9, 12.4e9], m: [1.1e9, 96e9]}}};
 }
-module.exports = {status, data, now, MD};
+// «YouTube и Discord через zapret» (CGI zapret): ZAP_STATE=ok|fallback|off
+const ZAP = {
+  ok: {installed: true, enabled: true, strategy: 1, engine: true, nft: true, route_cfg: true, route_live: true, fallback: false, error: '',
+       pkts_tcp: 1842, pkts_udp: 637, vpn_excluded: 1, version: 'v72.13', busy: false, checking: false,
+       check: {ts: now - 120, via: 'isp', list: [{name: 'YouTube', ok: true, code: '204', ms: 182, queued: 6}, {name: 'YouTube видео', ok: true, code: '200', ms: 241, queued: 6},
+                                              {name: 'Discord API', ok: true, code: '200', ms: 214, queued: 5}, {name: 'Discord CDN', ok: true, code: '404', ms: 196, queued: 5}]}},
+  fallback: {installed: true, enabled: true, strategy: 2, engine: false, nft: false, route_cfg: false, route_live: false, fallback: true,
+       error: 'nfqws не запускается — YouTube и Discord временно идут через VPN', pkts_tcp: 0, pkts_udp: 0, vpn_excluded: 0, version: 'v72.13', busy: false, checking: false, check: null},
+  off: {installed: true, enabled: false, strategy: 1, engine: false, nft: false, route_cfg: false, route_live: false, fallback: false, error: '',
+       pkts_tcp: 0, pkts_udp: 0, vpn_excluded: 0, version: 'v72.13', busy: false, checking: false, check: null},
+};
+module.exports = {status, data, now, MD, ZAP};

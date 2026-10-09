@@ -27,7 +27,7 @@ mac=$(param mac | sed 's/%3[Aa]/:/g' | tr A-F a-f | grep -E '^([0-9a-f]{2}:){5}[
 
 # Чтение — GET; всё, что меняет состояние или запускает работу, — только POST (nginx пускает POST только с CSRF-токеном).
 case "$action" in
-  status|net|pingone|mydirect) ;;
+  status|net|pingone|mydirect|zapret) ;;
   *) [ "$REQUEST_METHOD" = POST ] || reply "405 Method Not Allowed" '{"error":"method"}' ;;
 esac
 
@@ -351,6 +351,27 @@ L
     reply "200 OK" "{\"ok\":true,\"list\":\"$(cat /etc/fspirat/targets 2>/dev/null | jesc | tr '\n' '\t')\"}" ;;
   reboot)
     bg "sleep 2; reboot"
+    reply "200 OK" '{"ok":true}' ;;
+
+  # «YouTube и Discord через zapret» (/usr/bin/fspirat-zapret). Из браузера приходят только on=0|1 и номер стратегии.
+  zapret)       # состояние: выбранный режим, движок, правила nftables, маршрут PassWall, ошибки, последняя проверка
+    [ -x /usr/bin/fspirat-zapret ] || reply "200 OK" '{"installed":false,"absent":true}'
+    reply "200 OK" "$(/usr/bin/fspirat-zapret status)" ;;
+  zapretset)    # включить / выключить (перезапуск PassWall ~5 с — фоном; результат видно в состоянии)
+    on=$(param on | grep -E '^[01]$'); [ -n "$on" ] || reply "400 Bad Request" '{"error":"bad on"}'
+    [ -x /usr/bin/fspirat-zapret ] || reply "503 Service Unavailable" '{"error":"not installed"}'
+    [ -d /tmp/fspirat/zapret/lock ] && reply "409 Conflict" '{"error":"busy"}'
+    bg "/usr/bin/fspirat-zapret $([ "$on" = 1 ] && echo on || echo off)"
+    reply "200 OK" '{"ok":true}' ;;
+  zapretstrat)  # стратегия обхода — только из фиксированного списка
+    n=$(param n | grep -E '^[123]$'); [ -n "$n" ] || reply "400 Bad Request" '{"error":"bad strategy"}'
+    [ -x /usr/bin/fspirat-zapret ] || reply "503 Service Unavailable" '{"error":"not installed"}'
+    bg "/usr/bin/fspirat-zapret strategy $n"
+    reply "200 OK" '{"ok":true}' ;;
+  zapretcheck)  # проверка доступности YouTube/Discord через Xray (~10–40 с, фоном)
+    [ -x /usr/bin/fspirat-zapret ] || reply "503 Service Unavailable" '{"error":"not installed"}'
+    [ -f /tmp/fspirat/zapret/checking ] && reply "409 Conflict" '{"error":"busy"}'
+    bg "mkdir -p /tmp/fspirat/zapret; touch /tmp/fspirat/zapret/checking; /usr/bin/fspirat-zapret check; rm -f /tmp/fspirat/zapret/checking"
     reply "200 OK" '{"ok":true}' ;;
   *) reply "400 Bad Request" '{"error":"unknown action"}' ;;
 esac

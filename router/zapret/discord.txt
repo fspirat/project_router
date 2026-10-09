@@ -1,0 +1,19 @@
+# Discord через zapret (TCP: вход, сообщения, API, вложения, CDN, шлюз голоса по WebSocket).
+# Голосовые/видео UDP-соединения идут на IP без имени — их по домену не выделить, они остаются через VPN.
+discord.com
+discord.gg
+discord.co
+discord.media
+discord.dev
+discord.new
+discord.gift
+discord.gifts
+discordapp.com
+discordapp.net
+discordcdn.com
+discordstatus.com
+discordsays.com
+discordactivities.com
+discord-activities.com
+dis.gd
+discord-attachments-uploads-prd.storage.googleapis.com

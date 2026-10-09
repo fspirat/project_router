@@ -1,14 +1,14 @@
 // Скриншоты панели (web/) на демо-данных, без роутера и сервера. Запуск — см. README.md рядом.
 const fs = require('fs'), path = require('path');
 let chromium; try { ({ chromium } = require('playwright')); } catch(e){ ({ chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright')); }
-const { status, data, MD } = require('./demo_data.js');
+const { status, data, MD, ZAP } = require('./demo_data.js');
 const WEB = path.resolve(__dirname, '../../web');
 const OUT = path.resolve(process.env.OUT || path.join(__dirname, 'out')); fs.mkdirSync(OUT, {recursive: true});
 // цифры — Minecraft-шрифт сайта (лежит в project_hex); нет файла — цифры будут шрифтом Press Start 2P
 const FONT = process.env.MC_FONT || path.resolve(__dirname, '../../../project_hex/sites/fspirat.ru/admin/mc.ttf');
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
 const TYPES = {'.js': 'application/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json'};
-const READ = new Set(['status', 'net', 'pingone', 'mydirect']);
+const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret']);
 const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.env.PFX || '';
 (async () => {
   const exe = process.env.CHROME || ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome'].find(f => fs.existsSync(f));
@@ -25,7 +25,7 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
         return r.fulfill({body: fs.readFileSync(WEB + u.pathname.slice(7)), contentType: TYPES[path.extname(u.pathname)] || 'application/octet-stream'});
       if(u.pathname === '/router/api'){
         const a = u.searchParams.get('action');
-        const body = a === 'net' ? status.sys.net : a === 'mydirect' ? MD : READ.has(a) ? status : {ok: true};
+        const body = a === 'zapret' ? ZAP[process.env.ZAP_STATE || 'ok'] : a === 'net' ? status.sys.net : a === 'mydirect' ? MD : READ.has(a) ? status : {ok: true};
         return r.fulfill({body: JSON.stringify(body), contentType: 'application/json'});
       }
       if(u.pathname === '/router/data'){
@@ -49,6 +49,10 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
   if(process.env.DEAD){
     const p = await page(1440, 900, '#vpn'); await p.click('#dead-sum'); await p.waitForTimeout(300);
     const bb = await p.locator('#dead-box').boundingBox(); await p.screenshot({path: `${OUT}/${PFX}dead.png`, clip: {x: bb.x - 10, y: bb.y - 10, width: bb.width + 20, height: bb.height + 20}}); await p.close();
+  }
+  if(process.env.ZAPSHOT){   // только блок zapret
+    const p = await page(1440, 900, '#vpn'); const bb = await p.locator('#zap').boundingBox();
+    await p.screenshot({path: `${OUT}/${PFX}zapret.png`, clip: {x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16}}); await p.close();
   }
   if(process.env.EXTRA){
     const p = await page(1440, 900, '#dev');

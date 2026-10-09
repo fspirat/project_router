@@ -3,7 +3,7 @@ const API = '/router/api';
 // Чтение (status, net, pingone) — GET. Всё остальное меняет что-то на роутере — только POST с CSRF-токеном сессии
 // в заголовке X-FSR: сервер (check.php) без верного токена и нашего Origin отвечает 403, роутер на GET — 405.
 // Токен — из /router/data?csrf=1 (ответ чужому сайту не прочитать), меняется с каждой новой сессией.
-const READ = new Set(['status', 'net', 'pingone', 'mydirect']);
+const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret']);
 let csrf = '';
 let state = null, hist = null, names = {}, range = 'day', series = 'link', logLv = 'all', toastTimer, quietUntil = 0, editing = null, lastOk = 0, md = null;
 const $ = s => document.querySelector(s);
@@ -77,6 +77,7 @@ const ERR = {
   inner: 'адрес ведёт внутрь домашней сети или на сам роутер — так нельзя', long: 'слишком длинный список',
   domain: 'нужен домен вида site.ru', time: 'неверное время', resolve: 'не удалось узнать IP сервера', 'no target': 'нет такого сервиса',
   'no rule': 'в PassWall нет правила MyDirect',
+  'bad on': 'неверный режим', 'bad strategy': 'нет такой стратегии', 'not installed': 'zapret не установлен на роутере',
 };
 async function api(action, extra = ''){
   const post = !READ.has(action), url = `${API}?action=${action}${extra}`;
@@ -823,6 +824,69 @@ document.addEventListener('click', async e => {     // кнопки data-act: в
   } catch(err){ toast(err.message, true); done(); }
 });
 
+
+/* ---------- YouTube и Discord через zapret ---------- */
+let zap = null, zapPoll = 0;
+const yes = (v, a, b) => v ? `<b class="ok">${a}</b>` : `<b class="slow">${b}</b>`;
+function renderZap(){
+  const box = $('#zap'); if(!box) return;
+  if(!zap || zap.absent){ box.hidden = true; return; }
+  box.hidden = false;
+  const z = zap, on = !!z.enabled, t = $('#zap-tgl');
+  t.textContent = 'Zapret: ' + (on ? 'включён' : 'выключен');
+  t.setAttribute('aria-checked', on); t.classList.toggle('on', on);
+  t.disabled = !z.installed || z.busy;
+  $('#zap-strat').value = String(z.strategy || 1); $('#zap-strat').disabled = !z.installed || z.busy;
+  $('#zap-check').disabled = !z.installed || z.checking;
+  $('#zap-check').textContent = z.checking ? 'Проверяю…' : 'Проверить доступность';
+  const work = z.engine && z.nft && z.route_live;
+  const items = [
+    ['Выбрано', on ? '<b>включить</b>' : '<b>выключить</b>'],
+    ['Служба nfqws', yes(z.engine, 'работает', on ? 'не работает' : 'остановлена')],
+    ['Правила nftables', yes(z.nft, 'есть', 'нет')],
+    ['Маршрут', z.route_live ? '<b class="ok">YouTube и Discord — напрямую (IP провайдера)</b>' : '<b>YouTube и Discord — через VPN</b>'],
+  ];
+  if(z.nft) items.push(['Обработано пакетов', `<b>${num(z.pkts_tcp)} TCP · ${num(z.pkts_udp)} QUIC</b>`]);
+  if(z.busy) items.unshift(['Сейчас', '<b class="mid">применяю… (PassWall перезапускается)</b>']);
+  $('#zap-st').innerHTML = items.map(([k, v]) => `<li><span>${k}</span>${v}</li>`).join('');
+  let e = '';
+  if(!z.installed) e = 'zapret не установлен на роутере (нет nfqws, списков или модуля ядра).';
+  else if(z.error) e = z.error;
+  else if(!z.busy && on && !work) e = 'Расхождение: режим включён, но ' + [!z.engine && 'служба не работает', !z.nft && 'нет правил nftables', !z.route_live && 'маршрут PassWall не применён'].filter(Boolean).join(', ') + '. Сторож попробует исправить в течение минуты.';
+  else if(!z.busy && !on && (z.engine || z.nft || z.route_cfg)) e = 'Расхождение: режим выключен, но часть правил ещё активна. Сторож уберёт их в течение минуты.';
+  $('#zap-err').hidden = !e; $('#zap-err').textContent = e;
+  const c = z.check;
+  $('#zap-ck').innerHTML = !c || !c.list ? '' : `<li><span>Проверено ${when(c.ts)}</span><b>${c.via === 'isp' ? 'Discord видит IP провайдера' : c.via === 'vpn' ? 'Discord видит IP VPN' : 'IP не определён'}</b></li>`
+    + c.list.map(x => `<li><span>${esc(x.name)}</span>${x.ok ? `<b class="ok">открывается · ${num(x.ms)} ms</b>` : '<b class="slow">не открывается</b>'}${x.queued ? ` <small>обработано zapret: ${x.queued}</small>` : x.ok ? ' <small>без обработки zapret</small>' : ''}</li>`).join('');
+}
+async function loadZap(){
+  try { zap = await api('zapret'); } catch(err){ if(!zap) return; zap = {...zap, error: err.message}; }
+  renderZap();
+  clearTimeout(zapPoll);
+  if(zap && (zap.busy || zap.checking)) zapPoll = setTimeout(loadZap, 3000);
+}
+$('#zap-tgl').addEventListener('click', async () => {
+  if(!zap) return;
+  const on = !zap.enabled;
+  const ok = await ask(on
+    ? {title: 'Включить zapret для YouTube и Discord?', text: 'YouTube и Discord пойдут напрямую через провайдера, с IP провайдера (не через VPN). Остальное не меняется. VPN перезапустится примерно на 5 секунд, открытые видео и звонки переподключатся.', ok: 'Включить'}
+    : {title: 'Выключить zapret?', text: 'YouTube и Discord снова пойдут через VPN, обработка zapret остановится. VPN перезапустится примерно на 5 секунд.', ok: 'Выключить'});
+  if(!ok) return;
+  const done = busy($('#zap-tgl'), on ? 'Включаю…' : 'Выключаю…');
+  try { await api('zapretset', '&on=' + (on ? 1 : 0)); quietUntil = Date.now() + 15000; toast(on ? 'Включаю zapret — около 10 секунд.' : 'Выключаю zapret — около 10 секунд.'); }
+  catch(err){ toast(err.message, true); }
+  finally { done(); setTimeout(loadZap, 1500); }
+});
+$('#zap-strat').addEventListener('change', async e => {
+  try { await api('zapretstrat', '&n=' + encodeURIComponent(e.target.value)); toast('Стратегия ' + e.target.value + ' выбрана.'); }
+  catch(err){ toast(err.message, true); }
+  setTimeout(loadZap, 2000);
+});
+$('#zap-check').addEventListener('click', async () => {
+  try { await api('zapretcheck'); zap = {...zap, checking: true}; renderZap(); setTimeout(loadZap, 3000); }
+  catch(err){ toast(err.message, true); }
+});
+
 /* Опрос: один запрос каждого вида за раз (медленный ответ не копит очередь), во вкладке в фоне — пауза,
    при возврате на вкладку — сразу свежие данные. Таймеры заводятся один раз, слушатели — делегированные. */
 function every(ms, fn){
@@ -831,12 +895,13 @@ function every(ms, fn){
   setInterval(tick, ms);
   return tick;
 }
-const tLoad = every(30000, load), tData = every(60000, loadData);
+const tLoad = every(30000, load), tData = every(60000, loadData), tZap = every(30000, loadZap);
 every(3000, loadNet);
 setInterval(tickUpdated, 5000);
-document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); } });
+document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); tZap(); } });
 
 showTab();
 tLoad();
+tZap();
 tData();
 csrfToken().catch(() => {});

@@ -19,7 +19,7 @@ jobs:
 
       - name: Checks
         run: |
-          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/www/cgi-bin/fspirat router/etc/init.d/fstunnel; do sh -n "$f"; done
+          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret; do sh -n "$f"; done
 
       - name: SSH
         env:
@@ -47,6 +47,13 @@ jobs:
           push router/bin/fspirat-svcping /usr/bin/fspirat-svcping
           push router/bin/fspirat-fw      /usr/bin/fspirat-fw
           push router/bin/fspirat-sub     /usr/bin/fspirat-sub
+          # zapret: скрипт, служба и списки; сам движок (nfqws) ставит workflow «Zapret install». Режим не включается.
+          if ssh vps "$R '[ -d /usr/share/fspirat-zapret ]'"; then
+            push router/bin/fspirat-zapret        /usr/bin/fspirat-zapret
+            push router/etc/init.d/fspirat-zapret /etc/init.d/fspirat-zapret
+            for l in youtube discord; do tr -d '\r' < router/zapret/$l.txt | ssh vps "$R 'cat > /usr/share/fspirat-zapret/lists/$l.txt.new && mv /usr/share/fspirat-zapret/lists/$l.txt.new /usr/share/fspirat-zapret/lists/$l.txt'"; done
+            echo "  -> списки zapret (nfqws перечитает сам; правило PassWall обновит сторож, если режим включён)"
+          fi
           ssh vps "$R 'rm -f /usr/bin/fspirat-wake /usr/bin/fspirat-pc /etc/fspirat/pc.mac /etc/fspirat/pc.token'"   # «Разбудить/Усыпить» убраны
           ssh vps "$R '/usr/bin/fspirat-fw && nft list table inet fspirat >/dev/null && echo \"  таблица inet fspirat на месте\"'"
           ssh vps "$R 'grep -q fspirat-ping /etc/crontabs/root || { echo \"*/5 * * * * /usr/bin/fspirat-ping\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"

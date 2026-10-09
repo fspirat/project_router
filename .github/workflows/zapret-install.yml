@@ -1,0 +1,91 @@
+name: Zapret install
+
+# Установка движка для «YouTube и Discord через zapret» — режим остаётся ВЫКЛЮЧЕННЫМ.
+#  1) требует свежую резервную копию (workflow «Router backup», не старше 24 ч);
+#  2) скачивает релиз bol-van/zapret (версия и SHA-256 — router/zapret/VERSION), проверяет суммы архива и файлов;
+#  3) ставит на роутер модуль ядра очереди пакетов (apk: kmod-nft-queue), nfqws, fake-файлы, списки, скрипт и службу;
+#  4) проверяет параметры всех стратегий (nfqws --dry-run) и показывает состояние.
+# PassWall, firewall, DNS и маршруты не меняет. Включение — кнопкой в панели или `fspirat-zapret on`.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checks
+        run: |
+          for f in router/bin/fspirat-zapret router/etc/init.d/fspirat-zapret router/www/cgi-bin/fspirat; do sh -n "$f"; done
+          for f in router/bin/fspirat-zapret router/etc/init.d/fspirat-zapret router/zapret/*.txt router/zapret/VERSION; do
+            ! grep -q $'\r' "$f" || { echo "CRLF в $f"; exit 1; }
+          done
+
+      - name: Download zapret release and verify
+        run: |
+          . router/zapret/VERSION
+          mkdir -p z && cd z
+          curl -sSfL -o z.tgz "$ZAPRET_URL"
+          echo "$ZAPRET_TGZ_SHA256  z.tgz" | sha256sum -c -
+          tar -xzf z.tgz
+          D=zapret-$ZAPRET_VERSION
+          echo "$NFQWS_ARM64_SHA256  $D/binaries/linux-arm64/nfqws" | sha256sum -c -
+          echo "$FAKE_TLS_GOOGLE_SHA256  $D/files/fake/tls_clienthello_www_google_com.bin" | sha256sum -c -
+          echo "$FAKE_QUIC_GOOGLE_SHA256  $D/files/fake/quic_initial_www_google_com.bin" | sha256sum -c -
+          mkdir -p ../pkg/fake ../pkg/lists
+          cp $D/binaries/linux-arm64/nfqws ../pkg/nfqws
+          cp $D/files/fake/tls_clienthello_www_google_com.bin $D/files/fake/quic_initial_www_google_com.bin ../pkg/fake/
+          cd .. && tr -d '\r' < router/zapret/youtube.txt > pkg/lists/youtube.txt && tr -d '\r' < router/zapret/discord.txt > pkg/lists/discord.txt
+          cp router/zapret/VERSION router/zapret/LICENSE-zapret.txt pkg/
+          tar -czf pkg.tgz -C pkg . && ls -l pkg.tgz && tar -tzf pkg.tgz
+
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+
+      - name: Require fresh backup
+        run: |
+          ssh vps 'f=$(ls -1t /root/fspirat-backups/router/router-*.tar.gz 2>/dev/null | head -1)
+            [ -n "$f" ] || { echo "Нет резервной копии — сначала запусти workflow «Router backup»"; exit 1; }
+            age=$(( $(date +%s) - $(stat -c %Y "$f") )); echo "последняя копия: $f ($((age/60)) мин назад)"
+            [ $age -lt 86400 ] || { echo "Копия старше 24 ч — запусти «Router backup» заново"; exit 1; }
+            tar -tzf "$f" | grep -q "files/etc/config/passwall2" || { echo "Копия неполная"; exit 1; }'
+
+      - name: Install on router (zapret stays OFF)
+        run: |
+          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          # модуль ядра для очереди пакетов nfqws (версия ядра подбирается apk)
+          ssh vps "$R 'lsmod | grep -q ^nfnetlink_queue || { apk update >/dev/null && apk add kmod-nft-queue && modprobe nfnetlink_queue 2>/dev/null; }; lsmod | grep -E \"^(nfnetlink_queue|nft_queue)\" | cut -d\" \" -f1'"
+          ssh vps "$R 'rm -rf /tmp/fsz && mkdir -p /tmp/fsz && cat > /tmp/fsz/pkg.tgz'" < pkg.tgz
+          ssh vps "$R 'set -e; mkdir -p /usr/share/fspirat-zapret.new && tar -xzf /tmp/fsz/pkg.tgz -C /usr/share/fspirat-zapret.new
+            chmod 755 /usr/share/fspirat-zapret.new/nfqws; chmod -R a+rX /usr/share/fspirat-zapret.new
+            rm -rf /usr/share/fspirat-zapret.old; [ -d /usr/share/fspirat-zapret ] && mv /usr/share/fspirat-zapret /usr/share/fspirat-zapret.old
+            mv /usr/share/fspirat-zapret.new /usr/share/fspirat-zapret; rm -rf /usr/share/fspirat-zapret.old /tmp/fsz'"
+          push() { tr -d '\r' < "$1" | ssh vps "$R 'cat > $2.new && chmod 755 $2.new && mv $2.new $2'"; echo "  -> $2"; }
+          push router/bin/fspirat-zapret         /usr/bin/fspirat-zapret
+          push router/etc/init.d/fspirat-zapret  /etc/init.d/fspirat-zapret
+          push router/www/cgi-bin/fspirat        /www/cgi-bin/fspirat
+          # служба включена в автозапуск, но nfqws стартует только при ENABLED=1; режим по умолчанию — выключен
+          ssh vps "$R '[ -f /etc/fspirat/zapret ] || printf \"ENABLED=0\nSTRATEGY=1\n\" > /etc/fspirat/zapret
+            /etc/init.d/fspirat-zapret enable
+            grep -q \"fspirat-zapret ensure\" /etc/crontabs/root || { echo \"* * * * * /usr/bin/fspirat-zapret ensure\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
+
+      - name: Verify
+        run: |
+          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          ssh vps "$R 'for n in 1 2 3; do /usr/share/fspirat-zapret/nfqws --dry-run \$(/usr/bin/fspirat-zapret args \$n) >/dev/null 2>&1 && echo \"стратегия \$n: параметры приняты\" || { echo \"стратегия \$n: nfqws ОТКЛОНИЛ параметры\"; /usr/share/fspirat-zapret/nfqws --dry-run \$(/usr/bin/fspirat-zapret args \$n) 2>&1 | tail -3; }; done
+            /usr/share/fspirat-zapret/nfqws --version 2>&1 | head -1
+            echo; /usr/bin/fspirat-zapret status
+            echo; echo \"nft-таблицы: \$(nft list tables | tr \"\\n\" \" \")\"; echo \"правило в PassWall: \$(uci show passwall2 | grep -c fsZapret)\"'"
