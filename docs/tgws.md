@@ -21,7 +21,7 @@ Telegram (телефон/ПК дома) ─MTProto─► роутер :1443 (tg-
 
 Когда переключатель включён, своя таблица nftables `inet fspirat_tg` (nat prerouting, priority `dstnat - 10` — раньше
 PassWall) перенаправляет TCP устройств дома (`ip saddr <LAN>`) к подсетям Telegram (`core.telegram.org/resources/cidr.txt`,
-порты 80/443/5222) на порт **1444** роутера. Там `fspirat_transparent.py` принимает обычный обфусцированный заголовок
+порты 443/5222; HTTP-транспорт Telegram Desktop на 80 остаётся через VPN) на порт **1444** роутера. Там `fspirat_transparent.py` принимает обычный обфусцированный заголовок
 прямого подключения (ключ без секрета прокси), определяет DC (из заголовка или по адресу) и дальше использует код
 tg-ws-proxy: WebSocket через Cloudflare. Код tg-ws-proxy не меняется (кроме скрытия секрета в логе).
 

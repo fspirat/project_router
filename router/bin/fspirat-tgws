@@ -48,7 +48,7 @@ table inet $TBL {
   set tg4 { type ipv4_addr; flags interval; elements = { $TG_NETS } }
   chain pre {
     type nat hook prerouting priority dstnat - 10; policy accept;
-    ip saddr $net ip daddr @tg4 tcp dport { 80, 443, 5222 } counter redirect to :$TPORT comment "Telegram -> tg-ws-proxy"
+    ip saddr $net ip daddr @tg4 tcp dport { 443, 5222 } counter redirect to :$TPORT comment "Telegram -> tg-ws-proxy"
   }
 }
 EOF2
