@@ -22,7 +22,9 @@ write_conf() {
 ensure_secret() {
   read_conf
   [ -n "$SECRET" ] && return 0
-  SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  # BusyBox на роутере без od/hexdump — секрет даёт Python (он нужен прокси и так), запасной путь — lua
+  SECRET=$(python3 -c 'import os; print(os.urandom(16).hex())' 2>/dev/null || lua -e 'local f=io.open("/dev/urandom","rb"); io.write((f:read(16):gsub(".", function(c) return string.format("%02x", c:byte()) end)))')
+  echo "$SECRET" | grep -qE '^[0-9a-f]{32}$' || { echo "не удалось создать секрет" >&2; exit 1; }
   write_conf "$ENABLED" "$SECRET"
 }
 lan_ip() { ip=$(uci -q get network.lan.ipaddr); ip=${ip%%/*}; echo "${ip:-192.168.1.1}"; }
