@@ -111,6 +111,9 @@ route_on() {   # печатает 1, если конфиг поменялся
     uci set passwall2.$RULE=shunt_rules
     uci set passwall2.$RULE.remarks='fsZapret YouTube Discord'
     uci set passwall2.$RULE.network='tcp,udp'; c=1; }
+  # PassWall берёт в Xray только правила той же «группы», что у узла Split (shunt_group, сейчас RU)
+  g=$(uci -q get passwall2.$SHUNT.shunt_group)
+  [ "$(uci -q get passwall2.$RULE.group)" = "$g" ] || { if [ -n "$g" ]; then uci set passwall2.$RULE.group="$g"; else uci -q delete passwall2.$RULE.group; fi; c=1; }
   dl=$(domains)
   [ "$(uci -q get passwall2.$RULE.domain_list)" = "$dl" ] || { uci set passwall2.$RULE.domain_list="$dl"; c=1; }
   [ "$(uci -q get passwall2.$SHUNT.$RULE)" = _direct ] || { uci set passwall2.$SHUNT.$RULE=_direct; c=1; }
@@ -205,6 +208,7 @@ do_check() {
   [ -n "$(pidof xray)" ] || { echo '{"error":"xray"}' > "$RUN/check.json"; return 0; }
   # через какой IP Discord видит соединение: трассировка Cloudflare на самом discord.com
   ip=$(curl -s -m 10 -x socks5h://127.0.0.1:1070 https://discord.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')
+  [ -n "$ip" ] || ip=$(curl -s -m 10 -x socks5h://127.0.0.1:1070 https://cdn.discordapp.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')
   wan=$(curl -s -m 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')   # роутер сам ходит напрямую
   via=unknown; [ -n "$ip" ] && { [ "$ip" = "$wan" ] && via=isp || via=vpn; }
   printf '{"ts":%s,"via":"%s","list":[%s,%s,%s,%s]}\n' "$(date +%s)" "$via" \
