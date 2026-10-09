@@ -88,6 +88,26 @@
     </section>
 
     <div class="side">
+      <!-- YouTube и Discord через zapret: управление /usr/bin/fspirat-zapret на роутере (CGI zapret*) -->
+      <section class="panel needs-router zap" id="zap" hidden>
+        <div class="h2row"><h2>YouTube и Discord через zapret</h2>
+          <button class="btn small zap-tgl" id="zap-tgl" type="button" role="switch" aria-checked="false">Zapret: выключен</button></div>
+        <p class="zap-warn">Когда включено, YouTube и Discord идут <b>напрямую через провайдера — с IP провайдера, не через VPN</b>.
+          Остальные сайты и сервисы — как раньше (VPN / MyDirect). Голос и видео Discord остаются через VPN.</p>
+        <ul class="zap-st" id="zap-st"></ul>
+        <p class="zap-err" id="zap-err" role="alert" hidden></p>
+        <div class="zap-row">
+          <label for="zap-strat">Стратегия</label>
+          <select id="zap-strat">
+            <option value="1">1 · multisplit</option>
+            <option value="2">2 · fake + fakedsplit</option>
+            <option value="3">3 · hostfakesplit</option>
+          </select>
+          <button class="btn small" id="zap-check" type="button">Проверить доступность</button>
+        </div>
+        <ul class="zap-ck" id="zap-ck"></ul>
+        <p class="note">Проверка идёт с роутера через те же правила, что у устройств дома. Окончательно — открой видео на YouTube и зайди в голосовой канал Discord.</p>
+      </section>
       <section class="panel">
         <div class="h2row"><h2 id="chart-title">Связь за 24 часа</h2>
           <div class="seg" id="range" role="group" aria-label="Период">

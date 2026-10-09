@@ -1,0 +1,247 @@
+#!/bin/sh
+# FSPIRAT: «YouTube и Discord через zapret».
+# При включённом режиме PassWall (Split) отправляет домены YouTube и Discord в Direct — то есть Xray сам
+# открывает к ним новое соединение с IP провайдера, — а nfqws (bol-van/zapret) обрабатывает только эти
+# исходящие соединения Xray. VPN и все остальные правила (MyDirect, сервер по умолчанию) не меняются.
+#
+#   fspirat-zapret on | off            включить / выключить (запоминается в /etc/fspirat/zapret)
+#   fspirat-zapret strategy 1|2|3      сменить стратегию обхода (без перезапуска PassWall)
+#   fspirat-zapret status              состояние одной строкой JSON (для панели)
+#   fspirat-zapret check               проверка доступности YouTube/Discord через Xray (как у домашних устройств)
+#   fspirat-zapret ensure              сторож: cron раз в минуту, после перезагрузки и reload firewall
+#
+# Путь пакета: устройство → TPROXY PassWall → Xray (sniffing SNI/QUIC) → правило fsZapret → Direct (mark 0xff)
+#   → postrouting: таблица inet fspirat_zapret → очередь nfqws (первые 6 пакетов) → WAN.
+# Соединения Xray с VPN-серверами (тоже mark 0xff) исключены по адресам из набора PassWall psw2_vps;
+# nfqws к тому же меняет пакеты только при совпадении имени со списками (SNI / QUIC).
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+CONF=/etc/fspirat/zapret                 # ENABLED=0|1, STRATEGY=1..3 — переживает перезагрузку
+SHARE=/usr/share/fspirat-zapret          # nfqws, fake/*.bin, списки (выкладка: workflow «Zapret install» / «Deploy router»)
+NFQWS=$SHARE/nfqws
+RUN=/tmp/fspirat/zapret                  # состояние, ошибки, результаты проверки
+SHUNT=9DxG2j8l                           # узел Split в PassWall
+RULE=fsZapret                            # своё правило PassWall (не MyDirect)
+TBL=fspirat_zapret                       # своя таблица nftables
+QNUM=200
+TCP_PORTS="80, 443, 2053, 2083, 2087, 2096, 8443"
+RETRY_SEC=600                            # после отказа движка — новая попытка не чаще раза в 10 минут
+mkdir -p "$RUN"
+
+log() { logger -t fspirat-zapret "$*"; echo "$(date '+%d.%m %H:%M') zapret: $*" >> /tmp/fspirat/switch.log; }
+err() { printf '%s' "$*" > "$RUN/error"; log "ошибка: $*"; }
+
+conf_get() { sed -n "s/^$1=\([0-9]\{1,2\}\)\$/\1/p" "$CONF" 2>/dev/null | tail -1; }
+read_conf() {
+  ENABLED=$(conf_get ENABLED); [ "$ENABLED" = 1 ] || ENABLED=0
+  STRATEGY=$(conf_get STRATEGY); case "$STRATEGY" in 1|2|3) ;; *) STRATEGY=1 ;; esac
+}
+write_conf() { mkdir -p /etc/fspirat; printf 'ENABLED=%s\nSTRATEGY=%s\n' "$1" "$2" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; }
+
+installed() { [ -x "$NFQWS" ] && [ -s "$SHARE/lists/youtube.txt" ] && [ -s "$SHARE/lists/discord.txt" ] && lsmod | grep -q '^nfnetlink_queue'; }
+engine_pid() { pidof nfqws 2>/dev/null | awk '{print $1}'; }
+
+# ---------- блокировка: одно действие за раз ----------
+lock() {
+  L=$RUN/lock
+  if ! mkdir "$L" 2>/dev/null; then
+    p=$(cat "$L/pid" 2>/dev/null)
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "занято: идёт другое действие" >&2; exit 2; fi
+    rm -rf "$L"; mkdir "$L" || exit 2
+  fi
+  echo $$ > "$L/pid"; trap 'rm -rf "$RUN/lock"' EXIT INT TERM
+}
+
+# ---------- параметры nfqws: только фиксированные наборы, из браузера приходит лишь номер ----------
+# Стратегии взяты из Flowseal/zapret-discord-youtube (general / ALT / SIMPLE FAKE) и проверены на синтаксис nfqws v72.
+nfqws_args() {
+  F=$SHARE/fake; L=$SHARE/lists
+  case "$1" in
+    2) S="--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts --dpi-desync-fakedsplit-pattern=0x00 --dpi-desync-fake-tls=$F/tls_clienthello_www_google_com.bin" ;;
+    3) S="--dpi-desync=hostfakesplit --dpi-desync-fooling=ts --dpi-desync-hostfakesplit-mod=host=www.google.com" ;;
+    *) S="--dpi-desync=multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-split-seqovl-pattern=$F/tls_clienthello_www_google_com.bin" ;;
+  esac
+  echo "--qnum=$QNUM --user=nobody \
+--filter-tcp=80,443,2053,2083,2087,2096,8443 --hostlist=$L/youtube.txt --hostlist=$L/discord.txt --ip-id=zero $S --new \
+--filter-udp=443 --hostlist=$L/youtube.txt --hostlist=$L/discord.txt --dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$F/quic_initial_www_google_com.bin"
+}
+
+# ---------- nftables: своя таблица, остальные не трогаем ----------
+nft_up() {
+  nft -f - <<EOF || return 1
+table inet $TBL
+delete table inet $TBL
+table inet $TBL {
+	set vpn4 { type ipv4_addr; flags interval; auto-merge; }
+	set vpn6 { type ipv6_addr; flags interval; auto-merge; }
+	chain post {
+		type filter hook postrouting priority mangle + 10; policy accept;
+		meta mark & 0x40000000 == 0x40000000 return comment "пакеты самого nfqws"
+		meta mark & 0x000000ff != 0x000000ff return comment "только исходящие соединения Xray"
+		ip daddr @vpn4 return comment "соединения с VPN-серверами не трогаем"
+		ip6 daddr @vpn6 return comment "соединения с VPN-серверами не трогаем"
+		meta l4proto tcp tcp dport { $TCP_PORTS } ct original packets 1-6 counter queue num $QNUM bypass comment "zapret tcp"
+		meta l4proto udp udp dport 443 ct original packets 1-6 counter queue num $QNUM bypass comment "zapret quic"
+	}
+}
+EOF
+  vpn_sync
+}
+nft_down() { nft list table inet $TBL >/dev/null 2>&1 && nft delete table inet $TBL; return 0; }
+nft_ok() { nft list chain inet $TBL post 2>/dev/null | grep -q 'queue'; }
+
+# адреса VPN-серверов — из набора PassWall (он обновляет его при каждом запуске / смене сервера)
+els() { nft list set inet passwall2 "$1" 2>/dev/null | tr -d '\n\t' | sed -n 's/.*elements = {\([^}]*\)}.*/\1/p' \
+          | tr ',' '\n' | awk '{print $1}' | grep -E '^[0-9a-fA-F.:/]+$' | tr '\n' ',' | sed 's/,$//'; }
+vpn_sync() {
+  nft list table inet $TBL >/dev/null 2>&1 || return 0
+  for s in 4 6; do
+    e=$(els psw2_vps$( [ $s = 6 ] && echo 6 ))
+    nft flush set inet $TBL vpn$s
+    [ -n "$e" ] && nft add element inet $TBL vpn$s "{ $e }"
+  done
+  return 0
+}
+
+# ---------- PassWall: своё правило fsZapret → Direct в Split ----------
+domains() { cat "$SHARE/lists/youtube.txt" "$SHARE/lists/discord.txt" | sed 's/#.*//; s/[[:space:]]//g' | grep -E '^[a-z0-9.-]+\.[a-z]{2,}$' | sed 's/^/domain:/'; }
+route_on() {   # печатает 1, если конфиг поменялся
+  c=0
+  [ "$(uci -q get passwall2.$RULE)" = shunt_rules ] || {
+    uci set passwall2.$RULE=shunt_rules
+    uci set passwall2.$RULE.remarks='fsZapret YouTube Discord'
+    uci set passwall2.$RULE.network='tcp,udp'; c=1; }
+  dl=$(domains)
+  [ "$(uci -q get passwall2.$RULE.domain_list)" = "$dl" ] || { uci set passwall2.$RULE.domain_list="$dl"; c=1; }
+  [ "$(uci -q get passwall2.$SHUNT.$RULE)" = _direct ] || { uci set passwall2.$SHUNT.$RULE=_direct; c=1; }
+  [ $c = 1 ] && uci commit passwall2
+  echo $c
+}
+route_off() {
+  c=0
+  uci -q get passwall2.$SHUNT.$RULE >/dev/null && { uci delete passwall2.$SHUNT.$RULE; c=1; }
+  [ "$(uci -q get passwall2.$RULE)" = shunt_rules ] && { uci delete passwall2.$RULE; c=1; }
+  [ $c = 1 ] && uci commit passwall2
+  echo $c
+}
+route_cfg() { [ "$(uci -q get passwall2.$SHUNT.$RULE)" = _direct ]; }
+# правило реально попало в работающий Xray (PassWall перезапущен после изменения)
+route_live() { grep -q 'fsZapret' /tmp/etc/passwall2/acl/acl_default.json 2>/dev/null; }   # метка правила латиницей — не зависит от экранирования JSON
+pw_restart() { log "перезапуск PassWall"; date +%s > "$RUN/pw_restart"; /etc/init.d/passwall2 restart >/dev/null 2>&1; }
+# сторож перезапускает PassWall не чаще раза в RETRY_SEC — даже если проверка маршрута почему-то не сходится
+pw_restart_guarded() {
+  last=$(cat "$RUN/pw_restart" 2>/dev/null || echo 0)
+  [ $(( $(date +%s) - last )) -ge $RETRY_SEC ] || { err "маршрут PassWall не применился — повтор позже"; return 0; }
+  pw_restart
+}
+
+# nfqws сам проверяет параметры (--dry-run) — до запуска и до смены стратегии
+nfqws_dry() { "$NFQWS" --dry-run $(nfqws_args "$1") >/dev/null 2>&1; }
+engine_start() { /etc/init.d/fspirat-zapret start >/dev/null 2>&1; i=0; while [ $i -lt 5 ]; do [ -n "$(engine_pid)" ] && return 0; sleep 1; i=$((i+1)); done; return 1; }
+engine_stop() { /etc/init.d/fspirat-zapret stop >/dev/null 2>&1; return 0; }
+
+# ---------- действия ----------
+do_on() {
+  read_conf
+  installed || { err "zapret не установлен (нет nfqws, списков или модуля nfnetlink_queue)"; exit 1; }
+  write_conf 1 "$STRATEGY"; rm -f "$RUN/error" "$RUN/fallback"
+  # сначала движок и правила очереди, потом маршрут — чтобы не было окна «напрямую без обработки»
+  nfqws_dry "$STRATEGY" || { err "nfqws отклонил параметры стратегии $STRATEGY"; exit 1; }
+  nft_up || { err "не удалось создать таблицу nftables"; exit 1; }
+  engine_start || { err "nfqws не запустился"; nft_down; exit 1; }
+  [ "$(route_on)" = 1 ] && pw_restart
+  vpn_sync; log "включён (стратегия $STRATEGY)"
+}
+do_off() {
+  read_conf; write_conf 0 "$STRATEGY"
+  # сначала возвращаем YouTube/Discord в VPN, потом останавливаем движок
+  [ "$(route_off)" = 1 ] && pw_restart
+  engine_stop; nft_down; rm -f "$RUN/error" "$RUN/fallback"
+  log "выключен"
+}
+do_strategy() {
+  case "$1" in 1|2|3) ;; *) echo "стратегия: 1, 2 или 3" >&2; exit 1 ;; esac
+  read_conf
+  [ -x "$NFQWS" ] && ! nfqws_dry "$1" && { err "nfqws отклонил параметры стратегии $1"; exit 1; }
+  write_conf "$ENABLED" "$1"
+  [ "$ENABLED" = 1 ] && [ -n "$(engine_pid)" ] && { engine_stop; engine_start || err "nfqws не запустился со стратегией $1"; }
+  log "стратегия $1"
+}
+# отказ движка: YouTube/Discord — обратно в VPN (остальной трафик не трогаем), выбранный режим не меняем
+fallback() {
+  err "$1 — YouTube и Discord временно идут через VPN"
+  date +%s > "$RUN/fallback"
+  [ "$(route_off)" = 1 ] && pw_restart
+  engine_stop; nft_down
+}
+do_ensure() {
+  read_conf
+  if [ "$ENABLED" != 1 ]; then          # выключено: убрать остатки, если они вдруг есть
+    if route_cfg || [ "$(uci -q get passwall2.$RULE)" = shunt_rules ]; then [ "$(route_off)" = 1 ] && pw_restart_guarded; fi
+    [ -n "$(engine_pid)" ] && engine_stop; nft_down; return 0
+  fi
+  if [ -f "$RUN/fallback" ]; then        # после отказа — пробуем снова не чаще раза в RETRY_SEC
+    [ $(( $(date +%s) - $(cat "$RUN/fallback") )) -ge $RETRY_SEC ] || return 0
+  fi
+  installed || { [ -f "$RUN/fallback" ] || fallback "zapret не установлен"; date +%s > "$RUN/fallback"; return 0; }
+  nft_ok || nft_up || { fallback "не удалось создать таблицу nftables"; return 0; }
+  [ -n "$(engine_pid)" ] || engine_start || { fallback "nfqws не запускается"; return 0; }
+  if [ "$(route_on)" = 1 ] || ! route_live; then pw_restart_guarded; fi
+  vpn_sync
+  [ -f "$RUN/fallback" ] && { rm -f "$RUN/fallback" "$RUN/error"; log "движок снова работает — YouTube и Discord снова через zapret"; }
+  return 0
+}
+
+# ---------- проверка доступности: через SOCKS PassWall (те же правила Split, что у устройств дома) ----------
+probe() { # имя url
+  pk0=$(pkts)
+  r=$(curl -s -o /dev/null -m 12 -x socks5h://127.0.0.1:1070 -w '%{http_code} %{time_total}' "$2" 2>/dev/null)
+  code=${r%% *}; t=${r##* }
+  ms=$(awk -v t="$t" 'BEGIN{printf "%d", t*1000}')
+  ok=false; case "$code" in 2*|3*|4*) ok=true ;; esac
+  printf '{"name":"%s","ok":%s,"code":"%s","ms":%s,"queued":%s}' "$1" $ok "${code:-000}" "${ms:-0}" $(( $(pkts) - pk0 ))
+}
+do_check() {
+  [ -n "$(pidof xray)" ] || { echo '{"error":"xray"}' > "$RUN/check.json"; return 0; }
+  # через какой IP Discord видит соединение: трассировка Cloudflare на самом discord.com
+  ip=$(curl -s -m 10 -x socks5h://127.0.0.1:1070 https://discord.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')
+  wan=$(curl -s -m 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')   # роутер сам ходит напрямую
+  via=unknown; [ -n "$ip" ] && { [ "$ip" = "$wan" ] && via=isp || via=vpn; }
+  printf '{"ts":%s,"via":"%s","list":[%s,%s,%s,%s]}\n' "$(date +%s)" "$via" \
+    "$(probe 'YouTube' https://www.youtube.com/generate_204)" \
+    "$(probe 'YouTube видео' https://redirector.googlevideo.com/report_mapping)" \
+    "$(probe 'Discord API' https://discord.com/api/v10/gateway)" \
+    "$(probe 'Discord CDN' https://cdn.discordapp.com/)" > "$RUN/check.json.tmp" && mv "$RUN/check.json.tmp" "$RUN/check.json"
+}
+
+pkts() { nft list chain inet $TBL post 2>/dev/null | awk '/queue/{for(i=1;i<=NF;i++) if($i=="packets") s+=$(i+1)} END{print s+0}'; }
+pkts_of() { nft list chain inet $TBL post 2>/dev/null | awk -v c="$1" 'index($0,c){for(i=1;i<=NF;i++) if($i=="packets") n=$(i+1)} END{print n+0}'; }
+
+do_status() {
+  read_conf
+  inst=false; installed && inst=true
+  eng=false; [ -n "$(engine_pid)" ] && eng=true
+  nf=false; nft_ok && nf=true
+  rc=false; route_cfg && rc=true
+  rl=false; route_live && rl=true
+  fb=false; [ -f "$RUN/fallback" ] && fb=true
+  e=$(cat "$RUN/error" 2>/dev/null | tr -d '"\\\n' | cut -c1-200)
+  ck=$(cat "$RUN/check.json" 2>/dev/null); [ -n "$ck" ] || ck=null
+  v=$(sed -n 's/^ZAPRET_VERSION=//p' "$SHARE/VERSION" 2>/dev/null)
+  printf '{"installed":%s,"enabled":%s,"strategy":%s,"engine":%s,"nft":%s,"route_cfg":%s,"route_live":%s,"fallback":%s,"error":"%s","pkts_tcp":%s,"pkts_udp":%s,"vpn_excluded":%s,"version":"%s","busy":%s,"checking":%s,"check":%s}\n' \
+    $inst $([ "$ENABLED" = 1 ] && echo true || echo false) "$STRATEGY" $eng $nf $rc $rl $fb "$e" \
+    "$(pkts_of 'zapret tcp')" "$(pkts_of 'zapret quic')" \
+    "$(nft list set inet $TBL vpn4 2>/dev/null | grep -c elements)" "$v" \
+    $([ -d "$RUN/lock" ] && echo true || echo false) $([ -f "$RUN/checking" ] && echo true || echo false) "$ck"
+}
+
+case "$1" in
+  on) lock; do_on ;;
+  off) lock; do_off ;;
+  strategy) lock; do_strategy "$2" ;;
+  ensure) mkdir "$RUN/lock" 2>/dev/null || exit 0; echo $$ > "$RUN/lock/pid"; trap 'rm -rf "$RUN/lock"' EXIT INT TERM; do_ensure ;;
+  check) do_check ;;
+  status) do_status ;;
+  args) read_conf; nfqws_args "${2:-$STRATEGY}" ;;   # для init-скрипта
+  *) echo "использование: $0 on|off|strategy 1|2|3|status|check|ensure" >&2; exit 1 ;;
+esac

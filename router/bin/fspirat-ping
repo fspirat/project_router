@@ -79,7 +79,9 @@ tail -n $HIST_MAX $DIR/history > $DIR/history.tmp && mv $DIR/history.tmp $DIR/hi
 
 # 4. Автопереключение
 FAILS=$(cat $DIR/fails 2>/dev/null || echo 0)
-if [ -z "$(uci -q get passwall2.$CUR.address)" ]; then
+if [ "$CUR" = _direct ]; then
+  FAILS=0                           # выбран режим «Напрямую (без VPN)» — это решение пользователя, VPN сами не включаем
+elif [ -z "$(uci -q get passwall2.$CUR.address)" ]; then
   FAILS=$FAILS_TO_SWITCH            # текущего узла больше нет (например, после обновления подписки)
 elif [ "$HEALTH" -gt 0 ]; then
   FAILS=0

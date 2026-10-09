@@ -1,0 +1,100 @@
+name: Router backup
+
+# Резервная копия рабочего состояния перед изменениями: конфигурации роутера (PassWall/Xray, firewall, DNS, сеть,
+# службы, наши скрипты и CGI), снимок действующих правил (nft, ip rule/route, пакеты) и файлы веб-панели на сервере.
+# Архив с датой лежит на роутере в /root/fspirat-backup/ (вне /tmp и вне путей выкладки) и копией на сервере
+# в /root/fspirat-backups/ (только root). Содержимое (ключи, UUID, ссылка подписки) в лог не печатается —
+# только список файлов, размеры и контрольные суммы. Внутри — MANIFEST.txt и RESTORE.txt.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH
+        env:
+          OPS_SSH_KEY: ${{ secrets.OPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "$OPS_SSH_KEY" | tr -d ' \r\n' | base64 -d > ~/.ssh/ops && chmod 600 ~/.ssh/ops
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/ops\n  BatchMode yes\n' "$SSH_HOST" > ~/.ssh/config
+
+      - name: Backup on router
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          STAMP=$(TZ=Europe/Samara date +%Y%m%d-%H%M%S)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          R='ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          tr -d '\r' > /tmp/mk.sh <<'EOF'
+          set -e
+          STAMP=$1; SHA=$2
+          B=/root/fspirat-backup; W=/tmp/fsr-bk-$STAMP; mkdir -p $B $W/snapshot
+          umask 077
+          # постоянные конфигурации — по ним восстанавливаем
+          FILES="/etc/config/passwall2 /etc/config/firewall /etc/config/dhcp /etc/config/network /etc/config/system /etc/config/wireless
+                 /etc/init.d/fstunnel /etc/init.d/fspirat-zapret /etc/crontabs/root /etc/dropbear/authorized_keys
+                 /etc/fspirat /etc/fspirat.token /www/cgi-bin/fspirat /usr/share/fspirat-zapret"
+          for f in /usr/bin/fspirat-*; do FILES="$FILES $f"; done
+          for f in $FILES; do [ -e "$f" ] || continue; mkdir -p "$W/files$(dirname "$f")"; cp -a "$f" "$W/files$f"; done
+          # снимок действующих правил — только для диагностики
+          nft list ruleset > $W/snapshot/nft-ruleset.txt 2>&1 || true
+          ip rule > $W/snapshot/ip-rule.txt 2>&1; ip route show table all > $W/snapshot/ip-route.txt 2>&1 || true
+          uci export passwall2 > $W/snapshot/uci-passwall2.txt 2>&1 || true
+          apk list -I > $W/snapshot/packages.txt 2>/dev/null || true
+          cp /tmp/etc/passwall2/acl/acl_default.json $W/snapshot/xray-acl_default.json 2>/dev/null || true
+          ps w > $W/snapshot/ps.txt; crontab -l > $W/snapshot/crontab.txt 2>/dev/null || true
+          { echo "FSPIRAT router backup $STAMP (Europe/Samara)"; echo "project_router commit: $SHA"
+            grep DISTRIB_DESCRIPTION /etc/openwrt_release; echo "files/ (постоянные файлы, пути от корня):"
+            (cd $W/files && find . -type f | sed 's#^\.#  #' | sort)
+            echo "snapshot/: nft-ruleset, ip-rule, ip-route, uci-passwall2, packages, xray-acl_default.json, ps, crontab (только для диагностики)"; } > $W/MANIFEST.txt
+          cat > $W/RESTORE.txt <<'R'
+          Восстановление (на роутере, root@OpenWrt):
+            1) Выключить zapret, если он ставился:  /usr/bin/fspirat-zapret off 2>/dev/null; /etc/init.d/fspirat-zapret disable 2>/dev/null
+            2) Распаковать и вернуть постоянные файлы:
+                 mkdir -p /tmp/r && tar -xzf /root/fspirat-backup/<архив>.tar.gz -C /tmp/r && cp -a /tmp/r/files/. / && rm -rf /tmp/r
+               (если на роутере архива нет — он же на сервере: /root/fspirat-backups/router/<архив>.tar.gz)
+            3) Убрать то, чего в архиве не было (если ставился zapret позже архива):
+                 rm -rf /usr/share/fspirat-zapret /usr/bin/fspirat-zapret /etc/init.d/fspirat-zapret /etc/fspirat/zapret
+                 sed -i '/fspirat-zapret ensure/d' /etc/crontabs/root
+            4) Применить: /etc/init.d/cron restart; /etc/init.d/firewall reload; /etc/init.d/passwall2 restart
+               (перезапуск PassWall рвёт VPN на ~5 с; fstunnel не трогать, если он не менялся)
+            5) Проверить: nft list tables (без inet fspirat_zapret); uci show passwall2 | grep -c fsZapret (= 0); страница панели.
+          Панель на сервере (root@occasional-coffe): tar -xzf /root/fspirat-backups/server/<архив>-web.tar.gz -C /
+          R
+          tar -czf $B/router-$STAMP.tar.gz -C $W files MANIFEST.txt RESTORE.txt snapshot
+          rm -rf $W
+          # проверка: архив читается и в нём есть главное
+          L=$(tar -tzf $B/router-$STAMP.tar.gz | sed 's#^\./##; s#/$##')
+          for need in files/etc/config/passwall2 files/etc/config/firewall files/etc/config/dhcp files/www/cgi-bin/fspirat files/usr/bin/fspirat-ping files/etc/crontabs/root MANIFEST.txt RESTORE.txt snapshot/nft-ruleset.txt snapshot/uci-passwall2.txt; do
+            echo "$L" | grep -qx "$need" || { echo "НЕТ В АРХИВЕ: $need"; exit 1; }
+          done
+          echo "архив проверен: $(echo "$L" | grep -c '^files/.*[^/]$') файлов + снимок"
+          ls -l $B/router-$STAMP.tar.gz | awk '{print $5, $9}'; sha256sum $B/router-$STAMP.tar.gz
+          # старые копии на роутере: оставляем 5 последних (флеш)
+          ls -1t $B/router-*.tar.gz | tail -n +6 | xargs -r rm -f
+          EOF
+          ssh vps "$R 'cat > /tmp/fsr-mk.sh'" < /tmp/mk.sh
+          ssh vps "$R 'sh /tmp/fsr-mk.sh $STAMP $SHA; rm -f /tmp/fsr-mk.sh'"
+
+      - name: Copy off-router + panel files, verify
+        run: |
+          R='ssh -n -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1'
+          ssh vps "set -e; umask 077; mkdir -p /root/fspirat-backups/router /root/fspirat-backups/server
+            $R 'cat /root/fspirat-backup/router-$STAMP.tar.gz' > /root/fspirat-backups/router/router-$STAMP.tar.gz
+            a=\$($R 'sha256sum /root/fspirat-backup/router-$STAMP.tar.gz' | cut -d' ' -f1); b=\$(sha256sum /root/fspirat-backups/router/router-$STAMP.tar.gz | cut -d' ' -f1)
+            [ \"\$a\" = \"\$b\" ] && echo \"копия на сервере совпадает: \$b\"
+            tar -tzf /root/fspirat-backups/router/router-$STAMP.tar.gz | grep -c . | sed 's/^/файлов в архиве: /'
+            tar -czf /root/fspirat-backups/server/router-$STAMP-web.tar.gz -C / var/www/fspirat.online/router
+            tar -tzf /root/fspirat-backups/server/router-$STAMP-web.tar.gz | grep -q 'router/index.html' && echo 'файлы панели сохранены'
+            ls -l /root/fspirat-backups/router/router-$STAMP.tar.gz /root/fspirat-backups/server/router-$STAMP-web.tar.gz | awk '{print \$5, \$9}'"

@@ -1,0 +1,23 @@
+# YouTube через zapret: домен = он сам и все поддомены. Правится здесь, на роутер попадает при выкладке.
+# Только домены YouTube: общие домены Google (www.gstatic.com, fonts.googleapis.com, google.com…) сюда НЕ входят —
+# они остаются на прежнем маршруте (VPN), даже если страница YouTube их подгружает.
+youtube.com
+youtu.be
+youtube-nocookie.com
+youtubekids.com
+youtubei.googleapis.com
+youtube.googleapis.com
+youtubeembeddedplayer.googleapis.com
+jnn-pa.googleapis.com
+# видео
+googlevideo.com
+# картинки, превью, аватары
+ytimg.com
+yt3.ggpht.com
+yt4.ggpht.com
+yt3.googleusercontent.com
+# служебные имена фронтендов YouTube
+wide-youtube.l.google.com
+youtube-ui.l.google.com
+ytimg.l.google.com
+yt-video-upload.l.google.com

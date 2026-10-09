@@ -99,6 +99,9 @@ nginx перед каждым запросом спрашивает `check.php` 
   настоящая проверка и тест скорости «через VPN». Отдельный SOCKS 1080 НЕ настроен.
 - `localhost_proxy='0'`: собственный трафик роутера идёт напрямую (не через VPN).
 - Токен CGI: `/etc/fspirat.token` на роутере, тот же — в `/etc/nginx/snippets/fspirat-router.conf`.
+- **zapret (YouTube/Discord)**: `/usr/bin/fspirat-zapret`, служба `fspirat-zapret`, правило PassWall **`fsZapret`**
+  (не путать с MyDirect = `MyBlock`), таблица nft **`inet fspirat_zapret`**, очередь **200**, режим в `/etc/fspirat/zapret`.
+  Вкл/выкл перезапускает PassWall — спрашивать пользователя. Подробно: `docs/zapret.md`.
 - Временные данные роутера: `/tmp/fspirat/` (ping.json, history, switch.log, speed_*.json) —
   стираются при перезагрузке.
 

@@ -1,0 +1,8 @@
+# Движок: bol-van/zapret, nfqws (Linux), сборка из релиза — бинарник в репозиторий не кладётся,
+# его скачивает workflow «Zapret install» и проверяет контрольные суммы.
+ZAPRET_VERSION=v72.13
+ZAPRET_URL=https://github.com/bol-van/zapret/releases/download/v72.13/zapret-v72.13-openwrt-embedded.tar.gz
+ZAPRET_TGZ_SHA256=b2a9f454523264899e0e7ba19c662e59e29fb20ebb354aa3631cd76885f4c2e6
+NFQWS_ARM64_SHA256=75fc3d6352eb9ebf510dfa470797c5ea079c475755ae3c0a79b1e9aaaf0c37a6
+FAKE_TLS_GOOGLE_SHA256=936c2bee4cfb80aa3c426b2dcbcc834b3fbcd1adb17172959dc569c73a14275c
+FAKE_QUIC_GOOGLE_SHA256=f4589c57749f956bb30538197a521d7005f8b0a8723b4707e72405e51ddac50a

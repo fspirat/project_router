@@ -211,6 +211,7 @@ put running "$run"
 
 # Смена сервера
 name=$(jq -r --arg c "$cur" '[.ping.nodes[]? | select(.id==$c) | .name][0] // $c' <<<"$J")
+[ "$cur" = _direct ] && name="Напрямую (без VPN)"
 prev=$(get current)
 if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then
   last=$(jq -r '.log[-1] // ""' <<<"$J")
