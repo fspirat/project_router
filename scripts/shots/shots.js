@@ -52,7 +52,7 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
     const bb = await p.locator('#dead-box').boundingBox(); await p.screenshot({path: `${OUT}/${PFX}dead.png`, clip: {x: bb.x - 10, y: bb.y - 10, width: bb.width + 20, height: bb.height + 20}}); await p.close();
   }
   if(process.env.ZAPSHOT){   // только блок zapret (с Telegram)
-    const p = await page(1440, 1400, '#vpn'); if(process.env.TGLINK){ await p.click('#tgws-link'); await p.waitForTimeout(400); } const bb = await p.locator('#zap').boundingBox();
+    const p = await page(1440, 1400, '#vpn'); const bb = await p.locator('#zap').boundingBox();
     await p.screenshot({path: `${OUT}/${PFX}zapret.png`, clip: {x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16}}); await p.close();
   }
   if(process.env.SIDE){   // правая колонка вкладки VPN: график, zapret, журнал, устройства

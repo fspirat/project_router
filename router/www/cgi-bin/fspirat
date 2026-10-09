@@ -383,8 +383,5 @@ L
     [ -x /usr/bin/fspirat-tgws ] || reply "503 Service Unavailable" '{"error":"not installed"}'
     bg "/usr/bin/fspirat-tgws $([ "$on" = 1 ] && echo on || echo off)"
     reply "200 OK" '{"ok":true}' ;;
-  tgwslink)     # ссылка tg://proxy с секретом — только POST (не кэшируется и не попадает в историю)
-    [ -x /usr/bin/fspirat-tgws ] || reply "503 Service Unavailable" '{"error":"not installed"}'
-    reply "200 OK" "{\"link\":\"$(/usr/bin/fspirat-tgws link | jesc)\"}" ;;
   *) reply "400 Bad Request" '{"error":"unknown action"}' ;;
 esac

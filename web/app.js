@@ -908,8 +908,6 @@ function renderTgws(){
   box.hidden = false;
   const on = !!tgws.enabled, t = $('#tgws-tgl'), ok = tgws.running && tgws.listening;
   t.textContent = on ? 'включён' : 'выключен'; t.setAttribute('aria-checked', on); t.classList.toggle('on', on);
-  $('#tgws-link').hidden = !on;
-  if(!on) $('#tgws-out').hidden = true;
   $('#tgws-sum').innerHTML = !on ? '<i class="off">●</i> Выключен — Telegram идёт как обычно (через VPN)'
     : ok && tgws.auto ? `<i class="ok">●</i> Telegram на всех устройствах дома — <b>через Cloudflare, мимо VPN</b>, без настройки <small>${num(tgws.redirected)} подкл.</small>`
     : ok ? '<i class="mid">●</i> Прокси работает, перехват ещё не включён (сторож включит в течение минуты)'
@@ -926,15 +924,6 @@ $('#tgws-tgl').addEventListener('click', async () => {
   const done = busy($('#tgws-tgl'), on ? 'Включаю…' : 'Выключаю…');
   try { await api('tgwsset', '&on=' + (on ? 1 : 0)); } catch(err){ toast(err.message, true); }
   finally { done(); setTimeout(loadTgws, 3000); setTimeout(loadTgws, 8000); }
-});
-$('#tgws-link').addEventListener('click', async () => {
-  try { const r = await api('tgwslink'); $('#tgws-url').textContent = r.link; $('#tgws-out').hidden = false; }
-  catch(err){ toast(err.message, true); }
-});
-$('#tgws-copy').addEventListener('click', async () => {
-  const t = $('#tgws-url').textContent;
-  try { await navigator.clipboard.writeText(t); toast('Ссылка скопирована — открой её на устройстве дома или отправь себе в «Избранное».'); }
-  catch { toast('Не удалось скопировать — выдели ссылку вручную.', true); }
 });
 
 /* Опрос: один запрос каждого вида за раз (медленный ответ не копит очередь), во вкладке в фоне — пауза,

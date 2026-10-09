@@ -466,8 +466,6 @@ body.is-down.no-state .needs-router{display:none}
 .tgws{margin-top:12px;padding-top:10px;border-top:1px dashed var(--dash)}
 .tgws-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .tgws-name{flex:1;font-weight:600;font-size:14px}.tgws-name small{color:var(--dim);font-weight:400;font-size:12px}
-.tgws-out{display:flex;gap:8px;align-items:center;margin-top:8px}
-.tgws-out code{flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px;padding:5px 8px;background:var(--well);border:2px solid var(--edge)}
 .zap-more{margin-top:10px}
 .zap-more summary{padding:4px 0;border:0;font-size:13px}
 .zap-st{list-style:none;margin:4px 0 0;padding:0;font-size:13px}

@@ -77,7 +77,7 @@ case "$1" in
     exit 0 ;;
   init)  # при установке: конфиг с секретом (ENABLED=0), права 600; секрет не печатается
     ensure_secret; chmod 600 "$CONF"; echo ok ;;
-  link)  # ссылка для Telegram (содержит секрет) — только для панели и SSH, не в логи
+  link)  # ссылка для ручной настройки Telegram (содержит секрет) — только по SSH, не в логи и не в панель
     ensure_secret
     echo "tg://proxy?server=$(lan_ip)&port=$PORT&secret=dd$SECRET" ;;
   status)
