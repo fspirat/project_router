@@ -27,7 +27,7 @@ try {
         $action = $m[1] === 'data' ? 'rename' : preg_replace('/[^a-z]/', '', (string)($q['action'] ?? ''));
         $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
         $csrf = fsr_csrf();
-        if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://fspirat.online') || $csrf === ''
+        if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org') || $csrf === ''
             || !hash_equals($csrf, (string)($_SERVER['HTTP_X_FSR'] ?? ''))) {
             fsr_audit('DENY', "$action csrf/origin");
             http_response_code(403); exit;

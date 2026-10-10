@@ -9,7 +9,13 @@
 -- Ошибка — код в stderr (sub url, sub name, sub exists, sub many, inner, bad sub) и выход 1; CGI отвечает 400 с этим кодом.
 local uci = require('uci').cursor()
 local CFG, OWN, DIR, MAX = 'passwall2', 'fspirat', '/tmp/fspirat', 8
-local SHUNT = os.getenv('SHUNT') or '9DxG2j8l'
+-- узел Split: передаёт CGI (SHUNT); иначе — выбранный в Basic Settings → Node, если это shunt, иначе первый shunt
+local SHUNT = os.getenv('SHUNT')
+if not SHUNT or SHUNT == '' then
+  local g; uci:foreach('passwall2', 'global', function(x) g = g or x.node end)
+  if g and uci:get('passwall2', g, 'protocol') == '_shunt' then SHUNT = g
+  else uci:foreach('passwall2', 'nodes', function(n) if not SHUNT and n.protocol == '_shunt' then SHUNT = n['.name'] end end) end
+end
 local SUBLUA = '/usr/share/passwall2/subscribe.lua'
 
 local function fail(code) io.stderr:write(code .. '\n'); os.exit(1) end

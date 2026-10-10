@@ -14,8 +14,7 @@ LIST=/etc/fspirat/targets
 cat > $DIR/targets.default <<'L'
 web|YouTube|https://www.youtube.com/generate_204
 web|Discord|https://discord.com/api/v10/gateway
-mc|AgeMagic|mc.agemagic.net:25565
-mc|AgeM(DPI)|fixfuckingdpi.lostvale.fun:25565
+web|Telegram|https://api.telegram.org/
 L
 jesc() { sed 's/\\/\\\\/g;s/"/\\"/g'; }
 # Адрес ведёт внутрь (роутер, домашняя сеть, loopback, link-local, CGNAT)? Проверяем то, во что имя превращается сейчас:

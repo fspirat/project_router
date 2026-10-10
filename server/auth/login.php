@@ -21,7 +21,7 @@ $go = function (string $to): never { header('Location: ' . fsr_next($to)); http_
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-        if ($origin !== '' && $origin !== (getenv('FSR_ORIGIN') ?: 'https://fspirat.online')) { http_response_code(403); exit; }
+        if ($origin !== '' && $origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org')) { http_response_code(403); exit; }
         if ($wait = fsr_locked()) {
             fsr_log('LOCKED');
             $error = 'Слишком много неверных попыток. Вход с этого адреса закрыт ещё на ' . (int)ceil($wait / 60) . ' мин.';

@@ -3,6 +3,11 @@
 # Запускается cron'ом раз в минуту. Настройки — в /etc/fspirat-watch.conf
 
 source /etc/fspirat-watch.conf     # TG_TOKEN=...  TG_CHAT=...
+# Адреса этой установки (deploy.conf на сервере): PANEL_DOMAIN, LUCI_DOMAIN; по желанию —
+#   MTG_DOMAIN (свой Telegram-прокси), EXTRA_SITES (другие сайты на сервере, через пробел),
+#   VDS_HOSTS («Имя=адрес;Имя=адрес» — свои VPN-серверы для /vds, вход по ключу VDS_KEY), VDS_LOCAL_NAME
+[ -f /etc/fspirat-router/deploy.conf ] && source /etc/fspirat-router/deploy.conf
+PANEL_DOMAIN=${PANEL_DOMAIN:-localhost}; VDS_KEY=${VDS_KEY:-/root/.ssh/vds2_key}
 S=/var/lib/fspirat
 mkdir -p $S
 COOKIE=$(grep -o 'fspirat_token=[A-Za-z0-9]*' /etc/nginx/snippets/fspirat-router.conf)
@@ -53,18 +58,25 @@ check() { # имя  ok(0/1)  текст_сбоя
     [ $n -eq 2 ] && [ "$(get "down_$1")" != 1 ] && { send "🔴 Не работает: $1 — $3"; put "down_$1" 1; }
   fi
 }
-# Свои VPN-серверы для команды /vds (раз в 5 минут): этот сервер (Нидерланды) и Германия (по ключу vds2_key)
+# Серверы для команды /vds (раз в 5 минут): этот сервер и свои VPN-серверы из VDS_HOSTS (по ключу VDS_KEY)
 if [ $(( 10#$(date +%M) % 5 )) -eq 0 ] || [ ! -s $S/vds.json ]; then
-  nl=$(/usr/local/bin/fspirat-vdsstat 2>/dev/null); de=$(timeout 15 ssh -i /root/.ssh/vds2_key -o BatchMode=yes -o ConnectTimeout=6 root@64.188.83.100 'bash -s' < /usr/local/bin/fspirat-vdsstat 2>/dev/null)
-  printf '{"ts":%s,"nl":%s,"de":%s}\n' "$NOW" "${nl:-null}" "${de:-null}" | jq -c . > $S/vds.json.tmp 2>/dev/null && mv $S/vds.json.tmp $S/vds.json
+  local_stat=$(/usr/local/bin/fspirat-vdsstat 2>/dev/null)
+  list=$(jq -nc --arg n "${VDS_LOCAL_NAME:-Сервер панели}" --argjson s "${local_stat:-null}" '[{name: $n, local: true, stat: $s}]' 2>/dev/null)
+  IFS=';' read -ra hosts <<<"${VDS_HOSTS:-}"
+  for e in "${hosts[@]}"; do
+    n=${e%%=*}; h=${e#*=}; [ -n "$n" ] && [[ $h =~ ^[A-Za-z0-9.:-]+$ ]] || continue
+    st=$(timeout 15 ssh -i "$VDS_KEY" -o BatchMode=yes -o ConnectTimeout=6 "root@$h" 'bash -s' < /usr/local/bin/fspirat-vdsstat 2>/dev/null)
+    list=$(jq -c --arg n "$n" --argjson s "${st:-null}" '. + [{name: $n, stat: $s}]' <<<"$list" 2>/dev/null || echo "$list")
+  done
+  printf '{"ts":%s,"servers":%s}\n' "$NOW" "${list:-[]}" | jq -c . > $S/vds.json.tmp 2>/dev/null && mv $S/vds.json.tmp $S/vds.json
 fi
 
 # Ссылка Telegram-прокси ещё раз — по кнопке в боте (/tgproxy): секрет читает только root
 if [ -f /var/lib/fspirat-router-auth/tglink_now ]; then
   rm -f /var/lib/fspirat-router-auth/tglink_now
   sec=$(grep -oP '^secret = "\K[^"]+' /etc/mtg.toml 2>/dev/null)
-  [ -n "$sec" ] && send "📨 Ссылка на свой Telegram-прокси:
-https://t.me/proxy?server=tg.fspirat.online&port=443&secret=$sec
+  [ -n "$sec" ] && [ -n "$MTG_DOMAIN" ] && send "📨 Ссылка на свой Telegram-прокси:
+https://t.me/proxy?server=$MTG_DOMAIN&port=443&secret=$sec
 
 Ссылка = доступ. Давай только тем, кому доверяешь."
 fi
@@ -79,7 +91,7 @@ if [ -f /etc/systemd/system/mtg.service ]; then
 fi
 
 if [ $(( 10#$(date +%M) % 5 )) -eq 0 ]; then
-  for u in https://fspirat.online/ https://fspirat.ru/ https://fspirat.online/router/login; do
+  for u in https://$PANEL_DOMAIN/ $(for x in $EXTRA_SITES; do echo "https://$x/"; done) https://$PANEL_DOMAIN/router/login; do
     c=$(curl -s -o /dev/null -m 15 -w '%{http_code}' "$u")
     [ "$c" = 200 ] && check "$u" 1 || check "$u" 0 "ответ $c"
   done
@@ -87,7 +99,7 @@ if [ $(( 10#$(date +%M) % 5 )) -eq 0 ]; then
     systemctl is-active --quiet mtg && check "Telegram-прокси" 1 || check "Telegram-прокси" 0 "служба mtg остановлена"
   fi
   if [ "$(date +%H%M)" = 1000 ]; then        # сертификаты — раз в день
-    for d in fspirat.online fspirat.ru router.fspirat.online tg.fspirat.online; do
+    for d in $PANEL_DOMAIN $EXTRA_SITES $LUCI_DOMAIN $([ -f /etc/systemd/system/mtg.service ] && echo "$MTG_DOMAIN"); do
       end=$(echo | timeout 10 openssl s_client -connect 127.0.0.1:443 -servername "$d" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
       [ -n "$end" ] || continue
       left=$(( ($(date -d "$end" +%s) - NOW) / 86400 ))
@@ -134,7 +146,7 @@ else
       | map(select(. != "")) | join(" · ")' <<<"$J")
     send "📱 Новое устройство в сети: $info
 MAC $m
-Если оно чужое — выключи ему интернет на странице роутера: https://fspirat.online/router/#net"
+Если оно чужое — выключи ему интернет на странице роутера: https://$PANEL_DOMAIN/router/#net"
     event "$NOW" newdev "Новое устройство: $info ($m)"
   done
 fi

@@ -23,7 +23,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['csrf'])) out
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-    if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://fspirat.online')) out(['error' => 'origin'], 403);
+    if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org')) out(['error' => 'origin'], 403);
     $mac = strtolower(trim((string)($_POST['mac'] ?? '')));
     if (!preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $mac)) out(['error' => 'bad mac'], 400);
     $name = trim(preg_replace('/[\x00-\x1f\x7f]/u', '', (string)($_POST['name'] ?? '')) ?? '');
@@ -140,5 +140,6 @@ out([
     'tpoints' => (object)$tpoints,     // задержка до сервисов через текущий сервер
     'traffic' => (object)$traffic,     // трафик устройств по MAC
     'speed' => $speed,                 // история теста скорости
-    'mtg' => json_decode((string)@file_get_contents(watch('mtg.json')), true) ?: null,   // Telegram-прокси (fspirat-watch)
+    'mtg' => fsr_site()['mtg'] !== '' ? (json_decode((string)@file_get_contents(watch('mtg.json')), true) ?: null) : null,   // свой Telegram-прокси (fspirat-watch), если есть
+    'site' => fsr_site(),             // ссылка LuCI, имя бота, домен Telegram-прокси — из deploy.conf
 ]);

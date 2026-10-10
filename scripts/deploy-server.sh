@@ -2,7 +2,7 @@
 # Выкладка серверных файлов на NL-сервер. Секреты (токены) этот скрипт НЕ трогает.
 # Запуск: bash scripts/deploy-server.sh
 set -euo pipefail
-S="${SERVER:-root@193.39.143.202}"
+S="${SERVER:?укажи сервер: SERVER=root@адрес bash scripts/deploy-server.sh}"
 cd "$(dirname "$0")/.."
 
 bash -n server/bin/fspirat-watch

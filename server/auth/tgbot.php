@@ -1,5 +1,5 @@
 <?php
-// Команды роутеру из Telegram (@FSRouter_bot). Telegram присылает сюда каждое сообщение (webhook):
+// Команды роутеру из Telegram (@YourRouterBot). Telegram присылает сюда каждое сообщение (webhook):
 //   POST /router/tg-hook — без входа в панель, но только с IP Telegram (nginx) и с секретом в заголовке
 //   X-Telegram-Bot-Api-Secret-Token (tgbot.json, создаётся при выкладке). Слушается только чат владельца (telegram.json).
 // Действия идут в тот же CGI роутера, что и у панели (туннель 127.0.0.1:8081), опасные — с кнопкой подтверждения.
@@ -212,12 +212,14 @@ function cmd_router(): void {
 }
 function cmd_tgproxy(): void {
     global $cb;
+    $dom = fsr_site()['mtg'];
+    if ($dom === '') { say('Свой Telegram-прокси на сервере не настроен.'); return; }
     $m = json_decode((string)@file_get_contents(WATCH . '/mtg.json'), true);
     if (!$m) { say('Нет данных о Telegram-прокси.'); return; }
     $stale = time() - (int)($m['ts'] ?? 0) > 300; $up = ($m['active'] ?? false) && !$stale;
     $since = (int)($m['since'] ?? 0) ? floor((time() - $m['since']) / 3600) : 0;
     say(($up ? '🟢 Telegram-прокси работает' : ($stale ? '⚪ Нет свежих данных' : '🔴 Telegram-прокси не работает')) . "\n"
-        . 'tg.fspirat.online, порт 443' . ($up ? "\nПодключений сейчас: " . (int)$m['conns'] . ($since ? "\nБез перезапуска: " . floor($since / 24) . ' д ' . ($since % 24) . ' ч' : '') : ''),
+        . htmlspecialchars($dom) . ', порт 443' . ($up ? "\nПодключений сейчас: " . (int)$m['conns'] . ($since ? "\nБез перезапуска: " . floor($since / 24) . ' д ' . ($since % 24) . ' ч' : '') : ''),
         [[['text' => '📨 Прислать ссылку для подключения', 'callback_data' => $cb('tgl')]]]);
 }
 function cmd_vds(): void {
@@ -232,14 +234,14 @@ function cmd_vds(): void {
             . 'Без перезагрузки ' . floor($x['up'] / 86400) . ' д · трафик с запуска ↓' . gb($x['rx']) . ' ↑' . gb($x['tx']) . ($note ? "\n$note" : '');
     };
     $age = time() - (int)($v['ts'] ?? 0);
-    say($one('🇩🇪 Германия (fspirat) · 64.188.83.100', $v['de'] ?? null, '') . "\n\n"
-        . $one('🇳🇱 Нидерланды (fspirat) · сервер сайта', $v['nl'] ?? null, 'Здесь же сайт, панель и Telegram-прокси') . "\n\n"
-        . 'Данные ' . ($age < 90 ? 'свежие' : floor($age / 60) . ' мин назад') . '.');
+    // список серверов — из fspirat-watch: сервер панели и свои VPN-серверы (VDS_HOSTS в deploy.conf на сервере)
+    $parts = array_map(fn($x) => $one(htmlspecialchars((string)($x['name'] ?? 'Сервер')), $x['stat'] ?? null, !empty($x['local']) ? 'Здесь же панель' : ''), $v['servers'] ?? []);
+    say(implode("\n\n", $parts) . "\n\n" . 'Данные ' . ($age < 90 ? 'свежие' : floor($age / 60) . ' мин назад') . '.');
 }
 function cmd_help(): void {
     say("<b>Команды роутера</b>\n/status — состояние VPN, сервера, сервисов\n/servers — серверы с пингом, подключение кнопкой\n/vpn <i>название</i> — подключить сервер, например /vpn германия\n"
         . "/devices — кто в сети и сколько скачал\n/block <i>имя</i> — выключить интернет устройству\n/unblock <i>имя</i> — включить обратно\n/speed — тест скорости без VPN\n"
-        . "/ping — перемерить все серверы и сервисы\n/log — журнал событий\n/router — нагрузка, память, температура\n/update — обновить подписки VPN\n/tgproxy — Telegram-прокси\n/vds — твои серверы в Германии и Нидерландах\n/restart — перезапустить VPN\n/reboot — перезагрузить роутер\n/report — отчёт за сутки сейчас\n\nОпасные команды — с кнопкой подтверждения.");
+        . "/ping — перемерить все серверы и сервисы\n/log — журнал событий\n/router — нагрузка, память, температура\n/update — обновить подписки VPN\n" . (fsr_site()['mtg'] !== '' ? "/tgproxy — Telegram-прокси\n" : '') . "/vds — сервер панели и свои VPN-серверы\n/restart — перезапустить VPN\n/reboot — перезагрузить роутер\n/report — отчёт за сутки сейчас\n\nОпасные команды — с кнопкой подтверждения.");
 }
 
 /* ---------- кнопки ---------- */

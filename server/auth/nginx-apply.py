@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Переводит /router/ и router.fspirat.online с окна браузера (auth_basic) на свою страницу входа.
+"""Переводит /router/ и luci.example.org с окна браузера (auth_basic) на свою страницу входа.
 
 Запускается на сервере от root (workflow «Deploy server»). Повторный запуск ничего не ломает.
 Перед правкой делает копии *.bak-auth; если `nginx -t` не проходит — возвращает копии и выходит с ошибкой.
@@ -8,7 +8,7 @@
 import re, shutil, subprocess, sys, time
 
 SNIPPET = '/etc/nginx/snippets/fspirat-router.conf'
-ROUTER_SITE = '/etc/nginx/sites-available/router.fspirat.online'
+ROUTER_SITE = '/etc/nginx/sites-available/luci.example.org'
 PHP = 'unix:/run/php/php8.5-fpm.sock'
 AUTH_DIR = '/var/www/router-auth'
 BASIC = re.compile(r'[ \t]*auth_basic\s+"[^"]*";\n[ \t]*auth_basic_user_file\s+[^;]+;\n')
@@ -140,7 +140,7 @@ def router_site(s):
     if n != 1:
         sys.exit('router site: не нашёл auth_basic в location /')
     add = ('    ' + AUTH_LOC.replace('\n', '\n    ').rstrip() + '\n'
-           + '    location @fsr_login {\n        return 302 https://fspirat.online/router/login?next=https://router.fspirat.online$uri;\n    }\n\n')
+           + '    location @fsr_login {\n        return 302 https://example.org/router/login?next=https://luci.example.org$uri;\n    }\n\n')
     # вставить внутрь блока server с listen 443 — перед первой строкой "location / {"
     new = new.replace('    location / {', add + '    location / {', 1)
     return luci_cookie(new)

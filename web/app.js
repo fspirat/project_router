@@ -107,12 +107,14 @@ async function api(action, extra = '', body = null){
   throw new Error('Роутер не смог выполнить действие. Попробуй ещё раз через минуту.');
 }
 
-/* Значки сервисов (по адресу), все одного размера и цвета: YouTube, Discord — логотипы Simple Icons; прочие сайты — глобус; Minecraft — блок (Lucide) */
+/* Значки сервисов (по адресу) — контурные, одного размера и цвета: YouTube, Discord, Telegram, Instagram; прочие сайты — глобус; Minecraft — блок */
 const ICONS = {
   mc: ic('box', 'si'),          // Minecraft-сервер
   web: ic('globe', 'si'),        // прочие сайты
-  youtube: ic('brand-youtube', 'si brand yt'),
-  discord: ic('brand-discord', 'si brand dc'),
+  youtube: ic('brand-youtube', 'si'),
+  discord: ic('brand-discord', 'si'),
+  telegram: ic('brand-telegram', 'si'),
+  instagram: ic('brand-instagram', 'si'),
 };
 
 /* ---------- сервисы: значки, список, значения через сервер ---------- */
@@ -120,6 +122,8 @@ function svcIcon(x){
   const h = (x.host || '').toLowerCase(), n = (x.name || '').toLowerCase();
   if(/(^|\.)(youtube\.com|youtu\.be|googlevideo\.com)$/.test(h) || n === 'youtube') return ICONS.youtube;
   if(/(^|\.)(discord\.com|discord\.gg|discordapp\.com)$/.test(h) || n === 'discord') return ICONS.discord;
+  if(/(^|\.)(telegram\.org|t\.me|telegram\.me)$/.test(h) || n === 'telegram') return ICONS.telegram;
+  if(/(^|\.)(instagram\.com|cdninstagram\.com)$/.test(h) || n === 'instagram') return ICONS.instagram;
   return x.kind === 'mc' ? ICONS.mc : ICONS.web;
 }
 const msCls = ms => ms < 120 ? 'ok' : ms < 250 ? 'mid' : 'slow';
@@ -244,7 +248,6 @@ function renderServers(s){
   const dcur = s.current === '_direct';
   const drow = dir || dcur ? `<tr class="direct${dcur ? ' cur' : ''}" data-node="direct" ${dcur ? '' : 'tabindex="0"'} title="${dcur ? 'Подключено: весь трафик без VPN' : 'Без VPN: так открываются сайты из списка MyDirect. Нажми, чтобы пустить весь трафик напрямую. Пинг — до ya.ru'}">
       <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${pcell(num(dir && dir.base))}${sv.map(x => cell(dir ? svcVal(dcur && state.targets ? state.targets : dir, x.name) : null, false, x.kind === 'web' && !dcur)).join('')}<td class="act">${dcur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>` : '';
-  // свои серверы (ярлык fspirat в PassWall) — отдельным разделом сверху, подписка — ниже
   // разделы: свои серверы (ярлык fspirat в PassWall), затем каждая подписка отдельно (группа узла = название подписки)
   const own = alive.filter(n => n.own).sort(cmp), sub = alive.filter(n => !n.own);
   const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${esc(t)}</th></tr>`;
@@ -726,6 +729,13 @@ function renderMtg(m){
   $('#mtg-info').textContent = up ? `сейчас ${n} ${word}` + (m.since ? ` · без перезапуска ${minutes(Math.round((Date.now()/1000 - m.since) / 60))}` : '')
     : stale ? `последние данные ${when(m.ts)}` : 'служба mtg остановлена — бот уже прислал сообщение';
 }
+/* Настройки установки с сервера (deploy.conf): ссылка LuCI, домен своего Telegram-прокси. Нет ссылки — кнопки LuCI нет */
+function renderSite(site){
+  const s = site || {}, l = $('#luci-link');
+  l.hidden = !/^https:\/\/[\w.-]+(:\d+)?\/?$/.test(s.luci || '');
+  if(!l.hidden) l.href = s.luci;
+  $('#mtg-host').textContent = s.mtg || '';
+}
 function showDown(on){
   $('#down').hidden = !on;
   document.body.classList.toggle('is-down', on);
@@ -838,6 +848,7 @@ async function loadData(){
     if(r.status === 401){ toLogin(); return; }
     if(!r.ok) return;
     hist = await r.json(); names = hist.names || {};
+    renderSite(hist.site);
     renderMtg(hist.mtg); renderChart(); renderLog(); renderSpeedHist();
     if(state){ renderDevices(state.devices); renderHero(); }
     if(!$('#down').hidden) showDown(true);

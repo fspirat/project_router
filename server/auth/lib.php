@@ -1,6 +1,6 @@
 <?php
 /**
- * Вход в панель роутера (fspirat.online/router/ и router.fspirat.online) вместо окна браузера.
+ * Вход в панель роутера (example.org/router/ и luci.example.org) вместо окна браузера.
  * nginx спрашивает check.php перед каждым запросом (auth_request); login.php показывает страницу входа.
  *
  * Данные — вне папок сайта: /var/lib/fspirat-router-auth/
@@ -20,7 +20,7 @@ const FSR_USER = 'bob';
 const FSR_LOG = '/var/log/fspirat-router-auth.log';
 const FSR_AUDIT = '/var/log/fspirat-router-audit.log';   // действия в панели (кто, что, откуда) — без секретов
 const FSR_COOKIE = 'fsr_session';
-const FSR_COOKIE_DOMAIN = 'fspirat.online';     // один вход для fspirat.online/router/ и router.fspirat.online
+const FSR_COOKIE_DOMAIN = 'example.org';     // один вход для example.org/router/ и luci.example.org
 const FSR_TTL_SHORT = 12 * 3600;               // без «Запомнить»: 12 часов
 const FSR_TTL_LONG = 30 * 86400;               // с «Запомнить»: 30 дней (продлевается при работе)
 const FSR_MAX_FAILS = 5;
@@ -29,6 +29,11 @@ const FSR_LOCK_SEC = 900;
 date_default_timezone_set('Europe/Moscow');
 
 function fsr_dir(): string { return rtrim(getenv('FSR_DIR') ?: FSR_DIR, '/'); }
+// Открытые настройки установки (пишет Deploy server из deploy.conf): ссылка LuCI, имя бота, свой Telegram-прокси
+function fsr_site(): array {
+    $j = json_decode((string)@file_get_contents(fsr_dir() . '/site.json'), true);
+    return ['luci' => (string)($j['luci'] ?? ''), 'bot' => (string)($j['bot'] ?? ''), 'mtg' => (string)($j['mtg'] ?? '')];
+}
 
 function fsr_db(): PDO
 {
@@ -135,7 +140,7 @@ function fsr_cookie(string $value, int $expires): void
 {
     setcookie(FSR_COOKIE, $value, [
         'expires' => $expires, 'path' => '/', 'domain' => fsr_cookie_domain(),
-        // Strict: с чужого сайта cookie не уйдёт вообще (router.fspirat.online — тот же сайт, ему уходит)
+        // Strict: с чужого сайта cookie не уйдёт вообще (luci.example.org — тот же сайт, ему уходит)
         'secure' => true, 'httponly' => true, 'samesite' => 'Strict',
     ]);
 }

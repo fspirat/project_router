@@ -40,11 +40,29 @@ jobs:
             tr -d '\r' < "$1" | ssh vps "$R 'cat > $2.new && chmod 755 $2.new && mv $2.new $2'"
             echo "  -> $2"
           }
+          # свой список сервисов для замера, если его ещё нет: сохранить тот, что сейчас по умолчанию
+          # (список по умолчанию в fspirat-targets меняется — у работающей установки он остаётся прежним)
+          ssh vps "$R '[ -s /etc/fspirat/targets ] || { [ -s /tmp/fspirat/targets.default ] && mkdir -p /etc/fspirat && cp /tmp/fspirat/targets.default /etc/fspirat/targets && echo \"  список сервисов сохранён в /etc/fspirat/targets\"; }; true'"
           # fspirat-subs — первым: CGI и fspirat-ping берут из него список подписок (без него панель видит только свои серверы)
           push router/bin/fspirat-subs    /usr/bin/fspirat-subs
           push router/bin/fspirat-ping    /usr/bin/fspirat-ping
           push router/www/cgi-bin/fspirat /www/cgi-bin/fspirat
-          push router/etc/init.d/fstunnel /etc/init.d/fstunnel
+          # Туннель: адрес сервера — TUNNEL_HOST в /etc/fspirat/config (в репозитории его нет). Первый раз он берётся из
+          # установленного fstunnel; новый файл ставится, только если даёт ту же команду, что работает сейчас (туннель не перезапускается)
+          tr -d '\r' < router/etc/init.d/fstunnel | ssh vps "$R 'cat > /tmp/fstunnel.new'"
+          ssh vps "$R 'sh -s'" <<'SH'
+          cmdline() { if grep -q '^tunnel_args()' "$1"; then sed -n '/^tunnel_args()/,/^}/p' "$1" > /tmp/ta.sh; ( . /tmp/ta.sh; tunnel_args ); rm -f /tmp/ta.sh
+            else sed -n 's/^ *procd_set_param command //p' "$1" | head -1; fi; }
+          old=$(cmdline /etc/init.d/fstunnel)
+          mkdir -p /etc/fspirat
+          if ! grep -q '^TUNNEL_HOST=' /etc/fspirat/config 2>/dev/null; then
+            h=$(echo "$old" | sed -n 's/.*tunnel@\([A-Za-z0-9.:-]*\).*/\1/p')
+            [ -n "$h" ] && echo "TUNNEL_HOST=$h" >> /etc/fspirat/config && echo "  адрес туннеля сохранён в /etc/fspirat/config"
+          fi
+          new=$(cmdline /tmp/fstunnel.new)
+          if [ -n "$new" ] && [ "$new" = "$old" ]; then chmod 755 /tmp/fstunnel.new && mv /tmp/fstunnel.new /etc/init.d/fstunnel && echo "  -> /etc/init.d/fstunnel (команда туннеля та же)"
+          else rm -f /tmp/fstunnel.new; echo "  ⚠️ fstunnel НЕ обновлён: новая команда туннеля отличается от текущей — проверь /etc/fspirat/config"; fi
+          SH
           push router/bin/fspirat-mcping  /usr/bin/fspirat-mcping
           push router/bin/fspirat-targets /usr/bin/fspirat-targets
           push router/bin/fspirat-svcping /usr/bin/fspirat-svcping

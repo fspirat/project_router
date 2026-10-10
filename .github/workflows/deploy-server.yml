@@ -42,14 +42,26 @@ jobs:
 
       - name: Upload files
         run: |
-          tar -C server -czf - auth bin/fspirat-watch bin/fspirat-vdsstat cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
+          # свои домены и имя бота из deploy.conf — в копию файлов (исходники не меняются)
+          # значения: deploy.conf репозитория, поверх — /etc/fspirat-router/deploy.conf на сервере (свои адреса не хранятся в git)
+          ssh vps 'cat /etc/fspirat-router/deploy.conf 2>/dev/null' > /tmp/deploy.local || true
+          rm -rf /tmp/srv && cp -r server /tmp/srv && DEPLOY_LOCAL=/tmp/deploy.local sh scripts/apply-config.sh /tmp/srv/auth /tmp/srv/nginx/conf.d
+          cat deploy.conf /tmp/deploy.local > /tmp/srv/deploy.conf
+          tar -C /tmp/srv -czf - deploy.conf auth bin/fspirat-watch bin/fspirat-vdsstat cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
 
       - name: Install
         run: |
           ssh vps 'set -e; D=/tmp/fsr-deploy
             # страница входа
             install -d -m 755 /var/www/router-auth
-            install -m 644 $D/auth/*.php $D/auth/tgbot-commands.json /var/www/router-auth/
+            install -m 644 $D/auth/*.php /var/www/router-auth/
+            . $D/deploy.conf
+            # открытые настройки для панели и бота; без своего Telegram-прокси — без команды /tgproxy
+            install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
+            jq -n --arg l "https://$LUCI_DOMAIN/" --arg b "$TG_BOT" --arg m "${MTG_DOMAIN:-}" "{luci: \$l, bot: \$b, mtg: \$m}" > /var/lib/fspirat-router-auth/site.json.tmp
+            install -m 644 -o www-data -g www-data /var/lib/fspirat-router-auth/site.json.tmp /var/lib/fspirat-router-auth/site.json && rm -f /var/lib/fspirat-router-auth/site.json.tmp
+            if [ -n "${MTG_DOMAIN:-}" ]; then install -m 644 $D/auth/tgbot-commands.json /var/www/router-auth/
+            else jq "{commands: [.commands[] | select(.command != \"tgproxy\")]}" $D/auth/tgbot-commands.json > /var/www/router-auth/tgbot-commands.json; chmod 644 /var/www/router-auth/tgbot-commands.json; fi
             install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
             [ -f /var/log/fspirat-router-auth.log ] || install -m 640 -o www-data -g adm /dev/null /var/log/fspirat-router-auth.log
             [ -f /var/log/fspirat-router-audit.log ] || install -m 640 -o www-data -g adm /dev/null /var/log/fspirat-router-audit.log
@@ -85,27 +97,27 @@ jobs:
 
       - name: Telegram-бот (команды)
         run: |
-          ssh vps 'set -e; A=/var/lib/fspirat-router-auth
+          ssh vps 'set -e; A=/var/lib/fspirat-router-auth; . /tmp/fsr-deploy/deploy.conf
             # ключ роутера для tgbot.php (тот же, что nginx подставляет панели); секрет webhook — один раз
             ( umask 077; grep -o "fspirat_token=[A-Za-z0-9]*" /etc/nginx/snippets/fspirat-router.conf | head -1 | cut -d= -f2 > $A/router.token )
             [ -s $A/tgbot.json ] || ( umask 077; printf "{\"secret\":\"%s\"}" "$(openssl rand -hex 24)" > $A/tgbot.json )
             chown www-data:www-data $A/router.token $A/tgbot.json; chmod 600 $A/router.token $A/tgbot.json
             . /etc/fspirat-watch.conf; SEC=$(jq -r .secret $A/tgbot.json)
-            if curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST https://fspirat.online/router/tg-hook | grep -q "^403$"; then
-              curl -s -m 15 "https://api.telegram.org/bot$TG_TOKEN/setWebhook" --data-urlencode "url=https://fspirat.online/router/tg-hook" \
+            if curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST https://$PANEL_DOMAIN/router/tg-hook | grep -q "^403$"; then
+              curl -s -m 15 "https://api.telegram.org/bot$TG_TOKEN/setWebhook" --data-urlencode "url=https://$PANEL_DOMAIN/router/tg-hook" \
                 --data-urlencode "secret_token=$SEC" --data-urlencode "allowed_updates=[\"message\",\"callback_query\"]" -d drop_pending_updates=true | jq -c "{webhook: .ok, d: .description}"
               curl -s -m 15 "https://api.telegram.org/bot$TG_TOKEN/setMyCommands" -H "Content-Type: application/json" -d @/var/www/router-auth/tgbot-commands.json | jq -c "{commands: .ok}"
             else echo "⚠️ /router/tg-hook не закрыт как ожидалось — webhook не включаю"; fi'
 
       - name: Verify
         run: |
-          ssh vps 'set -e
-            echo "login page: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/router/login)"
-            echo "/router/ без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://fspirat.online/router/)"
-            echo "/router/api без входа: $(curl -s -o /dev/null -w %{http_code} "https://fspirat.online/router/api?action=net")"
-            echo "router.fspirat.online без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://router.fspirat.online/)"
-            echo "сайт: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/)"
-            echo "api без X-FSR (как ссылка с чужого сайта): $(curl -s -w " %{http_code}" "https://fspirat.online/router/api?action=reboot")"
-            echo "иконка PWA без входа: $(curl -s -o /dev/null -w %{http_code} https://fspirat.online/router/manifest.webmanifest)"
-            echo "заголовки: $(curl -sI https://fspirat.online/ | grep -iE "^(server|strict-transport-security):" | tr -d "\r" | tr "\n" " ")"
+          ssh vps 'set -e; . /tmp/fsr-deploy/deploy.conf
+            echo "login page: $(curl -s -o /dev/null -w %{http_code} https://$PANEL_DOMAIN/router/login)"
+            echo "/router/ без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://$PANEL_DOMAIN/router/)"
+            echo "/router/api без входа: $(curl -s -o /dev/null -w %{http_code} "https://$PANEL_DOMAIN/router/api?action=net")"
+            echo "$LUCI_DOMAIN без входа: $(curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}" https://$LUCI_DOMAIN/)"
+            echo "сайт: $(curl -s -o /dev/null -w %{http_code} https://$PANEL_DOMAIN/)"
+            echo "api без X-FSR (как ссылка с чужого сайта): $(curl -s -w " %{http_code}" "https://$PANEL_DOMAIN/router/api?action=reboot")"
+            echo "иконка PWA без входа: $(curl -s -o /dev/null -w %{http_code} https://$PANEL_DOMAIN/router/manifest.webmanifest)"
+            echo "заголовки: $(curl -sI https://$PANEL_DOMAIN/ | grep -iE "^(server|strict-transport-security):" | tr -d "\r" | tr "\n" " ")"
             rm -rf /tmp/fsr-deploy'

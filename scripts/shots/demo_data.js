@@ -43,7 +43,7 @@ function data(range){
   return {now, range, step, points: pts, stats: {avg: 163, min: 121, max: 214, fails: range === 'day' ? 6 : 31, offline_min: 0}, tpoints: tp,
     events: [[now - 900, 'manual', 'Сервер выбран вручную: 🇩🇪 Германия'], [now - 3 * 3600, 'auto', 'Автопереключение: 🇹🇷 Турция -> 🇩🇪 Германия 38ms'],
       [now - 8 * 3600, 'update', 'Обновление подписки'], [now - 26 * 3600, 'online', 'Роутер снова на связи (не было 4 мин)'], [now - 26 * 3600 - 240, 'offline', 'Роутер пропал со связи']],
-    offline_since: null, last_ok: now - 40, mtg: {active: true, conns: 2, since: now - 5 * 86400, ts: now - 30},
+    offline_since: null, last_ok: now - 40, mtg: null, site: {luci: 'https://luci.example.org/', bot: 'YourRouterBot', mtg: ''},
     names: {}, speed: SPEED, traffic: {'02:00:00:00:00:01': {d: [0.4e9, 7.8e9], m: [9e9, 164e9]}, '02:00:00:00:00:02': {d: [0.1e9, 1.9e9], m: [2.2e9, 41e9]}, '02:00:00:00:00:04': {d: [0.05e9, 12.4e9], m: [1.1e9, 96e9]}}};
 }
 // «YouTube и Discord через zapret» (CGI zapret): ZAP_STATE=ok|fallback|off

@@ -3,7 +3,7 @@ name: Deploy router page
 on:
   push:
     branches: [main]
-    paths: ['web/**']
+    paths: ['web/**', 'deploy.conf']
   workflow_dispatch:
 
 jobs:
@@ -25,12 +25,14 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Rsync web/ -> /var/www/fspirat.online/router/
+      - name: Rsync web/ -> /var/www/<PANEL_DOMAIN>/router/
         run: |
+          # страница одна для всех установок: ссылку LuCI и прочее она берёт с сервера (/router/data, deploy.conf)
+          . ./deploy.conf
           # Ключ deploy ограничен rrsync (только выкладка в /var/www/fspirat.online, пути — от этой папки).
           # Пока ограничения нет — полный путь (так workflow работает и до, и после включения rrsync).
           H="deploy@${{ secrets.SSH_HOST }}"
-          if [ "$(ssh -i ~/.ssh/id_deploy -o BatchMode=yes $H echo plain 2>/dev/null)" = plain ]; then D=/var/www/fspirat.online/router/; else D=router/; fi
+          if [ "$(ssh -i ~/.ssh/id_deploy -o BatchMode=yes $H echo plain 2>/dev/null)" = plain ]; then D=/var/www/$PANEL_DOMAIN/router/; else D=router/; fi
           echo "цель: $D"
           # повтор: rrsync не пускает две выкладки одновременно (сайт и страница роутера в одну секунду)
           for i in 1 2 3; do

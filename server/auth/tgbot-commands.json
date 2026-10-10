@@ -50,7 +50,7 @@
   },
   {
    "command": "vds",
-   "description": "Твои серверы: Германия и Нидерланды"
+   "description": "Сервер панели и свои VPN-серверы"
   },
   {
    "command": "restart",

@@ -1,12 +1,21 @@
 #!/bin/sh /etc/rc.common
-# Обратный SSH-туннель на сервер NL: 127.0.0.1:8081 -> LuCI роутера (192.168.7.1:80),
-#   127.0.0.1:8022 -> SSH роутера (для выкладки с сервера: workflow Deploy router)
+# Обратный SSH-туннель на сервер панели: 127.0.0.1:8081 -> LuCI роутера (порт 80),
+#   127.0.0.1:8022 -> SSH роутера (для выкладки с сервера: workflow Deploy router).
+# Адрес сервера — TUNNEL_HOST в /etc/fspirat/config (пользователь tunnel на сервере); IP роутера — из настроек LAN
+# (или LAN_IP там же). Deploy router ставит этот файл, только если команда туннеля получается та же, что работает сейчас.
 START=99
 USE_PROCD=1
+tunnel_args() {
+  [ -f /etc/fspirat/config ] && . /etc/fspirat/config
+  lan=${LAN_IP:-$(uci -q get network.lan.ipaddr)}; lan=${lan%%/*}
+  [ -n "$TUNNEL_HOST" ] && [ -n "$lan" ] || return 1
+  echo "/usr/bin/dbclient -N -y -i /root/.ssh/tunnel_key -K 30 -I 90 -R 127.0.0.1:8081:$lan:80 -R 127.0.0.1:8022:$lan:22 tunnel@$TUNNEL_HOST"
+}
 start_service() {
+  args=$(tunnel_args) || { echo "fstunnel: нет TUNNEL_HOST в /etc/fspirat/config" >&2; return 1; }
   procd_open_instance
   procd_set_param env HOME=/root
-  procd_set_param command /usr/bin/dbclient -N -y -i /root/.ssh/tunnel_key -K 30 -I 90 -R 127.0.0.1:8081:192.168.7.1:80 -R 127.0.0.1:8022:192.168.7.1:22 tunnel@193.39.143.202
+  procd_set_param command $args
   procd_set_param respawn 3600 10 0
   procd_set_param stdout 1
   procd_set_param stderr 1

@@ -20,7 +20,9 @@ CONF=/etc/fspirat/zapret                 # ENABLED=0|1, STRATEGY=1..3 — пер
 SHARE=/usr/share/fspirat-zapret          # nfqws, fake/*.bin, списки (выкладка: workflow «Zapret install» / «Deploy router»)
 NFQWS=$SHARE/nfqws
 RUN=/tmp/fspirat/zapret                  # состояние, ошибки, результаты проверки
-SHUNT=9DxG2j8l                           # узел Split в PassWall
+# Узел Split (shunt) в PassWall2: SHUNT из /etc/fspirat/config, иначе выбранный в Basic Settings → Node, если это shunt, иначе первый shunt
+[ -f /etc/fspirat/config ] && . /etc/fspirat/config
+[ -n "$SHUNT" ] || { SHUNT=$(uci -q get passwall2.@global[0].node); [ "$(uci -q get passwall2.$SHUNT.protocol)" = _shunt ] || SHUNT=$(uci show passwall2 2>/dev/null | sed -n "s/^passwall2\.\([^.=]*\)\.protocol='_shunt'$/\1/p" | head -1); }
 RULE=fsZapret                            # своё правило PassWall (не MyDirect)
 TBL=fspirat_zapret                       # своя таблица nftables
 QNUM=200

@@ -276,8 +276,6 @@ th[aria-sort="descending"] .sort::after{opacity:1;border-top-color:var(--acc);bo
 .dead{list-style:none;margin:10px 0 0;padding:0 12px;display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--dim);font-size:13px}
 .dead li{display:inline-flex;align-items:center;gap:6px}
 .si{width:14px;height:14px;vertical-align:-2px;margin-right:5px;flex:none;color:var(--dim)}
-/* логотипы сервисов — в фирменных цветах (всегда, и в выбранных чипах) */
-.ic.si.brand.yt{color:#FF0033} .ic.si.brand.dc{color:#5865F2}
 /* значок «палочки пинга» */
 .pi{width:16px;height:13px;vertical-align:-1px;flex:none}
 .kpis span .pi{margin-right:1px}

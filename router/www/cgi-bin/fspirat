@@ -1,7 +1,9 @@
 #!/bin/sh
 # FSPIRAT: CGI для страницы fspirat.online/router/
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-SHUNT=9DxG2j8l
+# Узел Split (shunt) в PassWall2: SHUNT из /etc/fspirat/config, иначе выбранный в Basic Settings → Node, если это shunt, иначе первый shunt
+[ -f /etc/fspirat/config ] && . /etc/fspirat/config
+[ -n "$SHUNT" ] || { SHUNT=$(uci -q get passwall2.@global[0].node); [ "$(uci -q get passwall2.$SHUNT.protocol)" = _shunt ] || SHUNT=$(uci show passwall2 2>/dev/null | sed -n "s/^passwall2\.\([^.=]*\)\.protocol='_shunt'$/\1/p" | head -1); }
 # Узлы, которые показывает и переключает панель: серверы подписок (группа = название подписки) и свои (группа fspirat)
 GROUPS=$(/usr/bin/fspirat-subs groups 2>/dev/null | tr 'A-Z' 'a-z'); [ -n "$GROUPS" ] || GROUPS="fspirat"
 in_groups() { [ -n "$1" ] && printf '%s\n' "$GROUPS" | grep -qxF "$(printf '%s' "$1" | tr 'A-Z' 'a-z')"; }

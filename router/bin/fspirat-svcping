@@ -9,7 +9,9 @@ if [ -f $SVC/lock ] && kill -0 "$(cat $SVC/lock)" 2>/dev/null; then exit 0; fi
 echo $$ > $SVC/lock
 X=""
 trap '[ -n "$X" ] && kill $X 2>/dev/null; rm -f $SVC/lock $DIR/svc-xray.json' EXIT INT TERM
-SHUNT=9DxG2j8l
+# Узел Split (shunt) в PassWall2: SHUNT из /etc/fspirat/config, иначе выбранный в Basic Settings → Node, если это shunt, иначе первый shunt
+[ -f /etc/fspirat/config ] && . /etc/fspirat/config
+[ -n "$SHUNT" ] || { SHUNT=$(uci -q get passwall2.@global[0].node); [ "$(uci -q get passwall2.$SHUNT.protocol)" = _shunt ] || SHUNT=$(uci show passwall2 2>/dev/null | sed -n "s/^passwall2\.\([^.=]*\)\.protocol='_shunt'$/\1/p" | head -1); }
 CUR=$(uci -q get passwall2.$SHUNT.default_node)
 /usr/bin/fspirat-targets direct $SVC/direct.json >/dev/null 2>&1
 # живые узлы из последней проверки (ms > 0)
