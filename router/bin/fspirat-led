@@ -1,0 +1,40 @@
+#!/bin/sh
+# FSPIRAT: подсветка роутера (Xiaomi AX3000T) — переключатель в шапке панели (CGI led / ledset).
+#   fspirat-led status   JSON: {"on":…, "items":[{"name":…,"on":…}]} — фактическое состояние из /sys/class/leds
+#   fspirat-led off      выключить все: секции uci system.fspirat_led_* (trigger none, default 0) — переживает перезагрузку
+#   fspirat-led on       вернуть как было: убрать эти секции; синий индикатор горит, Wi-Fi мигает при передаче (phy*tpt)
+# Работает только с фиксированным списком светодиодов ниже; сеть, VPN и firewall не трогает.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LEDS="blue:status yellow:status mt76-phy0 mt76-phy1"
+sec() { echo "fspirat_led_$(echo "$1" | tr ':-' '__')"; }
+trig() { sed -n 's/.*\[\(.*\)\].*/\1/p' "/sys/class/leds/$1/trigger" 2>/dev/null; }
+lit() { b=$(cat "/sys/class/leds/$1/brightness" 2>/dev/null); t=$(trig "$1"); [ "${b:-0}" -gt 0 ] || { [ -n "$t" ] && [ "$t" != none ]; }; }
+
+case "$1" in
+  status)
+    any=false; items=''
+    for l in $LEDS; do
+      [ -d "/sys/class/leds/$l" ] || continue
+      o=false; lit "$l" && { o=true; any=true; }
+      items="$items${items:+,}{\"name\":\"$l\",\"on\":$o}"
+    done
+    echo "{\"on\":$any,\"items\":[$items]}" ;;
+  off)
+    for l in $LEDS; do
+      [ -d "/sys/class/leds/$l" ] || continue
+      s=$(sec "$l"); uci -q delete system.$s
+      uci set system.$s=led; uci set system.$s.name="$l"; uci set system.$s.sysfs="$l"
+      uci set system.$s.trigger=none; uci set system.$s.default=0
+    done
+    uci commit system; /etc/init.d/led restart >/dev/null 2>&1
+    logger -t fspirat-led "подсветка выключена"; echo ok ;;
+  on)
+    for l in $LEDS; do uci -q delete system.$(sec "$l"); done
+    uci commit system; /etc/init.d/led restart >/dev/null 2>&1
+    # как было до выключения: синий горит, жёлтый погашен, Wi-Fi — индикация передачи
+    [ -d /sys/class/leds/blue:status ] && { echo none > /sys/class/leds/blue:status/trigger; echo 1 > /sys/class/leds/blue:status/brightness; }
+    [ -d /sys/class/leds/yellow:status ] && { echo none > /sys/class/leds/yellow:status/trigger; echo 0 > /sys/class/leds/yellow:status/brightness; }
+    for p in phy0 phy1; do [ -d /sys/class/leds/mt76-$p ] && echo ${p}tpt > /sys/class/leds/mt76-$p/trigger 2>/dev/null; done
+    logger -t fspirat-led "подсветка включена"; echo ok ;;
+  *) echo "usage: fspirat-led status|on|off" >&2; exit 2 ;;
+esac

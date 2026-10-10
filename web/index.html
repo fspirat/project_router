@@ -4,45 +4,63 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>FSPIRAT Router</title>
-<meta name="theme-color" content="#050605">
+<title>Router — Панель управления</title>
+<meta name="description" content="Панель управления домашним роутером: VPN, сеть, устройства, журнал">
+<meta name="theme-color" content="#090B0F">
+<link rel="icon" href="/router/favicon.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="/router/favicon.ico?v=2" sizes="48x48">
 <link rel="manifest" href="/router/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/router/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="/router/apple-touch-icon.png?v=2">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="Роутер">
+<meta name="apple-mobile-web-app-title" content="Router">
+<link rel="preload" href="fonts/inter-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <script src="theme.js"></script>
 </head>
 <body>
 <div class="wrap">
-  <!-- Шапка: логотип, вкладки (на телефоне — внизу экрана), LuCI и выход -->
+  <!-- Шапка: значок и имя роутера, вкладки (на телефоне — внизу экрана), связь, подсветка, тема, LuCI и выход -->
   <header class="top">
-    <a class="logo" href="/">FSPIRAT<small>ROUTER</small></a>
+    <a class="logo" href="#vpn" aria-label="Router AX3000T — главная">
+      <span class="logo-mark" aria-hidden="true"><svg class="ic"><use href="icons.svg#router"/></svg></span>
+      <span class="logo-txt"><b id="brand-name">Router AX3000T</b><small id="brand-fw">OpenWrt</small></span>
+    </a>
     <nav class="tabs" role="tablist" aria-label="Разделы">
-      <a class="tab" role="tab" href="#vpn" data-tab="vpn">VPN</a>
-      <a class="tab" role="tab" href="#net" data-tab="net">Сеть</a>
-      <a class="tab" role="tab" href="#dev" data-tab="dev">Устройства</a>
-      <a class="tab" role="tab" href="#log" data-tab="log">Журнал</a>
+      <a class="tab" role="tab" href="#vpn" data-tab="vpn"><svg class="ic" aria-hidden="true"><use href="icons.svg#shield-check"/></svg>VPN</a>
+      <a class="tab" role="tab" href="#net" data-tab="net"><svg class="ic" aria-hidden="true"><use href="icons.svg#activity"/></svg>Сеть</a>
+      <a class="tab" role="tab" href="#dev" data-tab="dev"><svg class="ic" aria-hidden="true"><use href="icons.svg#monitor-smartphone"/></svg>Устройства</a>
+      <a class="tab" role="tab" href="#log" data-tab="log"><svg class="ic" aria-hidden="true"><use href="icons.svg#scroll-text"/></svg>Журнал</a>
     </nav>
     <span class="sp"></span>
-    <button class="btn ghost small theme-btn" id="theme-btn" type="button" aria-label="Тема">◐</button>
-    <a class="btn ghost small" href="https://router.fspirat.online" target="_blank" rel="noopener" title="Полные настройки роутера (LuCI)">LuCI ↗</a>
-    <a class="btn ghost small" href="/router/logout" title="Выйти из панели на этом устройстве">Выйти</a>
+    <div class="top-acts">
+      <span class="conn" id="conn" role="status" title="Связь панели с роутером"><i aria-hidden="true"></i><span>Подключаюсь…</span></span>
+      <button class="ibtn led-btn" id="led-btn" type="button" role="switch" aria-checked="false" aria-label="Подсветка роутера" title="Подсветка роутера" hidden><svg class="ic" aria-hidden="true"><use href="icons.svg#lightbulb-off"/></svg></button>
+      <div class="tm">
+        <button class="ibtn" id="theme-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="theme-menu" aria-label="Тема" title="Тема"><svg class="ic" aria-hidden="true"><use href="icons.svg#sun-moon"/></svg></button>
+        <div class="tmenu" id="theme-menu" role="menu" aria-label="Тема" hidden>
+          <button type="button" role="menuitemradio" data-theme-set="light" aria-checked="false"><svg class="ic" aria-hidden="true"><use href="icons.svg#sun"/></svg>Светлая</button>
+          <button type="button" role="menuitemradio" data-theme-set="dark" aria-checked="false"><svg class="ic" aria-hidden="true"><use href="icons.svg#moon"/></svg>Тёмная</button>
+          <button type="button" role="menuitemradio" data-theme-set="auto" aria-checked="false"><svg class="ic" aria-hidden="true"><use href="icons.svg#sun-moon"/></svg>Как в системе</button>
+        </div>
+      </div>
+      <a class="btn-link" href="https://router.fspirat.online" target="_blank" rel="noopener" title="Полные настройки роутера (LuCI)" aria-label="LuCI — полные настройки роутера"><svg class="ic" aria-hidden="true"><use href="icons.svg#settings"/></svg><span class="btn-label">LuCI</span></a>
+      <a class="btn-link" href="/router/logout" title="Выйти из панели на этом устройстве" aria-label="Выйти"><svg class="ic" aria-hidden="true"><use href="icons.svg#log-out"/></svg><span class="btn-label">Выйти</span></a>
+    </div>
   </header>
 
   <!-- Главная карточка: общее состояние + текущий сервер + показатели + действия -->
   <section class="panel hero" id="hero" aria-live="polite">
     <i class="lamp" aria-hidden="true"></i>
     <div class="hero-head">
-      <b class="ov-title" id="ov-title">ПРОВЕРЯЮ…</b>
+      <b class="ov-title" id="ov-title">Проверяю…</b>
       <small class="ov-upd" id="ov-upd"></small>
       <ul class="ov-items" id="ov-items"></ul>
     </div>
     <div class="hero-acts">
-      <button class="btn primary" id="ping-btn" title="Пинг всех серверов, проверка VPN и сервисов">↻ Проверить</button>
-      <button class="btn small" data-act="restart">Перезапустить VPN</button>
-      <button class="btn small" data-act="update">Обновить подписку</button>
+      <button class="btn primary" id="ping-btn" title="Пинг всех серверов, проверка VPN и сервисов"><svg class="ic" aria-hidden="true"><use href="icons.svg#refresh-cw"/></svg>Проверить</button>
+      <button class="btn small" data-act="restart"><svg class="ic" aria-hidden="true"><use href="icons.svg#rotate-ccw"/></svg>Перезапустить VPN</button>
+      <button class="btn small" data-act="update"><svg class="ic" aria-hidden="true"><use href="icons.svg#arrow-down"/></svg>Обновить подписки</button>
     </div>
     <div class="hero-cur">
       <div class="cur-box"><small>Подключён сервер</small><b class="cur-name" id="cur-name">—</b></div>
@@ -70,22 +88,39 @@
 
   <!-- ===== VPN ===== -->
   <div data-page="vpn" class="cols">
+    <div class="main">
     <section class="panel needs-router srv-panel">
-      <div class="h2row"><h2>Серверы</h2>
-        <div class="h2btns"><button class="btn small" id="tg-edit" title="Какие сервисы мерить">✎ Сервисы</button><button class="btn small" id="ping-all" title="Пинг всех серверов и сервисов через каждый">↻ Пинг всех</button></div></div>
+      <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#server"/></svg>Серверы</h2>
+        <div class="h2btns"><button class="btn small" id="tg-edit" title="Какие сервисы мерить"><svg class="ic" aria-hidden="true"><use href="icons.svg#pencil"/></svg>Сервисы</button><button class="btn small" id="ping-all" title="Пинг всех серверов и сервисов через каждый"><svg class="ic" aria-hidden="true"><use href="icons.svg#refresh-cw"/></svg>Пинг всех</button></div></div>
       <div class="tbl-wrap"><table class="srv-tbl" id="srv"><tbody><tr><td class="empty">Загружаю список серверов…</td></tr></tbody></table></div>
-      <p class="tbl-hint">Числа — задержка в ms, лучшее в столбце обведено. Нажми строку, чтобы подключить сервер. Сервисы через другие серверы меряются раз в 30 минут.</p>
+      <p class="tbl-hint">Числа — задержка в ms, лучшее в столбце выделено. Заголовок столбца — сортировка. Нажми строку, чтобы подключить сервер. Сервисы через другие серверы меряются раз в 30 минут.</p>
       <div class="best-list" id="best"></div>
       <div class="svcdir" id="svcdir"></div>
       <details id="dead-box" hidden><summary id="dead-sum"></summary><ul class="dead" id="dead"></ul></details>
       <form id="tg-form" class="tg-form" hidden>
         <h3>Сервисы для замера</h3>
         <div id="tg-rows"></div>
-        <div class="tg-acts"><button type="button" class="btn small" id="tg-add">+ Добавить</button>
+        <div class="tg-acts"><button type="button" class="btn small" id="tg-add"><svg class="ic" aria-hidden="true"><use href="icons.svg#plus"/></svg>Добавить</button>
           <span class="sp"></span><button type="button" class="btn small ghost" id="tg-cancel">Отмена</button><button type="submit" class="btn small primary">Сохранить</button></div>
         <p class="note">Сайт — ссылка https://…; Minecraft — адрес сервера, как в игре (порт по умолчанию 25565). До 8 строк. Через текущий сервер — раз в 5 минут, через остальные — раз в 30 минут.</p>
       </form>
     </section>
+
+    <!-- Подписки VPN (PassWall2 subscribe_list): список, добавить, обновить, удалить. Ссылку подписки роутер в панель не отдаёт -->
+    <section class="panel needs-router" id="subs">
+      <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#rss"/></svg>Подписки</h2>
+        <div class="h2btns"><small class="muted" id="subs-count"></small><button class="btn small" id="sub-add" type="button"><svg class="ic" aria-hidden="true"><use href="icons.svg#plus"/></svg>Добавить</button></div></div>
+      <ul class="subs" id="subs-list"><li class="empty">Загружаю…</li></ul>
+      <form class="sub-form" id="sub-form" hidden autocomplete="off">
+        <h3>Новая подписка</h3>
+        <label class="fl">Название<input id="sub-name" maxlength="32" placeholder="например: Основная" required spellcheck="false"></label>
+        <label class="fl">Ссылка подписки<input id="sub-url" type="url" maxlength="500" placeholder="https://…" required spellcheck="false" autocomplete="off"></label>
+        <label class="chk"><input type="checkbox" id="sub-hwid" checked> Отправлять HWID <small>— большинство подписок без него не отдают серверы</small></label>
+        <div class="tg-acts"><span class="sp"></span><button type="button" class="btn small ghost" id="sub-cancel">Отмена</button><button type="submit" class="btn small primary">Добавить подписку</button></div>
+        <p class="note"><svg class="ic" aria-hidden="true"><use href="icons.svg#lock-keyhole"/></svg> Ссылка — это личный доступ к VPN. Она хранится только на роутере: панель её больше не показывает, в журнал и Telegram она не попадает.</p>
+      </form>
+    </section>
+    </div>
 
     <div class="side">
       <section class="panel">
@@ -104,7 +139,7 @@
 
       <!-- YouTube и Discord через zapret: управление /usr/bin/fspirat-zapret на роутере (CGI zapret*) -->
       <section class="panel needs-router zap" id="zap" hidden>
-        <div class="h2row"><h2>Zapret</h2>
+        <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#zap"/></svg>Zapret</h2>
           <button class="btn small zap-tgl" id="zap-tgl" type="button" role="switch" aria-checked="false" aria-label="Zapret для YouTube и Discord">выключен</button></div>
         <p class="zap-sum" id="zap-sum"></p>
         <p class="zap-err" id="zap-err" role="alert" hidden></p>
@@ -120,7 +155,7 @@
         <p class="zap-when" id="zap-when" hidden></p>
         <!-- Telegram через tg-ws-proxy на роутере (/usr/bin/fspirat-tgws, CGI tgws*) -->
         <div class="tgws" id="tgws" hidden>
-          <div class="tgws-row"><span class="tgws-name">Telegram <small>tg-ws-proxy</small></span>
+          <div class="tgws-row"><span class="tgws-name"><svg class="ic" aria-hidden="true"><use href="icons.svg#send"/></svg>Telegram <small>tg-ws-proxy</small></span>
             <button class="btn small zap-tgl" id="tgws-tgl" type="button" role="switch" aria-checked="false" aria-label="Telegram через tg-ws-proxy">выключен</button></div>
           <p class="zap-sum" id="tgws-sum"></p>
         </div>
@@ -133,12 +168,12 @@
       </section>
 
       <section class="panel">
-        <div class="h2row"><h2>Журнал</h2><a class="more-link" href="#log">все записи →</a></div>
+        <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#scroll-text"/></svg>Журнал</h2><a class="more-link" href="#log">все записи<svg class="ic" aria-hidden="true"><use href="icons.svg#arrow-right"/></svg></a></div>
         <ul class="log" id="log-mini"><li class="empty"><span>Загружаю…</span></li></ul>
       </section>
 
       <section class="panel">
-        <div class="h2row"><h2>Устройства</h2><a class="more-link" href="#dev" id="dev-mini-sum">все →</a></div>
+        <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#monitor-smartphone"/></svg>Устройства</h2><a class="more-link" href="#dev" id="dev-mini-sum">все</a></div>
         <ul class="dev-list" id="dev-mini"><li class="empty">Загружаю…</li></ul>
       </section>
     </div>
@@ -148,15 +183,15 @@
   <div data-page="net" class="cols" hidden>
     <div class="col">
       <section class="panel needs-router">
-        <h2>Интернет сейчас</h2>
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#globe"/></svg>Интернет сейчас</h2>
         <div class="speed">
-          <div class="spd"><span>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
-          <div class="spd"><span>Отдача</span><b id="sp-tx">—</b><small id="tot-tx"></small></div>
+          <div class="spd"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#arrow-down"/></svg>Загрузка</span><b id="sp-rx">—</b><small id="tot-rx"></small></div>
+          <div class="spd"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#arrow-up"/></svg>Отдача</span><b id="sp-tx">—</b><small id="tot-tx"></small></div>
         </div>
       </section>
 
       <section class="panel">
-        <h2>Тест скорости</h2>
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#gauge"/></svg>Тест скорости</h2>
         <div class="st st-dev" id="st-dev">
           <div class="st-head"><span>Это устройство, через VPN</span><button class="btn small primary" id="bspeed">Запустить</button></div>
           <div class="st-nums">
@@ -205,38 +240,38 @@
 
     <div class="col">
       <section class="panel">
-        <div class="h2row"><h2>Роутер</h2><button class="btn small danger" data-act="reboot">Перезагрузить роутер</button></div>
+        <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#router"/></svg>Роутер</h2><button class="btn small danger-outline" data-act="reboot"><svg class="ic" aria-hidden="true"><use href="icons.svg#power"/></svg>Перезагрузить роутер</button></div>
         <div class="sys-head"><span id="sys-model">—</span><span id="sys-fw"></span></div>
         <div class="meters">
-          <div class="meter"><div class="m-top"><span>Процессор</span><b id="m-cpu">—</b></div><div class="xp"><i id="x-cpu"></i></div><small id="s-cpu"></small></div>
-          <div class="meter"><div class="m-top"><span>Оперативная память</span><b id="m-ram">—</b></div><div class="xp"><i id="x-ram"></i></div><small id="s-ram"></small></div>
-          <div class="meter"><div class="m-top"><span>Флеш-память</span><b id="m-disk">—</b></div><div class="xp"><i id="x-disk"></i></div><small id="s-disk"></small></div>
-          <div class="meter"><div class="m-top"><span>Временные файлы</span><b id="m-tmp">—</b></div><div class="xp"><i id="x-tmp"></i></div><small id="s-tmp"></small></div>
+          <div class="meter"><div class="m-top"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#cpu"/></svg>Процессор</span><b id="m-cpu">—</b></div><div class="xp"><i id="x-cpu"></i></div><small id="s-cpu"></small></div>
+          <div class="meter"><div class="m-top"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#memory-stick"/></svg>Оперативная память</span><b id="m-ram">—</b></div><div class="xp"><i id="x-ram"></i></div><small id="s-ram"></small></div>
+          <div class="meter"><div class="m-top"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#hard-drive"/></svg>Флеш-память</span><b id="m-disk">—</b></div><div class="xp"><i id="x-disk"></i></div><small id="s-disk"></small></div>
+          <div class="meter"><div class="m-top"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#box"/></svg>Временные файлы</span><b id="m-tmp">—</b></div><div class="xp"><i id="x-tmp"></i></div><small id="s-tmp"></small></div>
         </div>
         <div class="facts">
-          <div class="fact"><span>Температура</span><b id="f-temp">—</b></div>
-          <div class="fact"><span>Работает без перезагрузки</span><b id="f-up">—</b></div>
+          <div class="fact"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#thermometer"/></svg>Температура</span><b id="f-temp">—</b></div>
+          <div class="fact"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#clock"/></svg>Работает без перезагрузки</span><b id="f-up">—</b></div>
         </div>
       </section>
 
       <section class="panel needs-router" id="md">
-        <div class="h2row"><h2>Напрямую (MyDirect)</h2><small class="muted" id="md-count"></small></div>
+        <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#arrow-right"/></svg>Напрямую (MyDirect)</h2><small class="muted" id="md-count"></small></div>
         <p class="note">Сайты из этого списка открываются без VPN — как из России. После каждого изменения VPN перезапускается (~5 секунд).</p>
-        <form class="md-add" id="md-form"><input id="md-in" maxlength="100" placeholder="пример: gosuslugi.ru" aria-label="Домен" autocomplete="off" spellcheck="false"><button class="btn small primary" type="submit">Добавить</button></form>
+        <form class="md-add" id="md-form"><input id="md-in" maxlength="100" placeholder="пример: gosuslugi.ru" aria-label="Домен" autocomplete="off" spellcheck="false"><button class="btn small primary" type="submit"><svg class="ic" aria-hidden="true"><use href="icons.svg#plus"/></svg>Добавить</button></form>
         <h3 class="sub-h">Добавлены из панели</h3>
         <ul class="md-list" id="md-added"><li class="empty">Загружаю…</li></ul>
         <details class="md-all"><summary id="md-all-sum">Весь список</summary>
-          <input id="md-search" placeholder="Найти домен…" aria-label="Поиск по списку" autocomplete="off" spellcheck="false">
+          <input id="md-search" type="search" placeholder="Найти домен…" aria-label="Поиск по списку" autocomplete="off" spellcheck="false">
           <ul class="md-list" id="md-found"></ul>
         </details>
       </section>
 
       <section class="panel">
-        <h2>Безопасность</h2>
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#lock-keyhole"/></svg>Безопасность</h2>
         <p class="note">Вход — пароль и код из Telegram на новом устройстве. Входы и действия записываются, о важных бот пишет в Telegram. Каждое утро в 9:00 бот присылает отчёт за сутки.</p>
         <form method="post" action="/router/logout" class="sec-row">
           <input type="hidden" name="all" value="1">
-          <button class="btn small danger-outline" type="submit">Выйти на всех устройствах</button>
+          <button class="btn small danger-outline" type="submit"><svg class="ic" aria-hidden="true"><use href="icons.svg#log-out"/></svg>Выйти на всех устройствах</button>
         </form>
       </section>
     </div>
@@ -245,19 +280,30 @@
   <!-- ===== Устройства ===== -->
   <div data-page="dev" hidden>
     <section class="panel">
-      <div class="h2row"><h2>Устройства</h2><small class="muted" id="dev-sum"></small></div>
+      <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#monitor-smartphone"/></svg>Устройства</h2></div>
+      <div class="tools">
+        <label class="search"><svg class="ic" aria-hidden="true"><use href="icons.svg#search"/></svg><input id="dev-q" type="search" placeholder="Имя, IP или MAC" aria-label="Поиск устройства" autocomplete="off" spellcheck="false"></label>
+        <div class="seg" id="dev-filter" role="group" aria-label="Какие устройства">
+          <button data-df="all" aria-pressed="true">Все</button><button data-df="on" aria-pressed="false">В сети</button><button data-df="off" aria-pressed="false">Не в сети</button><button data-df="cut" aria-pressed="false">Ограничены</button>
+        </div>
+        <small class="muted" id="dev-sum"></small>
+      </div>
       <div id="devices"><p class="empty">Загружаю…</p></div>
-      <p class="note">«⋯» у устройства: переименовать, выключить интернет, пустить мимо VPN, расписание. «Скрытый MAC» — телефон сам меняет свой адрес для приватности, поэтому без имени.</p>
+      <p class="note">Кнопка «⋯» у устройства: переименовать, выключить интернет, пустить мимо VPN, расписание. «Скрытый MAC» — телефон сам меняет свой адрес для приватности, поэтому без имени.</p>
     </section>
   </div>
 
   <!-- ===== Журнал ===== -->
   <div data-page="log" hidden>
     <section class="panel">
-      <div class="h2row"><h2>Журнал</h2>
+      <div class="h2row"><h2><svg class="ic" aria-hidden="true"><use href="icons.svg#scroll-text"/></svg>Журнал</h2></div>
+      <div class="tools">
+        <label class="search"><svg class="ic" aria-hidden="true"><use href="icons.svg#search"/></svg><input id="log-q" type="search" placeholder="Поиск по записям" aria-label="Поиск по журналу" autocomplete="off" spellcheck="false"></label>
         <div class="seg" id="log-filter" role="group" aria-label="Какие записи">
           <button data-lv="all" aria-pressed="true">Все</button><button data-lv="err" aria-pressed="false">Ошибки</button><button data-lv="warn" aria-pressed="false">Внимание</button><button data-lv="info" aria-pressed="false">Действия</button>
-        </div></div>
+        </div>
+        <small class="muted" id="log-sum"></small>
+      </div>
       <ul class="log full" id="log"><li class="empty"><span>Загружаю журнал…</span></li></ul>
     </section>
   </div>
@@ -265,10 +311,10 @@
 
 <!-- Нижняя панель вкладок (телефон) -->
 <nav class="mtabs" aria-label="Разделы">
-  <a href="#vpn" data-tab="vpn"><i aria-hidden="true">◉</i>VPN</a>
-  <a href="#net" data-tab="net"><i aria-hidden="true">⇅</i>Сеть</a>
-  <a href="#dev" data-tab="dev"><i aria-hidden="true">▣</i>Устр.</a>
-  <a href="#log" data-tab="log"><i aria-hidden="true">≡</i>Журнал</a>
+  <a href="#vpn" data-tab="vpn"><svg class="ic" aria-hidden="true"><use href="icons.svg#shield-check"/></svg>VPN</a>
+  <a href="#net" data-tab="net"><svg class="ic" aria-hidden="true"><use href="icons.svg#activity"/></svg>Сеть</a>
+  <a href="#dev" data-tab="dev"><svg class="ic" aria-hidden="true"><use href="icons.svg#monitor-smartphone"/></svg>Устройства</a>
+  <a href="#log" data-tab="log"><svg class="ic" aria-hidden="true"><use href="icons.svg#scroll-text"/></svg>Журнал</a>
 </nav>
 
 <!-- Меню устройства (⋯) -->

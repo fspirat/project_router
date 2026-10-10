@@ -42,7 +42,7 @@
   },
   {
    "command": "update",
-   "description": "Обновить подписку nosok"
+   "description": "Обновить подписки VPN"
   },
   {
    "command": "tgproxy",

@@ -82,76 +82,105 @@ $h = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#050605">
-<title>Вход · FSPIRAT Router</title>
+<meta name="theme-color" content="#090B0F" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F6F8FB" media="(prefers-color-scheme: light)">
+<title>Вход — Router AX3000T</title>
+<!-- значок вкладки встроен (data:) — CSP страницы входа разрешает картинки только так -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%2334D399%22/%3E%3Cstop offset=%221%22 stop-color=%22%23047857%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22url(%23g)%22/%3E%3Cg transform=%22translate(12 12) scale(1.6667)%22 fill=%22none%22 stroke=%22%23fff%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Crect width=%2220%22 height=%228%22 x=%222%22 y=%2214%22 rx=%222%22/%3E%3Cpath d=%22M6.01 18H6%22/%3E%3Cpath d=%22M10.01 18H10%22/%3E%3Cpath d=%22M15 10v4%22/%3E%3Cpath d=%22M17.84 7.17a4 4 0 0 0-5.66 0%22/%3E%3Cpath d=%22M20.66 4.34a8 8 0 0 0-11.31 0%22/%3E%3C/g%3E%3C/svg%3E">
 <style>
-  @font-face{font-family:"Press Start 2P";font-display:swap;src:url("/router/fonts/ps2p-cyrillic.woff2") format("woff2");unicode-range:U+0400-045F}
-  @font-face{font-family:"Press Start 2P";font-display:swap;src:url("/router/fonts/ps2p-latin.woff2") format("woff2");unicode-range:U+0000-00FF,U+2000-206F}
-  :root{--bg:#050605;--panel:#0c110a;--edge:#1d2b15;--green:#7fbf3a;--lime:#9be052;--text:#d9e7cd;--dim:#7f8e74;--red:#e0563c;
-        --pixel:"Minecraft","Press Start 2P",monospace;--body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  /* Router AX3000T — страница входа. Шрифт Inter — свой (/router/fonts/, открыт без входа), без Google и без скриптов.
+     Тема — как в системе (без JS выбор из панели здесь недоступен). */
+  @font-face{font-family:"Inter";font-weight:100 900;font-display:swap;src:url("/router/fonts/inter-cyrillic-wght-normal.woff2") format("woff2");unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+  @font-face{font-family:"Inter";font-weight:100 900;font-display:swap;src:url("/router/fonts/inter-latin-wght-normal.woff2") format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+  @font-face{font-family:"JetBrains Mono";font-weight:100 800;font-display:swap;src:url("/router/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2");unicode-range:U+0000-00FF}
+  :root{--bg:#090B0F;--card:#161B22;--surface:#11151B;--border:#252B35;--border-2:#313946;--text:#F1F5F9;--dim:#94A3B8;--faint:#64748B;
+        --acc:#34D399;--acc-tx:#34D399;--acc-hov:#4ADEA8;--on-acc:#052E1F;--acc-soft:rgba(52,211,153,.12);
+        --err:#F87171;--err-soft:rgba(248,113,113,.10);--err-bd:rgba(248,113,113,.32);
+        --glow-1:rgba(52,211,153,.16);--glow-2:rgba(96,165,250,.08);--shadow:0 24px 60px -24px rgba(0,0,0,.8),0 2px 8px rgba(0,0,0,.35);color-scheme:dark}
+  @media (prefers-color-scheme:light){
+    :root{--bg:#F6F8FB;--card:#FFFFFF;--surface:#F8FAFC;--border:#E2E8F0;--border-2:#CBD5E1;--text:#0F172A;--dim:#64748B;--faint:#94A3B8;
+          --acc:#059669;--acc-tx:#047857;--acc-hov:#047857;--on-acc:#FFFFFF;--acc-soft:rgba(5,150,105,.10);
+          --err:#DC2626;--err-soft:rgba(220,38,38,.06);--err-bd:rgba(220,38,38,.28);
+          --glow-1:rgba(5,150,105,.12);--glow-2:rgba(37,99,235,.07);--shadow:0 24px 60px -28px rgba(15,23,42,.28),0 2px 8px rgba(15,23,42,.05);color-scheme:light}
+  }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
-  body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px 16px;color:var(--text);font:15px/1.5 var(--body);
-       background:linear-gradient(rgba(127,191,58,.035) 1px,transparent 1px) 0 0/32px 32px,
-                  linear-gradient(90deg,rgba(127,191,58,.035) 1px,transparent 1px) 0 0/32px 32px,
-                  radial-gradient(ellipse at 50% -10%,#10200b 0%,var(--bg) 60%);background-color:var(--bg)}
-  .box{width:100%;max-width:380px}
-  .logo{font-family:var(--pixel);font-size:22px;color:var(--lime);text-shadow:3px 3px 0 #1f3a10;letter-spacing:1px;text-align:center;margin:0 0 6px}
-  .logo small{display:block;font-size:10px;color:var(--dim);text-shadow:none;margin-top:10px;letter-spacing:3px}
-  .panel{background:var(--panel);border:2px solid var(--edge);margin-top:22px;padding:22px 20px 20px;
-         box-shadow:inset 3px 3px 0 rgba(255,255,255,.035),inset -3px -3px 0 rgba(0,0,0,.5),4px 4px 0 #000}
-  .lock{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-  .lock svg{flex:none;width:32px;height:32px;shape-rendering:crispEdges}
-  .lock b{font-family:var(--pixel);font-size:11px;font-weight:400;color:var(--green);letter-spacing:1px;line-height:1.8}
-  .lock span{display:block;color:var(--dim);font-size:13px}
-  label.f{display:block;color:var(--dim);font-size:13px;margin-bottom:6px}
-  input[type=password]{width:100%;font:inherit;font-size:16px;color:var(--text);background:#0a0f08;border:2px solid #000;
-       box-shadow:inset 0 0 0 1px #1f2c17;padding:11px 12px;outline:none}
-  input[type=password]:focus{box-shadow:inset 0 0 0 1px var(--lime),0 0 0 2px rgba(155,224,82,.18)}
-  .row{display:flex;align-items:center;gap:9px;margin:14px 0 18px;color:var(--text);font-size:14px;cursor:pointer;user-select:none}
-  .row input{appearance:none;width:18px;height:18px;margin:0;flex:none;background:#0a0f08;border:2px solid #000;box-shadow:inset 0 0 0 1px #2c3f20;cursor:pointer}
-  .row input:checked{background:var(--lime);box-shadow:inset -3px -3px 0 #4f8a22}
-  .row input:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
-  button{width:100%;font-family:var(--pixel);font-size:12px;letter-spacing:1px;color:#0b1406;cursor:pointer;padding:14px;
-         background:var(--lime);border:2px solid #000;box-shadow:inset 3px 3px 0 #c8f59a,inset -3px -3px 0 #4f8a22,3px 3px 0 #000}
-  button:hover{background:#aaf064}
-  button:active{box-shadow:inset -3px -3px 0 #c8f59a,inset 3px 3px 0 #4f8a22}
-  button:focus-visible{outline:2px solid var(--text);outline-offset:3px}
-  .err{margin:0 0 16px;padding:10px 12px;border:2px solid #5a2216;background:#1c0b06;color:#f08a73;font-size:14px}
-  .hint{margin:16px 0 0;color:var(--dim);font-size:12px;text-align:center}
+  html,body{margin:0;min-height:100%}
+  body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;color:var(--text);
+       font:15px/1.5 "Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;
+       background:radial-gradient(800px 480px at 15% -10%,var(--glow-1),transparent 65%),radial-gradient(700px 500px at 105% 110%,var(--glow-2),transparent 60%),var(--bg)}
+  .box{width:100%;max-width:400px}
+  .ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:30px 28px 26px}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+  .mark{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;color:#fff;flex:none;
+        background:linear-gradient(145deg,#34D399,#047857);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 8px 20px -8px rgba(16,185,129,.6)}
+  .mark .ic{width:24px;height:24px;stroke-width:2}
+  .brand b{display:block;font-size:16px;font-weight:650;letter-spacing:-.01em;line-height:1.25}
+  .brand div span{display:block;font-size:12.5px;color:var(--dim)}
+  h1{margin:0 0 4px;font-size:22px;font-weight:650;letter-spacing:-.02em;line-height:1.3}
+  .lead{margin:0 0 22px;color:var(--dim);font-size:14px}
+  label.f{display:block;color:var(--text);font-size:13px;font-weight:500;margin-bottom:7px}
+  .field{position:relative}
+  .field .ic{position:absolute;left:13px;top:50%;margin-top:-9px;color:var(--faint);pointer-events:none}
+  input[type=password],input.code{width:100%;font:inherit;font-size:16px;color:var(--text);background:var(--surface);border:1px solid var(--border-2);border-radius:10px;
+       height:46px;padding:0 14px 0 42px;outline:none;transition:border-color .15s,box-shadow .15s}
+  input[type=password]:focus,input.code:focus{border-color:var(--acc);box-shadow:0 0 0 4px var(--acc-soft)}
+  input:disabled{opacity:.55;cursor:not-allowed}
+  .row{display:flex;align-items:center;gap:10px;margin:16px 0 22px;color:var(--text);font-size:14px;cursor:pointer;user-select:none}
+  .row input{appearance:none;width:18px;height:18px;margin:0;flex:none;border-radius:5px;background:var(--surface);border:1px solid var(--border-2);cursor:pointer;
+       display:grid;place-items:center;transition:background-color .15s,border-color .15s}
+  .row input::after{content:"";width:5px;height:9px;border:solid var(--on-acc);border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px);opacity:0}
+  .row input:checked{background:var(--acc);border-color:var(--acc)} .row input:checked::after{opacity:1}
+  .row input:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .row small{color:var(--dim);font-size:13px}
+  button{width:100%;height:46px;font:inherit;font-size:15px;font-weight:600;color:var(--on-acc);cursor:pointer;background:var(--acc);border:0;border-radius:10px;
+         display:flex;align-items:center;justify-content:center;gap:8px;transition:background-color .15s,transform .05s}
+  button:hover:not(:disabled){background:var(--acc-hov)}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .err{display:flex;gap:10px;align-items:flex-start;margin:0 0 18px;padding:11px 13px;border:1px solid var(--err-bd);border-radius:10px;background:var(--err-soft);color:var(--err);font-size:13.5px}
+  .err .ic{margin-top:1px}
+  .sent{display:flex;gap:12px;align-items:flex-start;margin:0 0 18px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);font-size:13.5px;color:var(--dim)}
+  .sent .ic{color:#60A5FA;margin-top:1px}
+  .sent b{color:var(--text);font-weight:600}
+  input.code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:22px;letter-spacing:.45em;text-align:center;padding:0 14px;margin-bottom:18px;height:54px}
+  .alt{margin:16px 0 0;text-align:center;font-size:13px;color:var(--dim)}
+  .alt a{color:var(--acc-tx);text-decoration:none;font-weight:500} .alt a:hover{text-decoration:underline}
+  .safe{display:flex;align-items:center;justify-content:center;gap:8px;margin:18px 0 0;color:var(--faint);font-size:12.5px;text-align:center}
+  .safe .ic{width:16px;height:16px;color:var(--acc-tx)}
   .user{position:absolute;left:-9999px}
-  .sent{margin:0 0 14px;color:var(--text);font-size:14px}
-  input.code{width:100%;font:inherit;font-family:var(--pixel);font-size:22px;letter-spacing:8px;text-align:center;color:var(--lime);
-       background:#0a0f08;border:2px solid #000;box-shadow:inset 0 0 0 1px #1f2c17;padding:12px;outline:none;margin-bottom:18px}
-  input.code:focus{box-shadow:inset 0 0 0 1px var(--lime),0 0 0 2px rgba(155,224,82,.18)}
-  .hint a{color:var(--green)}
+  @media (max-width:420px){.card{padding:24px 20px 22px;border-radius:16px} h1{font-size:20px}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
 <main class="box">
-  <p class="logo">FSPIRAT<small>ROUTER · VPN</small></p>
-  <form class="panel" method="post" action="/router/login" autocomplete="on">
-    <div class="lock">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#2a3d1d" d="M4 7h8v7H4z"/><path fill="#9be052" d="M5 2h6v1h1v4h-2V4H6v3H4V3h1z"/><path fill="#7fbf3a" d="M3 7h10v1H3zM3 8h1v6H3zM12 8h1v6h-1zM3 14h10v1H3z"/><path fill="#9be052" d="M7 9h2v3H7z"/></svg>
-      <div><b>ВХОД В ПАНЕЛЬ</b><span>Роутер, VPN и LuCI — один пароль</span></div>
+  <form class="card" method="post" action="/router/login" autocomplete="on">
+    <div class="brand">
+      <span class="mark"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6.01 18H6"/><path d="M10.01 18H10"/><path d="M15 10v4"/><path d="M17.84 7.17a4 4 0 0 0-5.66 0"/><path d="M20.66 4.34a8 8 0 0 0-11.31 0"/></svg></span>
+      <div><b>Router AX3000T</b><span>Панель управления</span></div>
     </div>
-    <?php if ($error): ?><p class="err" role="alert"><?= $h($error) ?></p><?php endif; ?>
+    <?php if ($error): ?><p class="err" role="alert"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg><span><?= $h($error) ?></span></p><?php endif; ?>
     <?php if ($step === 'code'): ?>
-    <p class="sent">📨 Это новое устройство — бот прислал в Telegram код из 6 цифр.</p>
+    <h1>Подтвердите вход</h1>
+    <p class="lead">Это новое устройство — нужен код из Telegram.</p>
+    <p class="sent"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg><span>Бот прислал в Telegram <b>код из 6 цифр</b>. Введите его ниже.</span></p>
     <label class="f" for="code">Код из Telegram</label>
     <input class="code" type="text" id="code" name="code" required autofocus inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7"
            autocomplete="one-time-code" placeholder="000000" <?= $wait ? 'disabled' : '' ?>>
-    <button type="submit" <?= $wait ? 'disabled' : '' ?>>ПОДТВЕРДИТЬ</button>
-    <p class="hint">После подтверждения это устройство запомнится на 30 дней. <a href="/router/login?restart=1&amp;next=<?= $h(rawurlencode($next)) ?>">Ввести пароль заново</a></p>
+    <button type="submit" <?= $wait ? 'disabled' : '' ?>>Подтвердить</button>
+    <p class="alt">После подтверждения устройство запомнится на 30 дней.<br><a href="/router/login?restart=1&amp;next=<?= $h(rawurlencode($next)) ?>">Ввести пароль заново</a></p>
     <?php else: ?>
+    <h1>Добро пожаловать</h1>
+    <p class="lead">Войдите для управления сетью</p>
     <input class="user" type="text" name="username" value="<?= FSR_USER ?>" autocomplete="username" tabindex="-1" aria-hidden="true">
     <label class="f" for="pw">Пароль</label>
-    <input type="password" id="pw" name="password" required autofocus autocomplete="current-password" <?= $wait ? 'disabled' : '' ?>>
-    <label class="row"><input type="checkbox" name="remember" value="1" checked> Запомнить на этом устройстве (30 дней)</label>
+    <div class="field"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="16" r="1"/><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/></svg><input type="password" id="pw" name="password" required autofocus autocomplete="current-password" <?= $wait ? 'disabled' : '' ?>></div>
+    <label class="row"><input type="checkbox" name="remember" value="1" checked> Запомнить это устройство <small>· 30 дней</small></label>
     <input type="hidden" name="next" value="<?= $h($next) ?>">
-    <button type="submit" <?= $wait ? 'disabled' : '' ?>>ВОЙТИ</button>
-    <p class="hint">Все входы и неудачные попытки записываются.</p>
+    <button type="submit" <?= $wait ? 'disabled' : '' ?>>Войти</button>
     <?php endif; ?>
+    <p class="safe"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg><span>Пароль + код Telegram на новом устройстве. Все входы записываются.</span></p>
   </form>
 </main>
 </body>

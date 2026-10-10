@@ -237,7 +237,7 @@ for via in vpn direct; do
 done
 [ "$(date +%H%M)" = 0300 ] && [ -f $S/speed.tsv ] && awk -v t=$((NOW - 180*86400)) '$1 >= t' $S/speed.tsv > $S/speed.tmp && mv $S/speed.tmp $S/speed.tsv
 
-# Подписка VPN (роутер берёт из заголовков подписки nosok): за 3 дня до конца — напоминание раз в день
+# Подписка VPN (роутер берёт из заголовков подписки, которая кончится раньше всех): за 3 дня до конца — напоминание раз в день
 exp=$(jq -r '.sub.expire // 0' <<<"$J")
 if [ "${exp:-0}" -gt 0 ] 2>/dev/null; then
   left=$(( (exp - NOW) / 86400 ))

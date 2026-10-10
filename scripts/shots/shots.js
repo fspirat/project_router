@@ -5,11 +5,9 @@ const { status, data, MD, ZAP, TGWS } = require('./demo_data.js');
 if(process.env.DIRECT_MODE) status.current = '_direct';   // режим «Напрямую (без VPN)»
 const WEB = path.resolve(__dirname, '../../web');
 const OUT = path.resolve(process.env.OUT || path.join(__dirname, 'out')); fs.mkdirSync(OUT, {recursive: true});
-// цифры — Minecraft-шрифт сайта (лежит в project_hex); нет файла — цифры будут шрифтом Press Start 2P
-const FONT = process.env.MC_FONT || path.resolve(__dirname, '../../../project_hex/sites/fspirat.ru/admin/mc.ttf');
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
-const TYPES = {'.js': 'application/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json'};
-const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret']);
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://speed.cloudflare.com; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
+const TYPES = {'.js': 'application/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon'};
+const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret', 'tgws', 'led']);
 const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.env.PFX || '';
 (async () => {
   const exe = process.env.CHROME || ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome'].find(f => fs.existsSync(f));
@@ -21,12 +19,11 @@ const errs = []; const THEME = process.env.THEME || 'dark'; const PFX = process.
     await p.route('**/*', async r => {
       const req = r.request(), u = new URL(req.url());
       if(u.pathname === '/router/') return r.fulfill({body: fs.readFileSync(WEB + '/index.html', 'utf8'), contentType: 'text/html', headers: {'Content-Security-Policy': CSP}});
-      if(u.pathname === '/admin/mc.ttf') return fs.existsSync(FONT) ? r.fulfill({body: fs.readFileSync(FONT), contentType: 'font/ttf'}) : r.fulfill({status: 404, body: ''});
       if(u.pathname.startsWith('/router/') && !u.pathname.endsWith('/') && fs.existsSync(WEB + u.pathname.slice(7)))
         return r.fulfill({body: fs.readFileSync(WEB + u.pathname.slice(7)), contentType: TYPES[path.extname(u.pathname)] || 'application/octet-stream'});
       if(u.pathname === '/router/api'){
         const a = u.searchParams.get('action');
-        const body = a === 'zapret' ? ZAP[process.env.ZAP_STATE || 'ok'] : a === 'tgws' ? TGWS : a === 'tgwslink' ? {link: 'tg://proxy?server=192.168.1.1&port=1443&secret=dd00000000000000000000000000000000'} : a === 'net' ? status.sys.net : a === 'mydirect' ? MD : READ.has(a) ? status : {ok: true};
+        const body = a === 'zapret' ? ZAP[process.env.ZAP_STATE || 'ok'] : a === 'tgws' ? TGWS : a === 'led' || a === 'ledset' ? {on: true, items: [{name: 'blue:status', on: true}]} : a === 'tgwslink' ? {link: 'tg://proxy?server=192.168.1.1&port=1443&secret=dd00000000000000000000000000000000'} : a === 'net' ? status.sys.net : a === 'mydirect' ? MD : READ.has(a) ? status : {ok: true};
         return r.fulfill({body: JSON.stringify(body), contentType: 'application/json'});
       }
       if(u.pathname === '/router/data'){

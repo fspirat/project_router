@@ -13,6 +13,7 @@ const FSR_ACTIONS = [
     'update' => ['📥 Обновление подписки', true], 'switch' => ['🌍 Смена сервера', false],
     'block' => ['⛔ Интернет выключен устройству', true], 'unblock' => ['✅ Интернет включён устройству', true],
     'settargets' => ['📝 Изменён список сервисов', true], 
+    'subadd' => ['➕ Добавлена подписка VPN', true], 'subdel' => ['🗑 Удалена подписка VPN', true], 'subupdate' => ['📥 Обновление подписки', false],
     'rename' => ['✏️ Переименовано устройство', false],
 ];
 
@@ -33,7 +34,7 @@ try {
         }
         // в журнал — только известные параметры и только безопасные значения
         $detail = $action;
-        foreach (['id', 'mac', 'via'] as $k) if (preg_match('/^[A-Za-z0-9:]{1,40}$/', (string)($q[$k] ?? ''))) $detail .= " $k=" . $q[$k];
+        foreach (['id', 'sid', 'mac', 'via'] as $k) if (preg_match('/^[A-Za-z0-9:_]{1,40}$/', (string)($q[$k] ?? ''))) $detail .= " $k=" . $q[$k];
         fsr_audit('ACTION', $detail);
         [$title, $tg] = FSR_ACTIONS[$action] ?? ['', false];
         if ($tg) $notify = $title . (preg_match('/^[0-9a-fA-F:]{17}$/', (string)($q['mac'] ?? '')) ? "\nMAC " . $q['mac'] : '') . "\nИз панели, IP " . fsr_ip();

@@ -2,7 +2,9 @@
 # FSPIRAT: CGI для страницы fspirat.online/router/
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 SHUNT=9DxG2j8l
-GROUP="nosok|fspirat"     # подписка и свои серверы
+# Узлы, которые показывает и переключает панель: серверы подписок (группа = название подписки) и свои (группа fspirat)
+GROUPS=$(/usr/bin/fspirat-subs groups 2>/dev/null | tr 'A-Z' 'a-z'); [ -n "$GROUPS" ] || GROUPS="fspirat"
+in_groups() { [ -n "$1" ] && printf '%s\n' "$GROUPS" | grep -qxF "$(printf '%s' "$1" | tr 'A-Z' 'a-z')"; }
 DIR=/tmp/fspirat
 mkdir -p $DIR
 TOKEN=$(cat /etc/fspirat.token 2>/dev/null)
@@ -22,12 +24,17 @@ io.write((arg[1]:gsub("+", " "):gsub("%%(%x%x)", function(h) return string.char(
 L
 }
 action=$(param action | grep -E '^[a-z]{1,20}$')
+# Тело POST (application/x-www-form-urlencoded, до 2 КБ) — для секретных полей (ссылка подписки): адрес запроса пишется в логи nginx
+BODY=''
+[ "$REQUEST_METHOD" = POST ] && [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null && [ "$CONTENT_LENGTH" -le 2048 ] && BODY=$(head -c "$CONTENT_LENGTH")
+bparam() { echo "&$BODY" | sed -n "s/^.*&$1=\([^&]*\).*$/\1/p" | head -1; }
+sid=$(param sid | grep -E '^[A-Za-z0-9_]{1,32}$')
 id=$(param id | grep -E '^[A-Za-z0-9]{1,32}$')
 mac=$(param mac | sed 's/%3[Aa]/:/g' | tr A-F a-f | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$')
 
 # Чтение — GET; всё, что меняет состояние или запускает работу, — только POST (nginx пускает POST только с CSRF-токеном).
 case "$action" in
-  status|net|pingone|mydirect|zapret|tgws) ;;
+  status|net|pingone|mydirect|zapret|tgws|led|subs) ;;
   *) [ "$REQUEST_METHOD" = POST ] || reply "405 Method Not Allowed" '{"error":"method"}' ;;
 esac
 
@@ -166,8 +173,9 @@ status_json() {
   [ -f $DIR/svc/lock ] && kill -0 "$(cat $DIR/svc/lock)" 2>/dev/null && svcrun=true || svcrun=false
   hist=$(awk '{printf "%s[%s,%s]", (NR>1?",":""), $1, $2}' $DIR/history 2>/dev/null)
   sub=$(cat $DIR/sub.json 2>/dev/null); [ -n "$sub" ] || sub=null
+  subs=$(/usr/bin/fspirat-subs list 2>/dev/null); [ -n "$subs" ] || subs=null
   sdl=$(cut -d'|' -f1 /etc/fspirat/svc_direct 2>/dev/null | jesc | awk 'NF{printf "%s\"%s\"", (n++?",":""), $0}')   # не sd: sd — тест скорости напрямую
-  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"sub\":$sub,\"svc_direct\":[$sdl],\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
+  echo "{\"running\":$run,\"split_active\":$split,\"current\":\"$cur\",\"ping\":$ping,\"log\":[$log],\"history\":[$hist],\"targets\":$tg,\"sub\":$sub,\"subs\":$subs,\"svc_direct\":[$sdl],\"target_list\":[$tl],\"svc\":{$svc},\"svc_running\":$svcrun,\"speed\":{\"vpn\":$sv,\"direct\":$sd},\"devices\":$(devices_json),\"sys\":$(sys_json)}"
 }
 
 case "$action" in
@@ -176,7 +184,7 @@ case "$action" in
   ping) /usr/bin/fspirat-ping all >/dev/null 2>&1; reply "200 OK" "$(status_json)" ;;
   targets) reply "200 OK" "$(/usr/bin/fspirat-targets 2>/dev/null)" ;;
   pingone)   # TCP-пинг одного сервера (лучший из трёх), заодно обновляет его в ping.json
-    [ -n "$id" ] && uci -q get passwall2.$id.group | grep -qxE "$GROUP" || reply "400 Bad Request" '{"error":"bad node"}'
+    [ -n "$id" ] && in_groups "$(uci -q get passwall2.$id.group)" || reply "400 Bad Request" '{"error":"bad node"}'
     addr=$(uci -q get passwall2.$id.address); port=$(uci -q get passwall2.$id.port)
     best=0
     for k in 1 2 3; do
@@ -187,7 +195,7 @@ case "$action" in
     reply "200 OK" "{\"id\":\"$id\",\"ms\":$best,\"ts\":$(date +%s)}" ;;
   switch)       # id=direct — без VPN: всё, кроме правил Split, идёт напрямую (default_node=_direct)
     if [ "$id" = direct ]; then id=_direct
-    else [ -n "$id" ] && uci -q get passwall2.$id.group | grep -qxE "$GROUP" || reply "400 Bad Request" '{"error":"bad node"}'; fi
+    else [ -n "$id" ] && in_groups "$(uci -q get passwall2.$id.group)" || reply "400 Bad Request" '{"error":"bad node"}'; fi
     uci set passwall2.$SHUNT.default_node="$id"
     uci commit passwall2
     echo 0 > $DIR/fails
@@ -198,10 +206,10 @@ case "$action" in
     echo "$(date '+%d.%m %H:%M') перезапуск VPN" >> $DIR/switch.log
     bg "/etc/init.d/passwall2 restart"
     reply "200 OK" '{"ok":true}' ;;
-  update)
+  update)       # все подписки (кнопка в главной карточке)
     [ -f /usr/share/passwall2/subscribe.lua ] || reply "500 Internal Server Error" '{"error":"subscribe.lua not found"}'
-    echo "$(date '+%d.%m %H:%M') обновление подписки" >> $DIR/switch.log
-    bg "lua /usr/share/passwall2/subscribe.lua start; sleep 5; /usr/bin/fspirat-ping"
+    echo "$(date '+%d.%m %H:%M') обновление подписок" >> $DIR/switch.log
+    bg "lua /usr/share/passwall2/subscribe.lua start all manual; sleep 5; /usr/bin/fspirat-sub; /usr/bin/fspirat-ping"
     reply "200 OK" '{"ok":true}' ;;
   speedtest)
     via=$(param via)
@@ -383,5 +391,36 @@ L
     [ -x /usr/bin/fspirat-tgws ] || reply "503 Service Unavailable" '{"error":"not installed"}'
     bg "/usr/bin/fspirat-tgws $([ "$on" = 1 ] && echo on || echo off)"
     reply "200 OK" '{"ok":true}' ;;
+  # Подсветка роутера (/usr/bin/fspirat-led): из браузера приходит только on=0|1, светодиоды — фиксированный список в скрипте
+  led)          # фактическое состояние светодиодов
+    [ -x /usr/bin/fspirat-led ] || reply "200 OK" '{"absent":true}'
+    reply "200 OK" "$(/usr/bin/fspirat-led status)" ;;
+  ledset)       # включить / выключить (только подсветка; сеть и VPN не трогает)
+    on=$(param on | grep -E '^[01]$'); [ -n "$on" ] || reply "400 Bad Request" '{"error":"bad on"}'
+    [ -x /usr/bin/fspirat-led ] || reply "503 Service Unavailable" '{"error":"not installed"}'
+    /usr/bin/fspirat-led $([ "$on" = 1 ] && echo on || echo off) >/dev/null 2>&1
+    reply "200 OK" "$(/usr/bin/fspirat-led status)" ;;
+  # Подписки VPN (/usr/bin/fspirat-subs): проверка названия и ссылки — там. Ссылка — только в теле POST и наружу не выходит.
+  subs) reply "200 OK" "$(/usr/bin/fspirat-subs list)" ;;
+  subadd)       # тело: name, url, hwid=0|1 → новая секция subscribe_list (настройки — как у первой подписки) и её загрузка
+    [ -f /usr/share/passwall2/subscribe.lua ] || reply "500 Internal Server Error" '{"error":"subscribe.lua not found"}'
+    [ "$(bparam hwid)" = 0 ] && hw=0 || hw=1
+    # по строке на поле: переводы строк и прочие управляющие символы из значений убираются (не подменить следующее поле)
+    res=$(printf '%s\n%s\n%s\n' "$(urldec "$(bparam name)" | tr -d '\000-\037')" "$(urldec "$(bparam url)" | tr -d '\000-\037')" "$hw" | /usr/bin/fspirat-subs add 2>&1) \
+      || reply "400 Bad Request" "{\"error\":\"$(echo "$res" | head -1 | tr -dc 'a-z ')\"}"
+    nsid=$(echo "$res" | sed -n 's/.*"id":"\([A-Za-z0-9_]*\)".*/\1/p')
+    bg "lua /usr/share/passwall2/subscribe.lua start $nsid manual; sleep 5; /usr/bin/fspirat-sub; /usr/bin/fspirat-ping"
+    reply "200 OK" "$res" ;;
+  subupdate)    # sid — одна подписка; без sid — все
+    [ -f /usr/share/passwall2/subscribe.lua ] || reply "500 Internal Server Error" '{"error":"subscribe.lua not found"}'
+    /usr/bin/fspirat-subs check "${sid:-all}" >/dev/null 2>&1 || reply "400 Bad Request" '{"error":"bad sub"}'
+    echo "$(date '+%d.%m %H:%M') обновление подписки $(uci -q get passwall2.${sid:-x}.remark | jesc)" >> $DIR/switch.log
+    bg "lua /usr/share/passwall2/subscribe.lua start ${sid:-all} manual; sleep 5; /usr/bin/fspirat-sub; /usr/bin/fspirat-ping"
+    reply "200 OK" '{"ok":true}' ;;
+  subdel)       # удалить подписку и её серверы; подключён сервер из неё — сначала переключение на лучший из остальных
+    res=$(SHUNT=$SHUNT /usr/bin/fspirat-subs del "$sid" 2>&1) || reply "400 Bad Request" "{\"error\":\"$(echo "$res" | head -1 | tr -dc 'a-z ')\"}"
+    echo 0 > $DIR/fails
+    bg "/etc/init.d/passwall2 restart; sleep 8; /usr/bin/fspirat-ping"
+    reply "200 OK" "$res" ;;
   *) reply "400 Bad Request" '{"error":"unknown action"}' ;;
 esac

@@ -1,13 +1,15 @@
-/* FSPIRAT Router — логика страницы (подключает index.html; CSP: script-src 'self') */
+/* Router AX3000T — логика панели (подключает index.html; CSP: script-src 'self') */
 const API = '/router/api';
 // Чтение (status, net, pingone) — GET. Всё остальное меняет что-то на роутере — только POST с CSRF-токеном сессии
 // в заголовке X-FSR: сервер (check.php) без верного токена и нашего Origin отвечает 403, роутер на GET — 405.
 // Токен — из /router/data?csrf=1 (ответ чужому сайту не прочитать), меняется с каждой новой сессией.
-const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret', 'tgws']);
+const READ = new Set(['status', 'net', 'pingone', 'mydirect', 'zapret', 'tgws', 'led']);
 let csrf = '';
-let state = null, hist = null, names = {}, range = 'day', series = 'link', logLv = 'all', toastTimer, quietUntil = 0, editing = null, lastOk = 0, md = null;
+let state = null, hist = null, names = {}, range = 'day', series = 'link', logLv = 'all', logQ = '', devF = 'all', devQ = '', srvSort = {k: 'ping', dir: 1}, toastTimer, quietUntil = 0, editing = null, lastOk = 0, md = null;
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Иконка Lucide из спрайта icons.svg (имена — только свои константы, не данные с роутера)
+const ic = (n, cls = '') => `<svg class="ic${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="icons.svg#${n}"/></svg>`;
 
 /* ---------- помощники ---------- */
 function level(ms){ if(!ms) return 0; if(ms<60) return 5; if(ms<100) return 4; if(ms<160) return 3; if(ms<250) return 2; return 1; }
@@ -39,7 +41,8 @@ function upt(s){
 function toast(msg, err){
   let t = $('.toast');
   if(!t){ t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); document.body.append(t); }
-  t.textContent = (err ? '' : '✓ ') + msg; t.classList.toggle('err', !!err); t.hidden = false;
+  t.innerHTML = ic(err ? 'circle-alert' : 'circle-check'); const m = document.createElement('span'); m.textContent = msg; t.append(m);
+  t.classList.toggle('err', !!err); t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, err ? 9000 : 6000);
 }
 const toLogin = () => { location.href = '/router/login?next=' + encodeURIComponent(location.pathname); };
@@ -59,8 +62,8 @@ function ask({title, text, ok = 'Да', danger = false}){
 
 /* Кнопка «занята»: надпись и disabled на время операции; вернуть — вызвать результат */
 function busy(b, text){
-  const old = b.textContent; b.disabled = true; b.setAttribute('aria-busy', 'true'); if(text) b.textContent = text;
-  return (later = 0) => setTimeout(() => { b.disabled = false; b.removeAttribute('aria-busy'); if(text) b.textContent = old; }, later);
+  const old = b.innerHTML; b.disabled = true; b.setAttribute('aria-busy', 'true'); if(text) b.textContent = text;     // innerHTML — своя разметка кнопки (иконка + текст)
+  return (later = 0) => setTimeout(() => { b.disabled = false; b.removeAttribute('aria-busy'); if(text) b.innerHTML = old; }, later);
 }
 
 async function csrfToken(fresh){
@@ -77,11 +80,14 @@ const ERR = {
   inner: 'адрес ведёт внутрь домашней сети или на сам роутер — так нельзя', long: 'слишком длинный список',
   domain: 'нужен домен вида site.ru', time: 'неверное время', resolve: 'не удалось узнать IP сервера', 'no target': 'нет такого сервиса',
   'no rule': 'в PassWall нет правила MyDirect',
+  'bad sub': 'нет такой подписки — обнови страницу', 'sub url': 'нужна ссылка подписки вида https://…', 'sub name': 'недопустимое название',
+  'sub exists': 'подписка с таким названием или ссылкой уже есть', 'sub many': 'не больше 8 подписок',
   'bad on': 'неверный режим', 'bad strategy': 'нет такой стратегии', 'not installed': 'zapret не установлен на роутере',
 };
-async function api(action, extra = ''){
-  const post = !READ.has(action), url = `${API}?action=${action}${extra}`;
-  const send = async fresh => fetch(url, {method: post ? 'POST' : 'GET', cache: 'no-store',
+// body — секретные поля (ссылка подписки): только в теле POST, не в адресе — адреса запросов пишутся в логи nginx
+async function api(action, extra = '', body = null){
+  const post = !READ.has(action) || !!body, url = `${API}?action=${action}${extra}`;
+  const send = async fresh => fetch(url, {method: post ? 'POST' : 'GET', cache: 'no-store', body: body ? new URLSearchParams(body) : undefined,
     headers: {'X-FSR': post ? await csrfToken(fresh) : (csrf || '1')}});
   let r;
   try {
@@ -101,12 +107,12 @@ async function api(action, extra = ''){
   throw new Error('Роутер не смог выполнить действие. Попробуй ещё раз через минуту.');
 }
 
-/* Значки сервисов (по адресу): YouTube, Discord, прочие сайты — глобус; Minecraft — пиксельный блок травы */
+/* Значки сервисов (по адресу), все одного размера и цвета: YouTube, Discord — логотипы Simple Icons; прочие сайты — глобус; Minecraft — блок (Lucide) */
 const ICONS = {
-  mc: '<svg class="si sq" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="0" width="1" height="1" fill="#6aaa2c"/><rect x="1" y="0" width="1" height="1" fill="#6aaa2c"/><rect x="2" y="0" width="1" height="1" fill="#6aaa2c"/><rect x="3" y="0" width="1" height="1" fill="#86c43c"/><rect x="4" y="0" width="1" height="1" fill="#6aaa2c"/><rect x="5" y="0" width="1" height="1" fill="#6aaa2c"/><rect x="6" y="0" width="1" height="1" fill="#6aaa2c"/><rect x="7" y="0" width="1" height="1" fill="#86c43c"/><rect x="0" y="1" width="1" height="1" fill="#6aaa2c"/><rect x="1" y="1" width="1" height="1" fill="#86c43c"/><rect x="2" y="1" width="1" height="1" fill="#6aaa2c"/><rect x="3" y="1" width="1" height="1" fill="#6aaa2c"/><rect x="4" y="1" width="1" height="1" fill="#6aaa2c"/><rect x="5" y="1" width="1" height="1" fill="#86c43c"/><rect x="6" y="1" width="1" height="1" fill="#6aaa2c"/><rect x="7" y="1" width="1" height="1" fill="#6aaa2c"/><rect x="0" y="2" width="1" height="1" fill="#6aaa2c"/><rect x="1" y="2" width="1" height="1" fill="#8b5a2b"/><rect x="2" y="2" width="1" height="1" fill="#6aaa2c"/><rect x="3" y="2" width="1" height="1" fill="#6aaa2c"/><rect x="4" y="2" width="1" height="1" fill="#8b5a2b"/><rect x="5" y="2" width="1" height="1" fill="#6aaa2c"/><rect x="6" y="2" width="1" height="1" fill="#6aaa2c"/><rect x="7" y="2" width="1" height="1" fill="#8b5a2b"/><rect x="0" y="3" width="1" height="1" fill="#8b5a2b"/><rect x="1" y="3" width="1" height="1" fill="#a5733f"/><rect x="2" y="3" width="1" height="1" fill="#8b5a2b"/><rect x="3" y="3" width="1" height="1" fill="#8b5a2b"/><rect x="4" y="3" width="1" height="1" fill="#8b5a2b"/><rect x="5" y="3" width="1" height="1" fill="#6b4423"/><rect x="6" y="3" width="1" height="1" fill="#8b5a2b"/><rect x="7" y="3" width="1" height="1" fill="#8b5a2b"/><rect x="0" y="4" width="1" height="1" fill="#8b5a2b"/><rect x="1" y="4" width="1" height="1" fill="#8b5a2b"/><rect x="2" y="4" width="1" height="1" fill="#6b4423"/><rect x="3" y="4" width="1" height="1" fill="#8b5a2b"/><rect x="4" y="4" width="1" height="1" fill="#a5733f"/><rect x="5" y="4" width="1" height="1" fill="#8b5a2b"/><rect x="6" y="4" width="1" height="1" fill="#8b5a2b"/><rect x="7" y="4" width="1" height="1" fill="#6b4423"/><rect x="0" y="5" width="1" height="1" fill="#6b4423"/><rect x="1" y="5" width="1" height="1" fill="#8b5a2b"/><rect x="2" y="5" width="1" height="1" fill="#8b5a2b"/><rect x="3" y="5" width="1" height="1" fill="#8b5a2b"/><rect x="4" y="5" width="1" height="1" fill="#8b5a2b"/><rect x="5" y="5" width="1" height="1" fill="#8b5a2b"/><rect x="6" y="5" width="1" height="1" fill="#a5733f"/><rect x="7" y="5" width="1" height="1" fill="#8b5a2b"/><rect x="0" y="6" width="1" height="1" fill="#8b5a2b"/><rect x="1" y="6" width="1" height="1" fill="#8b5a2b"/><rect x="2" y="6" width="1" height="1" fill="#a5733f"/><rect x="3" y="6" width="1" height="1" fill="#8b5a2b"/><rect x="4" y="6" width="1" height="1" fill="#6b4423"/><rect x="5" y="6" width="1" height="1" fill="#8b5a2b"/><rect x="6" y="6" width="1" height="1" fill="#8b5a2b"/><rect x="7" y="6" width="1" height="1" fill="#8b5a2b"/><rect x="0" y="7" width="1" height="1" fill="#8b5a2b"/><rect x="1" y="7" width="1" height="1" fill="#6b4423"/><rect x="2" y="7" width="1" height="1" fill="#8b5a2b"/><rect x="3" y="7" width="1" height="1" fill="#8b5a2b"/><rect x="4" y="7" width="1" height="1" fill="#8b5a2b"/><rect x="5" y="7" width="1" height="1" fill="#8b5a2b"/><rect x="6" y="7" width="1" height="1" fill="#6b4423"/><rect x="7" y="7" width="1" height="1" fill="#8b5a2b"/></svg>',
-  web: '<svg class="si sq" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7f8e74" d="M2 0h4v1h1v1h1v4h-1v1h-1v1h-4v-1h-1v-1h-1v-4h1v-1h1z"/><path fill="#0a0f08" d="M3 1h2v6h-2zM1 3h6v2h-6z" opacity=".55"/></svg>',
-  youtube: '<svg class="si" viewBox="0 0 16 12" aria-hidden="true"><rect width="16" height="12" rx="3" fill="#ff0033"/><path d="M6.2 3.3v5.4L10.9 6z" fill="#fff"/></svg>',
-  discord: '<svg class="si" viewBox="0 0 127.14 96.36" aria-hidden="true"><path fill="#5865f2" d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z"/></svg>',
+  mc: ic('box', 'si'),          // Minecraft-сервер
+  web: ic('globe', 'si'),        // прочие сайты
+  youtube: ic('brand-youtube', 'si brand yt'),
+  discord: ic('brand-discord', 'si brand dc'),
 };
 
 /* ---------- сервисы: значки, список, значения через сервер ---------- */
@@ -160,13 +166,14 @@ function renderHero(){
     items.push(['Серверы', alive >= 2 ? 'ok' : alive ? 'warn' : 'err', `${alive} из ${nodes.length}`]);
     const t = (s.targets && s.targets.list) || [], bad = t.filter(x => !(x.vpn > 0));
     if(t.length) items.push(['Сервисы', bad.length ? 'warn' : 'ok', bad.length ? 'нет ответа: ' + bad.map(x => x.name).join(', ') : 'отвечают']);
-    const sub = s.sub, left = sub && sub.expire ? Math.floor((sub.expire - Date.now() / 1000) / 86400) : null;
+    // несколько подписок — в главной карточке та, что закончится раньше всех
+    const many = (s.subs || []).length > 1, sub = (s.subs || []).filter(x => x.expire).sort((a, b) => a.expire - b.expire)[0] || s.sub, left = sub && sub.expire ? Math.floor((sub.expire - Date.now() / 1000) / 86400) : null;
     if(left != null && left <= 3) items.push(['Подписка', left < 1 ? 'err' : 'warn', left < 1 ? 'закончилась' : `осталось ${left} дн.`]);
     if(!s.split_active) why = 'в PassWall выбран не Split';
     // текущий сервер и показатели
     $('#cur-name').textContent = nodeName(s.current);
     const r = svcOf(s.current), today = Object.values((hist && hist.traffic) || {}).reduce((a, v) => a + v.d[1], 0);
-    const kp = [[`${pingIcon(p.socks ? p.real : 0)}Задержка`, p.socks ? (p.real > 0 ? `<i class="${msCls(p.real)}">${num(p.real)} ms</i>` : '<i class="slow">нет</i>') : '—',
+    const kp = [[`${ic('activity', 'si')}Задержка`, p.socks ? (p.real > 0 ? `<i class="${msCls(p.real)}">${num(p.real)} ms</i>` : '<i class="slow">нет</i>') : '—',
                  'Как пинг: ответ сайта через VPN по уже открытому соединению. Раз в 5 минут.']];
     services().forEach(x => { const v = svcVal(r, x.name);
       kp.push([`${svcIcon(x)}${esc(x.name)}`, v ? `<i class="${msCls(v)}">${v} ms</i>` : '<i class="slow">—</i>', x.host]); });
@@ -175,7 +182,7 @@ function renderHero(){
     $('#updated').textContent = p.updated ? 'Проверено ' + ago(p.updated) : '';
     // подписка
     $('#sub-line').innerHTML = sub && sub.expire
-      ? `Подписка до <b>${new Date(sub.expire * 1000).toLocaleDateString('ru-RU', {day: 'numeric', month: 'long'})}</b> · осталось <b class="${left <= 3 ? 'slow' : ''}">${left} дн.</b>`
+      ? (many ? `«${esc(sub.name)}» до <b>` : `Подписка до <b>`) + `${new Date(sub.expire * 1000).toLocaleDateString('ru-RU', {day: 'numeric', month: 'long'})}</b> · осталось <b class="${left <= 3 ? 'slow' : ''}">${left} дн.</b>`
         + (sub.down ? ` · израсходовано ${bytes(sub.down + (sub.up || 0))}` + (sub.total ? ` из ${bytes(sub.total)}` : ', без лимита') : '')
       : '';
     $('#warn').hidden = s.split_active;
@@ -183,10 +190,24 @@ function renderHero(){
   document.querySelector('.hero-cur').hidden = down || !s;     // роутер не на связи — нечего показывать про сервер
   const worst = items.some(i => i[1] === 'err') ? 'err' : items.some(i => i[1] === 'warn') || why ? 'warn' : 'ok';
   box.className = 'panel hero ' + worst;
-  $('#ov-title').textContent = {ok: 'ВСЁ РАБОТАЕТ', warn: 'ТРЕБУЕТ ВНИМАНИЯ', err: 'ЕСТЬ ПРОБЛЕМА'}[worst];
+  $('#ov-title').textContent = {ok: 'Всё работает', warn: 'Требует внимания', err: 'Есть проблема'}[worst];
   $('#ov-items').innerHTML = items.map(([n, lv, t]) => `<li class="${lv}"><i aria-hidden="true"></i>${esc(n)} <b>${esc(t)}</b></li>`).join('')
     + (why ? `<li class="warn"><i aria-hidden="true"></i><b>${esc(why)}</b></li>` : '');
-  tickUpdated();
+  renderConn(); tickUpdated();
+}
+/* Шапка: имя роутера и версия OpenWrt — из status.sys (model из /tmp/sysinfo/model, fw — DISTRIB_DESCRIPTION), значок связи */
+const shortModel = m => { const x = String(m || '').match(/\bAX\d{3,5}[A-Z]?\b/i); return x ? 'Router ' + x[0].toUpperCase() : 'Router'; };
+function renderBrand(y){
+  const name = shortModel(y && y.model);
+  $('#brand-name').textContent = name;
+  $('#brand-fw').textContent = (y && y.fw) || 'OpenWrt';
+  document.title = name + ' — Панель управления';
+}
+function renderConn(){
+  const c = $('#conn'), down = !$('#down').hidden, ok = !!state && !down;
+  c.className = 'conn' + (ok ? ' ok' : down ? ' err' : '');
+  c.querySelector('span').textContent = ok ? 'На связи' : down ? 'Нет связи' : 'Подключаюсь…';
+  c.title = ok ? 'Роутер на связи' : down ? 'Роутер не отвечает — сервер не получает от него ответа' : 'Связь панели с роутером';
 }
 function tickUpdated(){
   const el = $('#ov-upd'); if(!el) return;
@@ -206,7 +227,15 @@ function renderServers(s){
   // лучшее значение в каждом столбце (только среди VPN-серверов)
   const best = {ping: Math.min(...alive.map(n => n.ms))};
   sv.forEach(x => { const v = alive.map(n => svcVal(svcOf(n.id), x.name)).filter(v => v > 0); best[x.name] = v.length ? Math.min(...v) : 0; });
-  const head = `<tr><th>Сервер</th><th title="Пинг до самого сервера"><img class="pi" src="img/ping-5.svg" width="20" height="16" alt=""><span>Пинг</span></th>${sv.map(x => `<th title="${esc(x.name)} · ${esc(x.host || '')}">${svcIcon(x)}<span>${esc(x.name)}</span></th>`).join('')}<th class="act"></th></tr>`;
+  // сортировка по столбцу (кнопка в заголовке): имя — по алфавиту, числа — по задержке; без ответа — всегда в конце
+  if(srvSort.k.startsWith('svc:') && !sv.some(x => 'svc:' + x.name === srvSort.k)) srvSort = {k: 'ping', dir: 1};
+  const keyOf = n => srvSort.k === 'name' ? n.name.replace(/^[^\p{L}\p{N}]+/u, '').trim().toLowerCase() : srvSort.k === 'ping' ? n.ms : svcVal(svcOf(n.id), srvSort.k.slice(4));
+  const cmp = (a, b) => { const x = keyOf(a), y = keyOf(b);
+    if(srvSort.k === 'name') return x.localeCompare(y, 'ru') * srvSort.dir;
+    const bad = v => !(v > 0); if(bad(x) !== bad(y)) return bad(x) ? 1 : -1;
+    return bad(x) ? a.ms - b.ms : (x - y) * srvSort.dir || a.ms - b.ms; };
+  const sortTh = (k, inner, title) => `<th${srvSort.k === k ? ` aria-sort="${srvSort.dir > 0 ? 'ascending' : 'descending'}"` : ''} title="${esc(title)}"><button class="sort" type="button" data-sort="${esc(k)}" aria-label="Сортировать: ${esc(title)}">${inner}</button></th>`;
+  const head = `<tr>${sortTh('name', '<span>Сервер</span>', 'Сервер')}${sortTh('ping', `${ic('activity', 'si')}<span>Пинг</span>`, 'Пинг до самого сервера')}${sv.map(x => sortTh('svc:' + x.name, `${svcIcon(x)}<span>${esc(x.name)}</span>`, `${x.name} · ${x.host || ''}`)).join('')}<th class="act"></th></tr>`;
   const row = n => { const r = svcOf(n.id), cur = n.id === s.current;
     return `<tr class="${cur ? 'cur' : ''}" data-node="${esc(n.id)}" ${cur ? '' : 'tabindex="0"'} title="${cur ? 'Подключён сейчас' : 'Нажми, чтобы подключить'}">
       <th scope="row">${esc(n.name.trim())}${n.own ? ' <span class="tag own">свой</span>' : ''}</th>${pcell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
@@ -216,23 +245,27 @@ function renderServers(s){
   const drow = dir || dcur ? `<tr class="direct${dcur ? ' cur' : ''}" data-node="direct" ${dcur ? '' : 'tabindex="0"'} title="${dcur ? 'Подключено: весь трафик без VPN' : 'Без VPN: так открываются сайты из списка MyDirect. Нажми, чтобы пустить весь трафик напрямую. Пинг — до ya.ru'}">
       <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${pcell(num(dir && dir.base))}${sv.map(x => cell(dir ? svcVal(dcur && state.targets ? state.targets : dir, x.name) : null, false, x.kind === 'web' && !dcur)).join('')}<td class="act">${dcur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>` : '';
   // свои серверы (ярлык fspirat в PassWall) — отдельным разделом сверху, подписка — ниже
-  const own = alive.filter(n => n.own), sub = alive.filter(n => !n.own);
-  const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${t}</th></tr>`;
-  const body = own.length ? grp('Свои серверы') + own.map(row).join('') + (sub.length ? grp('Подписка nosok') + sub.map(row).join('') : '') : sub.map(row).join('');
-  $('#srv').innerHTML = `<thead>${head}</thead><tbody>${body || `<tr><td class="empty" colspan="${sv.length + 3}">Ни один сервер не ответил. Нажми «↻ Пинг всех».</td></tr>`}${drow}</tbody>`;
+  // разделы: свои серверы (ярлык fspirat в PassWall), затем каждая подписка отдельно (группа узла = название подписки)
+  const own = alive.filter(n => n.own).sort(cmp), sub = alive.filter(n => !n.own);
+  const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${esc(t)}</th></tr>`;
+  const groups = [...new Set(sub.map(n => n.group || ''))];
+  const subHtml = groups.map(g => { const a = sub.filter(n => (n.group || '') === g).sort(cmp);
+    return (own.length || groups.length > 1 ? grp(g ? 'Подписка ' + g : 'Подписка') : '') + a.map(row).join(''); }).join('');
+  const body = (own.length ? grp('Свои серверы') + own.map(row).join('') : '') + subHtml;
+  $('#srv').innerHTML = `<thead>${head}</thead><tbody>${body || `<tr><td class="empty" colspan="${sv.length + 3}">Ни один сервер не ответил. Нажми «Пинг всех».</td></tr>`}${drow}</tbody>`;
   // «лучший для …» — с кнопкой подключить
   const chips = sv.map(x => {
     const b = alive.filter(n => svcVal(svcOf(n.id), x.name) > 0).sort((a, c) => svcVal(svcOf(a.id), x.name) - svcVal(svcOf(c.id), x.name))[0];
     if(!b) return '';
     const cur = b.id === s.current;
-    return `<button class="chip${cur ? ' on' : ''}" ${cur ? 'disabled' : `data-best="${esc(b.id)}"`} title="${cur ? 'Уже подключён' : 'Подключить ' + esc(b.name.trim())}">${svcIcon(x)}${esc(x.name)}: <b>${esc(b.name.trim())}</b> ${svcVal(svcOf(b.id), x.name)} ms${cur ? ' ✓' : ' →'}</button>`;
+    return `<button class="chip${cur ? ' on' : ''}" ${cur ? 'disabled' : `data-best="${esc(b.id)}"`} title="${cur ? 'Уже подключён' : 'Подключить ' + esc(b.name.trim())}">${svcIcon(x)}${esc(x.name)}: <b>${esc(b.name.trim())}</b> <span class="mono">${svcVal(svcOf(b.id), x.name)} ms</span>${cur ? ic('check') : ic('arrow-right')}</button>`;
   }).join('');
   $('#best').innerHTML = chips ? '<span class="muted">Лучший сервер для:</span>' + chips : '';
   // сервисы напрямую (мимо VPN)
   const sd = s.svc_direct || [];
   $('#svcdir').innerHTML = sv.length ? `<span class="muted">Пускать напрямую, без VPN:</span>` + sv.map(x => {
     const on = sd.includes(x.name);
-    return `<button class="chip tgl${on ? ' on' : ''}" data-svcdir="${esc(x.name)}" aria-pressed="${on}" title="${on ? 'Сейчас напрямую — нажми, чтобы снова через VPN' : 'Пустить мимо VPN'}">${svcIcon(x)}${esc(x.name)}${on ? ' ✓' : ''}</button>`;
+    return `<button class="chip tgl${on ? ' on' : ''}" data-svcdir="${esc(x.name)}" aria-pressed="${on}" title="${on ? 'Сейчас напрямую — нажми, чтобы снова через VPN' : 'Пустить мимо VPN'}">${svcIcon(x)}${esc(x.name)}${on ? ic('check') : ''}</button>`;
   }).join('') : '';
   $('#dead-box').hidden = !dead.length;
   $('#dead-sum').textContent = `Не отвечают: ${dead.length}`;
@@ -288,7 +321,7 @@ function renderChart(){
       const d = seg.map(p => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
       lines += `<polyline class="line" points="${d}"/>`;
       areas += `<polygon class="area" points="${x(seg[0][0]).toFixed(1)},${H} ${d} ${x(seg[seg.length-1][0]).toFixed(1)},${H}"/>`;
-    } else if(seg.length === 1) lines += `<rect x="${x(seg[0][0])-1}" y="${y(seg[0][1])-1}" width="3" height="3" fill="var(--lime)"/>`;
+    } else if(seg.length === 1) lines += `<circle class="pt" cx="${x(seg[0][0]).toFixed(1)}" cy="${y(seg[0][1]).toFixed(1)}" r="2"/>`;
     seg = [];
   };
   pts.forEach(p => {
@@ -338,6 +371,7 @@ $('#chart-box').addEventListener('pointerleave', e => { if(e.pointerType === 'mo
 
 /* ---------- журнал ---------- */
 const two = n => String(n).padStart(2, '0');
+const plural = (n, one, few, many) => n % 10 === 1 && n % 100 !== 11 ? one : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? few : many;
 function when(ts){
   const d = new Date(ts * 1000), t = new Date();
   const hm = two(d.getHours()) + ':' + two(d.getMinutes());
@@ -347,7 +381,7 @@ function when(ts){
   return two(d.getDate()) + '.' + two(d.getMonth() + 1) + ' ' + hm;
 }
 const LEVEL = {offline: 'err', vpn_down: 'err', auto: 'warn', reboot: 'warn', newdev: 'warn', online: 'ok', vpn_up: 'ok'};
-const LEVEL_TXT = {err: 'ОШИБКА', warn: 'ВНИМАНИЕ', ok: 'УСПЕХ', info: 'ДЕЙСТВИЕ'};
+const LEVEL_TXT = {err: 'Ошибка', warn: 'Внимание', ok: 'Успех', info: 'Действие'};
 function events(){
   if(hist && hist.events && hist.events.length) return hist.events.map(e => ({ts: e[0], kind: e[1], text: String(e[2]).replace(/\b_direct\b/g, DIRECT_NAME)}));
   const byId = Object.fromEntries(((state && state.ping && state.ping.nodes) || []).map(n => [n.id, n.name]));
@@ -360,8 +394,11 @@ function logItem(e){
 function renderLog(){
   const ev = events(), empty = '<li class="empty"><span>Событий пока нет. Здесь появятся смены сервера, перезагрузки, сбои VPN и новые устройства.</span></li>';
   $('#log-mini').innerHTML = ev.slice(0, 6).map(logItem).join('') || empty;
-  const f = ev.filter(e => logLv === 'all' || (LEVEL[e.kind] || 'info') === logLv || (logLv === 'info' && (LEVEL[e.kind] || 'info') === 'ok'));
+  const q = logQ.trim().toLowerCase();
+  const f = ev.filter(e => (logLv === 'all' || (LEVEL[e.kind] || 'info') === logLv || (logLv === 'info' && (LEVEL[e.kind] || 'info') === 'ok'))
+    && (!q || e.text.toLowerCase().includes(q) || (e.ts && when(e.ts).includes(q))));
   $('#log').innerHTML = f.slice(0, 200).map(logItem).join('') || (ev.length ? '<li class="empty"><span>Таких записей нет.</span></li>' : empty);
+  $('#log-sum').textContent = ev.length ? (f.length === ev.length ? `${ev.length} ${plural(ev.length, 'запись', 'записи', 'записей')}` : `найдено ${f.length} из ${ev.length}`) + (f.length > 200 ? ', показаны 200 последних' : '') : '';
 }
 
 /* ---------- устройства: компактные строки, действия — в меню «⋯» ---------- */
@@ -374,14 +411,14 @@ function devRow(d, mini){
   const mac = (d.mac || '').toLowerCase(), t = hist && hist.traffic && hist.traffic[mac], b = BANDS[d.band];
   const tags = [b && d.online ? `<span class="band ${b[0]}">${b[1]}</span>` : '',
     d.blocked ? '<span class="tag cut">без интернета</span>' : d.sblocked ? '<span class="tag cut">по расписанию</span>' : '',
-    d.direct ? '<span class="tag dir">мимо VPN</span>' : '', d.sched && !d.sblocked ? `<span class="tag">⏱ ${d.sched.replace(/(\d\d)(\d\d)/g, '$1:$2').replace('-', '–')}</span>` : ''].join('');
-  const sub = [d.ip, hiddenMac(mac) && !devName(d) ? 'скрытый MAC' : '', !mini && d.rate ? d.rate + '\u00a0Мбит/с' : ''].filter(Boolean).join(' · ');
+    d.direct ? '<span class="tag dir">мимо VPN</span>' : '', d.sched && !d.sblocked ? `<span class="tag">${ic('timer')}${d.sched.replace(/(\d\d)(\d\d)/g, '$1:$2').replace('-', '–')}</span>` : ''].join('');
+  const sub = [d.ip, !mini && mac ? mac : '', hiddenMac(mac) && !devName(d) ? 'скрытый MAC' : '', !mini && d.rate ? d.rate + '\u00a0Мбит/с' : ''].filter(Boolean).join(' · ');
   return `<li class="dev${d.online ? '' : ' off'}${d.blocked || d.sblocked ? ' is-blocked' : ''}" data-mac="${esc(mac)}">
     <i class="dot${d.online ? ' on' : ''}" title="${d.online ? 'в сети' : 'не в сети'}"></i>
     <div class="dev-main"><b class="dev-nm">${esc(devName(d) || 'Без имени')}</b>${tags}<small>${esc(sub)}</small></div>
     ${d.band && d.band !== 'wired' && d.online ? sig(d.signal) : '<span></span>'}
     <div class="tr">${t ? `↓${bytes(t.d[1])}<small>${mini ? 'сегодня' : `месяц ↓${bytes(t.m[1])}`}</small>` : ''}</div>
-    ${mini ? '' : `<button class="more" data-menu="${esc(mac)}" aria-label="Действия: ${esc(devName(d) || mac)}" aria-haspopup="menu">⋯</button>`}
+    ${mini ? '' : `<button class="more" data-menu="${esc(mac)}" aria-label="Действия: ${esc(devName(d) || mac)}" aria-haspopup="menu" aria-expanded="false">${ic('ellipsis')}</button>`}
   </li>`;
 }
 function renderDevices(list){
@@ -389,16 +426,23 @@ function renderDevices(list){
   list = (list || []).slice();
   const traf = d => { const t = hist && hist.traffic && hist.traffic[(d.mac || '').toLowerCase()]; return t ? t.d[1] : 0; };
   const byName = (a, b) => (devName(a) || 'я').localeCompare(devName(b) || 'я');
+  const all = list, online = all.filter(d => d.online);
+  $('#dev-mini-sum').innerHTML = `${online.length} в сети · все${ic('arrow-right')}`;
+  $('#dev-mini').innerHTML = online.slice().sort((a, b) => traf(b) - traf(a)).slice(0, 4).map(d => devRow(d, true)).join('') || '<li class="empty">Никого нет в сети.</li>';
+  // поиск (имя, IP, MAC) и фильтр: все / в сети / не в сети / ограничены (без интернета, по расписанию, мимо VPN)
+  const q = devQ.trim().toLowerCase();
+  list = all.filter(d => (devF === 'all' || (devF === 'on' ? d.online : devF === 'off' ? !d.online : d.blocked || d.sblocked || d.sched || d.direct))
+    && (!q || [devName(d), d.name, d.ip, d.mac].some(v => v && String(v).toLowerCase().includes(q))));
   const on = list.filter(d => d.online);
-  $('#dev-sum').textContent = `${on.length} в сети из ${list.length}`;
-  $('#dev-mini-sum').textContent = `${on.length} в сети · все →`;
-  $('#dev-mini').innerHTML = on.slice().sort((a, b) => traf(b) - traf(a)).slice(0, 4).map(d => devRow(d, true)).join('') || '<li class="empty">Никого нет в сети.</li>';
+  $('#dev-sum').textContent = list.length === all.length ? `${online.length} в сети из ${all.length}` : `найдено ${list.length} из ${all.length}`;
   const groups = [['Wi-Fi 5 ГГц', on.filter(d => d.band === '5g' || d.band === '6g')], ['Wi-Fi 2,4 ГГц', on.filter(d => d.band === '2g')],
     ['По кабелю', on.filter(d => !['5g', '6g', '2g'].includes(d.band))]];
-  let html = groups.filter(g => g[1].length).map(([t, a]) => `<h3>${t}<small>${a.length}</small></h3><ul class="dev-list">${a.sort(byName).map(d => devRow(d)).join('')}</ul>`).join('');
+  const GI = {'Wi-Fi 5 ГГц': 'wifi', 'Wi-Fi 2,4 ГГц': 'wifi', 'По кабелю': 'cable'};
+  let html = groups.filter(g => g[1].length).map(([t, a]) => `<h3>${ic(GI[t])}${t}<small>${a.length}</small></h3><ul class="dev-list">${a.sort(byName).map(d => devRow(d)).join('')}</ul>`).join('');
   const off = list.filter(d => !d.online);
-  if(off.length) html += `<details><summary>Не в сети: ${off.length}</summary><ul class="dev-list">${off.sort(byName).map(d => devRow(d)).join('')}</ul></details>`;
-  $('#devices').innerHTML = list.length ? html : '<p class="empty">Устройства не найдены: роутер пока никому не выдал адрес.</p>';
+  if(off.length) html += devF === 'off' || q ? `<h3>${ic('wifi-off')}Не в сети<small>${off.length}</small></h3><ul class="dev-list">${off.sort(byName).map(d => devRow(d)).join('')}</ul>`
+    : `<details><summary>Не в сети: ${off.length}</summary><ul class="dev-list">${off.sort(byName).map(d => devRow(d)).join('')}</ul></details>`;
+  $('#devices').innerHTML = list.length ? html : all.length ? '<p class="empty">Ничего не найдено — измени поиск или фильтр.</p>' : '<p class="empty">Устройства не найдены: роутер пока никому не выдал адрес.</p>';
 }
 
 /* Меню «⋯» устройства */
@@ -406,17 +450,18 @@ const devBy = mac => ((state && state.devices) || []).find(x => (x.mac || '').to
 function openMenu(btn){
   const mac = btn.dataset.menu, d = devBy(mac), m = $('#devmenu'), t = hist && hist.traffic && hist.traffic[mac];
   m.innerHTML = `<div class="menu-head"><b>${esc(devName(d) || 'Без имени')}</b><small>${esc(d.ip || '')} · ${esc(mac)}${t ? ` · месяц ↓${bytes(t.m[1])} ↑${bytes(t.m[0])}` : ''}</small></div>
-    <button role="menuitem" data-do="rename">✎ Переименовать</button>
-    <button role="menuitem" data-do="${d.blocked ? 'unblock' : 'block'}" class="${d.blocked ? 'ok' : 'danger'}">${d.blocked ? '✓ Включить интернет' : '⛔ Выключить интернет'}</button>
-    <button role="menuitem" data-do="direct">${d.direct ? '↺ Снова через VPN' : '⇢ Пускать мимо VPN'}</button>
-    <button role="menuitem" data-do="sched">⏱ Расписание${d.sched ? ': ' + d.sched.replace(/(\d\d)(\d\d)/g, '$1:$2').replace('-', '–') : '…'}</button>`;
+    <button role="menuitem" data-do="rename">${ic('pencil')}Переименовать</button>
+    <button role="menuitem" data-do="${d.blocked ? 'unblock' : 'block'}" class="${d.blocked ? 'ok' : 'danger'}">${d.blocked ? ic('check') + 'Включить интернет' : ic('ban') + 'Выключить интернет'}</button>
+    <button role="menuitem" data-do="direct">${d.direct ? ic('rotate-ccw') + 'Снова через VPN' : ic('arrow-right') + 'Пускать мимо VPN'}</button>
+    <button role="menuitem" data-do="sched">${ic('timer')}Расписание${d.sched ? ': ' + d.sched.replace(/(\d\d)(\d\d)/g, '$1:$2').replace('-', '–') : '…'}</button>`;
   m.dataset.mac = mac; m.hidden = false;
+  document.querySelectorAll('[data-menu][aria-expanded="true"]').forEach(x => x.setAttribute('aria-expanded', 'false')); btn.setAttribute('aria-expanded', 'true');
   const r = btn.getBoundingClientRect(), w = m.offsetWidth;
   m.style.top = Math.min(window.scrollY + r.bottom + 4, window.scrollY + innerHeight - m.offsetHeight - 70) + 'px';
   m.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px';
   m.querySelector('button').focus();
 }
-const closeMenu = () => { $('#devmenu').hidden = true; };
+const closeMenu = () => { $('#devmenu').hidden = true; document.querySelectorAll('[data-menu][aria-expanded="true"]').forEach(x => x.setAttribute('aria-expanded', 'false')); };
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-menu]');
   if(b){ e.stopPropagation(); $('#devmenu').hidden || $('#devmenu').dataset.mac !== b.dataset.menu ? openMenu(b) : closeMenu(); return; }
@@ -505,6 +550,7 @@ function setMeter(key, pct, sub){
 }
 function renderSys(y){
   if(!y) return;
+  renderBrand(y);
   $('#sys-model').textContent = y.model || 'Роутер';
   $('#sys-fw').textContent = y.fw || '';
   setMeter('cpu', y.cpu, `Средняя нагрузка ${y.load}, ядер: ${y.cores}`);
@@ -553,11 +599,11 @@ function renderMd(){
   const plain = md.domains.filter(d => !/^[a-z]+:/.test(d));
   $('#md-count').textContent = `${md.domains.length} записей`;
   $('#md-all-sum').textContent = `Весь список (${md.domains.length})`;
-  $('#md-added').innerHTML = md.added.map(d => `<li><span>${esc(d)}</span><button class="ed" data-mddel="${esc(d)}" aria-label="Убрать ${esc(d)}">✕</button></li>`).join('')
+  $('#md-added').innerHTML = md.added.map(d => `<li><span>${esc(d)}</span><button class="ed" data-mddel="${esc(d)}" aria-label="Убрать ${esc(d)}">${ic('x')}</button></li>`).join('')
     || '<li class="empty">Пока ничего — добавь домен выше.</li>';
   const q = $('#md-search').value.trim().toLowerCase();
   const f = q ? md.domains.filter(d => d.toLowerCase().includes(q)) : plain;
-  $('#md-found').innerHTML = f.slice(0, 60).map(d => `<li><span>${esc(d)}</span>${/^[a-z]+:/.test(d) ? '' : `<button class="ed" data-mddel="${esc(d)}" aria-label="Убрать ${esc(d)}">✕</button>`}</li>`).join('')
+  $('#md-found').innerHTML = f.slice(0, 60).map(d => `<li><span>${esc(d)}</span>${/^[a-z]+:/.test(d) ? '' : `<button class="ed" data-mddel="${esc(d)}" aria-label="Убрать ${esc(d)}">${ic('x')}</button>`}</li>`).join('')
     + (f.length > 60 ? `<li class="empty">…и ещё ${f.length - 60}. Уточни поиск.</li>` : '') || '<li class="empty">Не найдено.</li>';
 }
 $('#md-search').addEventListener('input', renderMd);
@@ -592,7 +638,11 @@ async function connect(id){
     setTimeout(load, 10000);
   } catch(err){ toast(err.message, true); }
 }
-$('#srv').addEventListener('click', e => { const tr = e.target.closest('tr[data-node]'); if(tr && !tr.classList.contains('cur')) connect(tr.dataset.node); });
+$('#srv').addEventListener('click', e => {
+  const sb = e.target.closest('[data-sort]');
+  if(sb){ const k = sb.dataset.sort; srvSort = srvSort.k === k ? {k, dir: -srvSort.dir} : {k, dir: 1}; if(state) renderServers(state);
+    const nb = $(`#srv [data-sort="${CSS.escape(k)}"]`); if(nb) nb.focus(); return; }
+  const tr = e.target.closest('tr[data-node]'); if(tr && !tr.classList.contains('cur')) connect(tr.dataset.node); });
 $('#srv').addEventListener('keydown', e => { const tr = e.target.closest('tr[data-node]'); if(tr && (e.key === 'Enter' || e.key === ' ') && !tr.classList.contains('cur')){ e.preventDefault(); connect(tr.dataset.node); } });
 $('#best').addEventListener('click', e => { const b = e.target.closest('[data-best]'); if(b) connect(b.dataset.best); });
 $('#svcdir').addEventListener('click', async e => {
@@ -608,13 +658,17 @@ $('#svcdir').addEventListener('click', async e => {
 $('#series').addEventListener('click', e => { const b = e.target.closest('[data-series]'); if(!b) return; series = b.dataset.series; renderSeries(); renderChart(); });
 $('#log-filter').addEventListener('click', e => { const b = e.target.closest('[data-lv]'); if(!b) return; logLv = b.dataset.lv;
   document.querySelectorAll('#log-filter button').forEach(x => x.setAttribute('aria-pressed', x === b)); renderLog(); });
+$('#log-q').addEventListener('input', e => { logQ = e.target.value; renderLog(); });
+$('#dev-q').addEventListener('input', e => { devQ = e.target.value; if(state) renderDevices(state.devices); });
+$('#dev-filter').addEventListener('click', e => { const b = e.target.closest('[data-df]'); if(!b) return; devF = b.dataset.df;
+  document.querySelectorAll('#dev-filter button').forEach(x => x.setAttribute('aria-pressed', x === b)); if(state) renderDevices(state.devices); });
 
 /* Свой список сервисов */
 function tgRow(k = 'web', name = '', addr = ''){
   return `<div class="tg-row"><span class="ico">${svcIcon({kind: k, name, host: hostOf(addr)})}</span><select aria-label="Вид"><option value="web"${k === 'web' ? ' selected' : ''}>Сайт</option><option value="mc"${k === 'mc' ? ' selected' : ''}>Minecraft</option></select>
     <input class="nm" maxlength="20" placeholder="Имя" value="${esc(name)}" aria-label="Имя">
     <input class="addr" maxlength="200" placeholder="${k === 'mc' ? 'mc.server.net:25565' : 'https://…'}" value="${esc(addr)}" aria-label="Адрес">
-    <button type="button" class="ed" data-del title="Убрать" aria-label="Убрать">✕</button></div>`;
+    <button type="button" class="ed" data-del title="Убрать" aria-label="Убрать">${ic('x')}</button></div>`;
 }
 $('#tg-edit').addEventListener('click', () => {
   const f = $('#tg-form');
@@ -689,8 +743,67 @@ function showDown(on){
   }
 }
 
+/* ---------- подписки VPN: список, добавить, обновить, удалить ----------
+   Роутер (CGI subs) отдаёт по каждой подписке только название, адрес сервера подписки без пути, число серверов и цифры
+   из заголовка subscription-userinfo. Сама ссылка — личный доступ — в панель не возвращается. */
+function subsList(){
+  const s = state; if(!s) return [];
+  if(s.subs) return s.subs;
+  return s.sub ? [{id: '', name: s.sub.title || 'Подписка', host: '', ...s.sub, nodes: ((s.ping && s.ping.nodes) || []).filter(n => !n.own).length}] : [];
+}
+function renderSubs(){
+  const list = subsList(), cur = ((state && state.ping && state.ping.nodes) || []).find(n => n.id === (state && state.current));
+  $('#subs-count').textContent = list.length ? `${list.length} ${plural(list.length, 'подписка', 'подписки', 'подписок')}` : '';
+  $('#subs-list').innerHTML = list.map(x => {
+    const left = x.expire ? Math.floor((x.expire - Date.now() / 1000) / 86400) : null, used = num(x.down) + num(x.up);
+    const pct = x.total ? Math.min(100, Math.round(used / x.total * 100)) : 0, isCur = cur && !cur.own && cur.group === x.name;
+    const meta = [left != null ? `<span>осталось <b class="${left <= 3 ? 'slow' : ''}">${left} дн.</b></span>` : '',
+      used ? `<span>израсходовано <b>${bytes(used)}</b>${x.total ? ` из ${bytes(x.total)}` : ' · без лимита'}</span>` : ''].join('');
+    return `<li class="sub${isCur ? ' cur' : ''}"><span class="sub-ic">${ic('link')}</span>
+      <div class="sub-main"><b>${esc(x.name)}</b>${x.hwid ? ' <span class="tag" title="Подписка получает HWID — идентификатор роутера как устройства">HWID</span>' : ''}${isCur ? ' <span class="tag own">сервер отсюда подключён</span>' : ''}
+        <small>${x.host ? `<span class="mono">${esc(x.host)}</span> · ` : ''}${num(x.nodes)} ${plural(num(x.nodes), 'сервер', 'сервера', 'серверов')}${x.ts ? ' · обновлено ' + ago(x.ts) : ''}</small>
+        ${meta ? `<div class="sub-meta">${meta}</div>` : ''}${x.total ? `<div class="xp${pct >= 85 ? ' crit' : pct >= 65 ? ' warn' : ''}"><i style="width:${pct}%"></i></div>` : ''}</div>
+      <div class="sub-acts"><button class="btn small" type="button" data-subupd="${esc(x.id)}" title="Скачать список серверов заново">${ic('refresh-cw')}Обновить</button>
+        <button class="ed" type="button" data-subdel="${esc(x.id)}" title="Удалить подписку" aria-label="Удалить подписку ${esc(x.name)}">${ic('trash-2')}</button></div></li>`;
+  }).join('') || '<li class="empty">Подписок нет. Добавьте ссылку от вашего VPN-сервиса — серверы из неё появятся в таблице.</li>';
+}
+$('#sub-add').addEventListener('click', () => { const f = $('#sub-form'); f.hidden = !f.hidden; if(!f.hidden) $('#sub-name').focus(); });
+$('#sub-cancel').addEventListener('click', () => { $('#sub-form').reset(); $('#sub-form').hidden = true; });
+$('#sub-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('#sub-name').value.trim(), url = $('#sub-url').value.trim();
+  if(!/^[\p{L}\p{N} ._-]{1,32}$/u.test(name)) return toast('Название: до 32 букв, цифр, пробелов, точек, «-» и «_».', true);
+  if(!/^https:\/\/[a-z0-9.-]+(:\d{1,5})?\/\S*$/i.test(url) || url.length > 500) return toast('Нужна ссылка подписки вида https://…', true);
+  if(subsList().some(x => x.name.toLowerCase() === name.toLowerCase())) return toast('Подписка с таким названием уже есть.', true);
+  if(!await ask({title: `Добавить подписку «${name}»?`, ok: 'Добавить',
+    text: 'Роутер скачает список серверов — до минуты, потом VPN перезапустится на несколько секунд. Подключённый сервер не меняется: новые серверы появятся в таблице, подключить их можно вручную.'})) return;
+  const done = busy(e.submitter, 'Добавляю…');
+  try {
+    await api('subadd', '', {name, url, hwid: $('#sub-hwid').checked ? 1 : 0});
+    $('#sub-form').reset(); $('#sub-form').hidden = true;
+    toast(`Подписка «${name}» добавлена. Серверы появятся примерно через минуту.`); setTimeout(load, 45000);
+  } catch(err){ toast(err.message, true); } finally { done(); }
+});
+document.addEventListener('click', async e => {
+  const u = e.target.closest('[data-subupd]'), d = e.target.closest('[data-subdel]');
+  if(!u && !d) return;
+  const id = (u || d).dataset.subupd ?? d.dataset.subdel, x = subsList().find(v => v.id === id) || {name: 'подписка'};
+  if(u){
+    const done = busy(u, 'Обновляю…');
+    try { await api('subupdate', '&sid=' + encodeURIComponent(id)); toast(`«${x.name}»: список серверов обновляется, около минуты.`); setTimeout(load, 45000); }
+    catch(err){ toast(err.message, true); } finally { done(3000); }
+    return;
+  }
+  const cur = ((state && state.ping && state.ping.nodes) || []).find(n => n.id === state.current), onIt = cur && !cur.own && cur.group === x.name;
+  if(!await ask({title: `Удалить подписку «${x.name}»?`, danger: true, ok: 'Удалить',
+    text: `Её серверы (${num(x.nodes)}) пропадут из таблицы, ссылка удалится с роутера.` + (onIt ? ' Сейчас подключён сервер из этой подписки — роутер переключится на лучший из оставшихся.' : ' Подключённый сервер не меняется.') + ' VPN перезапустится, связь пропадёт на несколько секунд.'})) return;
+  d.disabled = true;
+  try { await api('subdel', '&sid=' + encodeURIComponent(id)); toast(`Подписка «${x.name}» удалена.`); quietUntil = Date.now() + 12000; setTimeout(load, 8000); }
+  catch(err){ toast(err.message, true); d.disabled = false; }
+});
+
 function render(){
-  renderHero(); renderChart(); renderSys(state.sys); renderSpeedtest(state.speed);
+  renderHero(); renderSubs(); renderChart(); renderSys(state.sys); renderSpeedtest(state.speed);
   renderDevices(state.devices); renderServers(state); renderLog();
 }
 
@@ -814,7 +927,7 @@ document.querySelectorAll('[data-speed]').forEach(btn => btn.addEventListener('c
 
 const ACTIONS = {
   restart: { title: 'Перезапустить VPN?', text: 'Связь через VPN пропадёт на несколько секунд.', ok: 'Перезапустить', busy: 'Перезапускаю…', done: 'VPN перезапускается.', quiet: 15000 },
-  update:  { title: 'Обновить подписку?', text: 'Список серверов nosok скачается заново, это займёт до минуты.', ok: 'Обновить', busy: 'Обновляю…', done: 'Подписка обновляется, список серверов обновится примерно через минуту.', quiet: 0 },
+  update:  { title: 'Обновить подписки?', text: 'Списки серверов всех подписок скачаются заново, это займёт до минуты.', ok: 'Обновить', busy: 'Обновляю…', done: 'Подписка обновляется, список серверов обновится примерно через минуту.', quiet: 0 },
   reboot:  { title: 'Перезагрузить роутер?', text: 'Интернет дома пропадёт на 1–2 минуты, панель будет недоступна, пока роутер не вернётся.', ok: 'Перезагрузить', danger: true, busy: 'Перезагружаю…', done: 'Роутер перезагружается. Страница сама обновится, когда он вернётся.', quiet: 150000 },
 };
 document.addEventListener('click', async e => {     // кнопки data-act: в главной карточке и в блоке «Роутер»
@@ -847,10 +960,10 @@ function renderZap(){
   $('#zap-check').textContent = z.checking ? 'Проверяю…' : 'Проверить';
   const work = z.engine && z.nft && z.route_live;
   // одна строка вместо таблицы: что сейчас происходит с YouTube и Discord
-  $('#zap-sum').innerHTML = z.busy ? '<i class="mid">●</i> Применяю… PassWall перезапускается'
-    : on && work ? `<i class="ok">●</i> YouTube и Discord — <b>напрямую</b>, с IP провайдера${z.nft ? ` <small>${num(z.pkts_tcp)} TCP · ${num(z.pkts_udp)} QUIC</small>` : ''}`
-    : on ? '<i class="mid">●</i> Включён, но работает не полностью'
-    : '<i class="off">●</i> YouTube и Discord — через VPN, как всё остальное';
+  $('#zap-sum').innerHTML = z.busy ? '<i class="mid"></i>Применяю… PassWall перезапускается'
+    : on && work ? `<i class="ok"></i>YouTube и Discord — <b>напрямую</b>, с IP провайдера${z.nft ? ` <small>${num(z.pkts_tcp)} TCP · ${num(z.pkts_udp)} QUIC</small>` : ''}`
+    : on ? '<i class="mid"></i>Включён, но работает не полностью'
+    : '<i class="off"></i>YouTube и Discord — через VPN, как всё остальное';
   const items = [
     ['Выбрано', on ? '<b>включить</b>' : '<b>выключить</b>'],
     ['Служба nfqws', yes(z.engine, 'работает', on ? 'не работает' : 'остановлена')],
@@ -908,10 +1021,10 @@ function renderTgws(){
   box.hidden = false;
   const on = !!tgws.enabled, t = $('#tgws-tgl'), ok = tgws.running && tgws.listening;
   t.textContent = on ? 'включён' : 'выключен'; t.setAttribute('aria-checked', on); t.classList.toggle('on', on);
-  $('#tgws-sum').innerHTML = !on ? '<i class="off">●</i> Выключен — Telegram идёт как обычно (через VPN)'
-    : ok && tgws.auto ? `<i class="ok">●</i> Telegram на всех устройствах дома — <b>через Cloudflare, мимо VPN</b>, без настройки <small>${num(tgws.redirected)} подкл.</small>`
-    : ok ? '<i class="mid">●</i> Прокси работает, перехват ещё не включён (сторож включит в течение минуты)'
-    : '<i class="mid">●</i> Запускается… Пока прокси не работает, Telegram идёт через VPN';
+  $('#tgws-sum').innerHTML = !on ? '<i class="off"></i>Выключен — Telegram идёт как обычно (через VPN)'
+    : ok && tgws.auto ? `<i class="ok"></i>Telegram на всех устройствах дома — <b>через Cloudflare, мимо VPN</b>, без настройки <small>${num(tgws.redirected)} подкл.</small>`
+    : ok ? '<i class="mid"></i>Прокси работает, перехват ещё не включён (сторож включит в течение минуты)'
+    : '<i class="mid"></i>Запускается… Пока прокси не работает, Telegram идёт через VPN';
 }
 async function loadTgws(){ try { tgws = await api('tgws'); } catch(err){ return; } renderTgws(); }
 $('#tgws-tgl').addEventListener('click', async () => {
@@ -926,6 +1039,27 @@ $('#tgws-tgl').addEventListener('click', async () => {
   finally { done(); setTimeout(loadTgws, 3000); setTimeout(loadTgws, 8000); }
 });
 
+/* Подсветка роутера (LED): переключатель в шапке; на роутере /usr/bin/fspirat-led (CGI led — состояние, ledset — POST с CSRF).
+   Состояние — фактическое, из /sys/class/leds; нет скрипта на роутере — кнопка скрыта. */
+let led = null;
+function renderLed(){
+  const b = $('#led-btn');
+  if(!led || led.absent){ b.hidden = true; return; }
+  const on = !!led.on;
+  b.hidden = false; b.setAttribute('aria-checked', on);
+  b.querySelector('use').setAttribute('href', 'icons.svg#' + (on ? 'lightbulb' : 'lightbulb-off'));
+  b.title = on ? 'Подсветка роутера включена — нажми, чтобы выключить' : 'Подсветка роутера выключена — нажми, чтобы включить';
+}
+async function loadLed(){ try { led = await api('led'); } catch { return; } renderLed(); }
+$('#led-btn').addEventListener('click', async () => {
+  if(!led) return;
+  const b = $('#led-btn'), on = !led.on;
+  b.disabled = true; b.setAttribute('aria-busy', 'true');
+  try { led = await api('ledset', '&on=' + (on ? 1 : 0)); renderLed(); toast(on ? 'Подсветка роутера включена.' : 'Подсветка роутера выключена.'); }
+  catch(err){ toast(err.message, true); }
+  finally { b.disabled = false; b.removeAttribute('aria-busy'); }
+});
+
 /* Опрос: один запрос каждого вида за раз (медленный ответ не копит очередь), во вкладке в фоне — пауза,
    при возврате на вкладку — сразу свежие данные. Таймеры заводятся один раз, слушатели — делегированные. */
 function every(ms, fn){
@@ -934,14 +1068,15 @@ function every(ms, fn){
   setInterval(tick, ms);
   return tick;
 }
-const tLoad = every(30000, load), tData = every(60000, loadData), tZap = every(30000, loadZap), tTg = every(60000, loadTgws);
+const tLoad = every(30000, load), tData = every(60000, loadData), tZap = every(30000, loadZap), tTg = every(60000, loadTgws), tLed = every(300000, loadLed);
 every(3000, loadNet);
 setInterval(tickUpdated, 5000);
-document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); tZap(); tTg(); } });
+document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); tZap(); tTg(); tLed(); } });
 
 showTab();
 tLoad();
 tZap();
 tTg();
+tLed();
 tData();
 csrfToken().catch(() => {});

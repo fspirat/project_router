@@ -13,6 +13,5 @@ DEAD=1 node scripts/shots/shots.js m              # список «Не отве
 
 Файлы — в `scripts/shots/out/` (не коммитятся; папку можно сменить переменной `OUT`).
 
-Переменные: `THEME` (`dark`/`light`), `PFX` — приставка к именам файлов, `MC_FONT` — путь к `mc.ttf`
-(по умолчанию из соседнего `project_hex`), `CHROME` — путь к Chromium, если Playwright не находит свой.
+Переменные: `THEME` (`dark`/`light`), `PFX` — приставка к именам файлов, `CHROME` — путь к Chromium, если Playwright не находит свой.
 Нужен Node.js и пакет `playwright` (`npm i -g playwright`).

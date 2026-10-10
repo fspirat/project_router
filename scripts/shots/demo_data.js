@@ -10,13 +10,15 @@ const SUB = [['demo0001', '🇫🇮 Финляндия', 52, [61, 66, 58, 104]],
   ['demo0005', '🇫🇷 Франция', 63, [76, 81, 74, 88]], ['demo0006', '🇺🇸 США', 128, [140, 152, 147, 121]],
   ['demo0007', '🇹🇷 Турция', 0, [0, 0, 0, 0]]];
 const nodes = [{id: 'fspiratDE', name: '🇩🇪 Германия', ms: 38, own: true}, {id: 'fspiratNL', name: '🇳🇱 Нидерланды', ms: 45, own: true},
-  ...SUB.map(([id, name, ms]) => ({id, name, ms}))];
+  ...SUB.map(([id, name, ms], i) => ({id, name, ms, group: i < 5 ? 'Основная' : 'Резервная'}))];
 const svc = {direct: {...lst([0, 0, 0, 0]), base: 8}, fspiratDE: lst([42, 47, 44, 92]), fspiratNL: lst([49, 55, 51, 90])};
 SUB.forEach(([id,,, v]) => svc[id] = lst(v));
 const rh = []; for(let t = now - 86400; t <= now; t += 300) rh.push([t, (t % 14400 < 300) ? 0 : 150 + Math.round(18 * Math.sin(t / 9000) + 35 * rnd() * rnd())]);
 const status = {running: true, split_active: true, current: 'fspiratDE', ping: {updated: now - 95, socks: true, real: 171, nodes}, log: [], history: rh,
   targets: {...lst([45, 49, 46, 94]), ts: now - 95}, target_list: T.map((n, i) => `${K[i]}|${n}|${K[i] === 'mc' ? HOST[i] + ':25565' : 'https://' + HOST[i] + '/'}`),
   svc, svc_running: false, svc_direct: ['Telegram'],
+  subs: [{id: 'cfg0a1b2', name: 'Основная', host: 'sub.example.com', nodes: 7, ts: now - 3000, up: 3.1e9, down: 41.7e9, total: 0, expire: now + 23 * 86400 + 3600},
+         {id: 'cfg9z8y7', name: 'Резервная', host: 'vpn.example.net', nodes: 3, ts: now - 7200, up: 0.4e9, down: 61.5e9, total: 100e9, expire: now + 2 * 86400 + 600}],
   sub: {ts: now - 3000, up: 3.1e9, down: 41.7e9, total: 0, expire: now + 23 * 86400 + 3600, title: 'Демо-подписка'},
   speed: {vpn: {via: 'vpn', ts: now - 1800, down: 268e6, up: 91e6, latency: 47, ip: '203.0.113.24', country: 'DE', server: 'Тестовый сервер', streams: 4},
           direct: {via: 'direct', ts: now - 1750, down: 402e6, up: 287e6, latency: 6, ip: '198.51.100.7', country: 'RU', server: 'Тестовый сервер', streams: 4}},

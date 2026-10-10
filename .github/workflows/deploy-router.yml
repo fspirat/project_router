@@ -19,7 +19,8 @@ jobs:
 
       - name: Checks
         run: |
-          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/bin/fspirat-tgws router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret router/etc/init.d/fspirat-tgws; do sh -n "$f"; done
+          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/bin/fspirat-tgws router/bin/fspirat-led router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret router/etc/init.d/fspirat-tgws; do sh -n "$f"; done
+          if command -v luac >/dev/null; then luac -p router/bin/fspirat-subs; fi
 
       - name: SSH
         env:
@@ -39,6 +40,8 @@ jobs:
             tr -d '\r' < "$1" | ssh vps "$R 'cat > $2.new && chmod 755 $2.new && mv $2.new $2'"
             echo "  -> $2"
           }
+          # fspirat-subs — первым: CGI и fspirat-ping берут из него список подписок (без него панель видит только свои серверы)
+          push router/bin/fspirat-subs    /usr/bin/fspirat-subs
           push router/bin/fspirat-ping    /usr/bin/fspirat-ping
           push router/www/cgi-bin/fspirat /www/cgi-bin/fspirat
           push router/etc/init.d/fstunnel /etc/init.d/fstunnel
@@ -47,6 +50,7 @@ jobs:
           push router/bin/fspirat-svcping /usr/bin/fspirat-svcping
           push router/bin/fspirat-fw      /usr/bin/fspirat-fw
           push router/bin/fspirat-sub     /usr/bin/fspirat-sub
+          push router/bin/fspirat-led     /usr/bin/fspirat-led
           # zapret: скрипт, служба и списки; сам движок (nfqws) ставит workflow «Zapret install». Режим не включается.
           if ssh vps "$R '[ -d /usr/share/fspirat-tgws ]'"; then   # Telegram через tg-ws-proxy (если установлен)
             push router/bin/fspirat-tgws        /usr/bin/fspirat-tgws

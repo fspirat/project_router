@@ -1,0 +1,128 @@
+#!/usr/bin/lua
+-- FSPIRAT: подписки VPN (PassWall2, секции subscribe_list) для панели — CGI subs / subadd / subupdate / subdel.
+--   fspirat-subs list            JSON: [{id, name, host, hwid, nodes, ts, up, down, total, expire}]
+--   fspirat-subs groups          группы узлов для таблицы серверов: названия подписок и «fspirat» (свои серверы), по строке
+--   fspirat-subs add             из stdin по строке: название, ссылка, hwid (0|1) — не в аргументах: их видно в списке процессов
+--   fspirat-subs del <id>        удалить подписку и её серверы; если подключён сервер из неё — сначала переключить на лучший из остальных
+--   fspirat-subs check <id|all>  есть ли такая подписка (для обновления)
+-- Ссылка подписки — личный доступ: наружу (stdout, журнал) выходит только адрес её сервера без пути.
+-- Ошибка — код в stderr (sub url, sub name, sub exists, sub many, inner, bad sub) и выход 1; CGI отвечает 400 с этим кодом.
+local uci = require('uci').cursor()
+local CFG, OWN, DIR, MAX = 'passwall2', 'fspirat', '/tmp/fspirat', 8
+local SHUNT = os.getenv('SHUNT') or '9DxG2j8l'
+local SUBLUA = '/usr/share/passwall2/subscribe.lua'
+
+local function fail(code) io.stderr:write(code .. '\n'); os.exit(1) end
+local function jesc(s) return (tostring(s or ''):gsub('[%c"\\]', function(c) return c == '"' and '\\"' or c == '\\' and '\\\\' or '' end)) end
+local function low(s) return (s or ''):lower() end      -- как PassWall: группа узла сравнивается с названием подписки без учёта регистра (ASCII)
+local function trim(s) return ((s or ''):gsub('^%s+', ''):gsub('%s+$', '')) end
+local function q(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
+local function log(msg)
+  local f = io.open(DIR .. '/switch.log', 'a'); if f then f:write(os.date('%d.%m %H:%M') .. ' ' .. msg .. '\n'); f:close() end
+end
+
+local function subs()
+  local t = {}
+  uci:foreach(CFG, 'subscribe_list', function(s) t[#t + 1] = s end)
+  return t
+end
+local function by_id(id)
+  if not id or not id:match('^[%w_]+$') or uci:get(CFG, id) ~= 'subscribe_list' then return nil end
+  local s = uci:get_all(CFG, id); s['.name'] = id; return s
+end
+local function host_of(url) return (url or ''):match('^%a+://([%w%.%-]+)') or '' end
+
+-- Ссылка не должна вести внутрь: роутер, домашняя сеть, loopback (её скачивает сам роутер — это SSRF). Как settargets в CGI.
+local function inner(h)
+  h = h:lower()
+  if h == 'localhost' or h:match('%.localhost$') or h:match('%.local$') or h:match('%.lan$') or h:match('%.home%.arpa$')
+     or h:match('%.internal$') or not h:find('%.') then return true end
+  if h:match('^0x') or h:match('^[%d]+$') then return true end
+  local a, b, c, d = h:match('^(%d+)%.(%d+)%.(%d+)%.(%d+)$')
+  if not a then return h:match('^[%d.]+$') ~= nil end
+  a, b = tonumber(a), tonumber(b)
+  return a == 0 or a == 10 or a == 127 or a >= 224 or (a == 100 and b >= 64 and b <= 127) or (a == 169 and b == 254)
+      or (a == 172 and b >= 16 and b <= 31) or (a == 192 and b == 168) or (a == 198 and (b == 18 or b == 19))
+      or tonumber(c) > 255 or tonumber(d) > 255 or a > 255 or b > 255
+end
+
+local function node_count(remark)
+  local n = 0
+  uci:foreach(CFG, 'nodes', function(s) if s.group and low(s.group) == low(remark) then n = n + 1 end end)
+  return n
+end
+
+local cmd = arg[1]
+if cmd == 'groups' then
+  for _, s in ipairs(subs()) do if trim(s.remark) ~= '' then print(s.remark) end end
+  print(OWN)
+
+elseif cmd == 'list' then
+  local out = {}
+  for _, s in ipairs(subs()) do
+    -- цифры подписки (трафик, срок) — из заголовка subscription-userinfo, их раз в час собирает fspirat-sub
+    local f, info = io.open(DIR .. '/sub/' .. s['.name'] .. '.json'), ''
+    if f then local j = f:read('*a') or ''; f:close()
+      for _, k in ipairs({'ts', 'up', 'down', 'total', 'expire'}) do local v = j:match('"' .. k .. '":(%d+)'); if v then info = info .. ',"' .. k .. '":' .. v end end
+    end
+    out[#out + 1] = string.format('{"id":"%s","name":"%s","host":"%s","hwid":%s,"nodes":%d%s}', jesc(s['.name']), jesc(s.remark),
+      jesc(host_of(s.url)), s.hwid == '1' and 'true' or 'false', node_count(s.remark), info)
+  end
+  print('[' .. table.concat(out, ',') .. ']')
+
+elseif cmd == 'add' then
+  local name, url, hwid = trim(io.read('*l')), trim(io.read('*l')), trim(io.read('*l'))
+  -- название: 1–48 байт (≈24 русские буквы), без служебных символов — оно же группа узлов и аргумент subscribe.lua
+  if #name < 1 or #name > 48 or name:find('[%c"\'\\`$|;&<>{}%%]') or low(name) == OWN then fail('sub name') end
+  if #url > 500 or not url:match('^https://[%w%.%-]+:?%d*/[%w%-%._~:/%?#%[%]@!%$&\'%(%)%*%+,;=%%]*$') then fail('sub url') end
+  if inner(host_of(url)) then fail('inner') end
+  local all = subs()
+  if #all >= MAX then fail('sub many') end
+  for _, s in ipairs(all) do if low(s.remark) == low(name) or s.url == url then fail('sub exists') end end
+  -- настройки — как у первой подписки (тип ядра, фильтры, User-Agent), без её названия, ссылки и контрольной суммы
+  local id = uci:add(CFG, 'subscribe_list')
+  local base = all[1] or {user_agent = 'v2rayN/9.99', allowInsecure = '0', filter_keyword_mode = '5', boot_update = '0',
+    ss_type = 'global', trojan_type = 'global', vmess_type = 'global', vless_type = 'global', hysteria2_type = 'global'}
+  for k, v in pairs(base) do
+    if not k:match('^%.') and k ~= 'remark' and k ~= 'url' and k ~= 'md5' and k ~= 'hwid' then uci:set(CFG, id, k, v) end
+  end
+  uci:set(CFG, id, 'remark', name); uci:set(CFG, id, 'url', url); uci:set(CFG, id, 'hwid', hwid == '0' and '0' or '1')
+  uci:commit(CFG)
+  log('подписка добавлена: ' .. name)
+  print(string.format('{"ok":true,"id":"%s"}', jesc(id)))
+
+elseif cmd == 'check' then
+  if arg[2] ~= 'all' and not by_id(arg[2]) then fail('bad sub') end
+  print('ok')
+
+elseif cmd == 'del' then
+  local s = by_id(arg[2])
+  -- пустое название нельзя: «subscribe.lua truncate» без группы удаляет серверы ВСЕХ подписок
+  if not s or trim(s.remark) == '' or low(s.remark) == OWN then fail('bad sub') end
+  local remark, groups = s.remark, {}
+  for _, o in ipairs(subs()) do if o['.name'] ~= s['.name'] then groups[low(o.remark)] = true end end
+  groups[OWN] = true
+  -- подключён сервер из удаляемой подписки — сначала на лучший из оставшихся (по последнему пингу), иначе свой, иначе напрямую.
+  -- Сначала переключить, потом удалить: truncate обнуляет ссылки на удалённые узлы, и в Split остался бы пустой узел.
+  local cur, to = uci:get(CFG, SHUNT, 'default_node'), nil
+  if cur and low(uci:get(CFG, cur, 'group')) == low(remark) then
+    local f = io.open(DIR .. '/ping.json'); local j = f and f:read('*a') or ''; if f then f:close() end
+    local best = 0
+    for nid, ms in j:gmatch('"id":"([%w_]+)"[^}]-"ms":(%d+)') do
+      ms = tonumber(ms)
+      if ms > 0 and (best == 0 or ms < best) and groups[low(uci:get(CFG, nid, 'group'))] then best, to = ms, nid end
+    end
+    if not to then uci:foreach(CFG, 'nodes', function(n) if not to and low(n.group) == OWN then to = n['.name'] end end) end
+    to = to or '_direct'
+    uci:set(CFG, SHUNT, 'default_node', to)
+  end
+  uci:delete(CFG, s['.name'])
+  uci:commit(CFG)
+  os.execute('lua ' .. SUBLUA .. ' truncate ' .. q(remark) .. ' >/dev/null 2>&1')   -- серверы подписки (add_mode=2, group=название)
+  os.remove(DIR .. '/sub/' .. s['.name'] .. '.json')
+  log('подписка удалена: ' .. remark .. (to and (' — переключено на ' .. to) or ''))
+  print(string.format('{"ok":true,"switched":%s}', to and 'true' or 'false'))
+
+else
+  io.stderr:write('usage: fspirat-subs list|groups|add|del <id>|check <id|all>\n'); os.exit(2)
+end
