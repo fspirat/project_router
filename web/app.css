@@ -225,15 +225,16 @@ i.ok,b.ok{color:var(--acc-tx)} i.mid,b.mid{color:var(--warn)} i.slow,b.slow{colo
 .srv-tbl{width:100%;border-collapse:collapse;font-size:14px}
 .srv-tbl thead th{font-weight:500;font-size:11.5px;color:var(--dim);text-align:center;padding:4px 4px 10px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:bottom}
 .srv-tbl thead th:first-child{text-align:left;padding-left:8px}
-.srv-tbl thead .pi{display:block;margin:0 auto 3px;width:18px;height:14px}
-.srv-tbl thead .si{display:block;margin:0 auto 4px;width:14px;height:14px}
+.srv-tbl thead .pi{display:block;margin:0 auto;width:18px;height:14px}
+.srv-tbl thead .si{display:block;margin:0 auto;width:14px;height:14px}
 /* сортировка по столбцу: кнопка в заголовке */
-.sort{all:unset;box-sizing:border-box;display:inline-flex;flex-direction:column;align-items:center;cursor:pointer;padding:2px 4px;border-radius:6px}
-.srv-tbl thead th:first-child .sort{flex-direction:row;gap:6px}
+.sort{all:unset;box-sizing:border-box;position:relative;display:inline-flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:2px 4px 11px;border-radius:6px}
+.srv-tbl thead th:first-child .sort{flex-direction:row;gap:6px;padding:2px 16px 11px 4px}
 .sort:hover{color:var(--text)}
 .sort:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
-.sort::after{content:"";width:0;height:0;border:4px solid transparent;margin-top:3px;opacity:0}
-.srv-tbl thead th:first-child .sort::after{margin:3px 0 0}
+/* стрелка сортировки — поверх отступа, не меняет высоту заголовка: все подписи стоят на одной линии */
+.sort::after{content:"";position:absolute;left:50%;bottom:1px;margin-left:-4px;width:0;height:0;border:4px solid transparent;opacity:0}
+.srv-tbl thead th:first-child .sort::after{left:auto;right:3px;bottom:auto;top:9px;margin:0}
 th[aria-sort] .sort{color:var(--text)}
 th[aria-sort="ascending"] .sort::after{opacity:1;border-bottom-color:var(--acc);border-top-width:0}
 th[aria-sort="descending"] .sort::after{opacity:1;border-top-color:var(--acc);border-bottom-width:0}
