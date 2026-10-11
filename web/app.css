@@ -250,6 +250,7 @@ th[aria-sort="descending"] .sort::after{opacity:1;border-top-color:var(--acc);bo
 .srv-tbl td.na{color:var(--faint)}
 .srv-tbl td.blk{color:var(--faint);font-size:11.5px}
 .srv-tbl tr.cur{background:var(--sel);cursor:default}
+.srv-tbl tr.off th,.srv-tbl tr.off td{opacity:.5}   /* свой сервер не отвечает — остаётся в таблице, приглушён */
 .srv-tbl tr.cur:hover{background:var(--sel)}
 .srv-tbl tr.cur th{box-shadow:inset 3px 0 0 var(--acc);font-weight:600}
 .srv-tbl td.act{text-align:right;padding-right:10px;font-size:12px;width:1%}

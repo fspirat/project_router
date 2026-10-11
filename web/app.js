@@ -223,7 +223,7 @@ function tickUpdated(){
 /* ---------- серверы: таблица (строка — сервер, столбцы — пинг и сервисы; лучшее в столбце обведено) ---------- */
 function renderServers(s){
   const nodes = (s.ping && s.ping.nodes) || [];
-  const alive = nodes.filter(n => n.ms > 0).sort((a, b) => a.ms - b.ms), dead = nodes.filter(n => !n.ms);
+  const alive = nodes.filter(n => n.ms > 0).sort((a, b) => a.ms - b.ms), dead = nodes.filter(n => !n.ms && !n.own);   // свои серверы — всегда в таблице
   const sv = services();
   const cell = (v, best, web) => v == null ? '<td class="na" title="ещё не мерили">·</td>' : v ? `<td class="${msCls(v)}${best ? ' best' : ''}"><b>${v}</b></td>`
     : web ? '<td class="blk" title="Без VPN этот сайт в России не открывается">блок</td>' : '<td class="slow"><b>—</b></td>';
@@ -240,8 +240,8 @@ function renderServers(s){
     return bad(x) ? a.ms - b.ms : (x - y) * srvSort.dir || a.ms - b.ms; };
   const sortTh = (k, inner, title) => `<th${srvSort.k === k ? ` aria-sort="${srvSort.dir > 0 ? 'ascending' : 'descending'}"` : ''} title="${esc(title)}"><button class="sort" type="button" data-sort="${esc(k)}" aria-label="Сортировать: ${esc(title)}">${inner}</button></th>`;
   const head = `<tr>${sortTh('name', '<span>Сервер</span>', 'Сервер')}${sortTh('ping', `${ic('activity', 'si')}<span>Пинг</span>`, 'Пинг до самого сервера')}${sv.map(x => sortTh('svc:' + x.name, `${svcIcon(x)}<span>${esc(x.name)}</span>`, `${x.name} · ${x.host || ''}`)).join('')}<th class="act"></th></tr>`;
-  const row = n => { const r = svcOf(n.id), cur = n.id === s.current;
-    return `<tr class="${cur ? 'cur' : ''}" data-node="${esc(n.id)}" ${cur ? '' : 'tabindex="0"'} title="${cur ? 'Подключён сейчас' : 'Нажми, чтобы подключить'}">
+  const row = n => { const off = !(n.ms > 0), r = off ? null : svcOf(n.id), cur = n.id === s.current;   // не отвечает — старые замеры сервисов не показываем
+    return `<tr class="${cur ? 'cur' : ''}${off ? ' off' : ''}" data-node="${esc(n.id)}" ${cur ? '' : 'tabindex="0"'} title="${off ? 'Сервер не отвечает на пинг — проверь, работает ли он' : cur ? 'Подключён сейчас' : 'Нажми, чтобы подключить'}">
       <th scope="row">${esc(n.name.trim())}${n.own ? ' <span class="tag own">свой</span>' : ''}</th>${pcell(n.ms, n.ms === best.ping)}${sv.map(x => cell(r ? svcVal(r, x.name) : null, r && svcVal(r, x.name) === best[x.name] && best[x.name] > 0)).join('')}
       <td class="act">${cur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>`; };
   const dir = s.svc && s.svc.direct;
@@ -249,7 +249,7 @@ function renderServers(s){
   const drow = dir || dcur ? `<tr class="direct${dcur ? ' cur' : ''}" data-node="direct" ${dcur ? '' : 'tabindex="0"'} title="${dcur ? 'Подключено: весь трафик без VPN' : 'Без VPN: так открываются сайты из списка MyDirect. Нажми, чтобы пустить весь трафик напрямую. Пинг — до ya.ru'}">
       <th scope="row">🇷🇺 Напрямую <span class="tag">без VPN</span></th>${pcell(num(dir && dir.base))}${sv.map(x => cell(dir ? svcVal(dcur && state.targets ? state.targets : dir, x.name) : null, false, x.kind === 'web' && !dcur)).join('')}<td class="act">${dcur ? '<span class="now">сейчас</span>' : '<span class="go">подключить</span>'}</td></tr>` : '';
   // разделы: свои серверы (ярлык fspirat в PassWall), затем каждая подписка отдельно (группа узла = название подписки)
-  const own = alive.filter(n => n.own).sort(cmp), sub = alive.filter(n => !n.own);
+  const own = nodes.filter(n => n.own).sort(cmp), sub = alive.filter(n => !n.own);
   const grp = t => `<tr class="grp"><th colspan="${sv.length + 3}">${esc(t)}</th></tr>`;
   const groups = [...new Set(sub.map(n => n.group || ''))];
   const subHtml = groups.map(g => { const a = sub.filter(n => (n.group || '') === g).sort(cmp);

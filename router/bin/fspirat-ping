@@ -105,12 +105,13 @@ if [ $FAILS -ge $FAILS_TO_SWITCH ]; then
     [ "$ms" -lt "$BEST_MS" ] && { BEST=$id; BEST_MS=$ms; }
   done
   if [ -n "$BEST" ]; then
+    # запись в журнал — до смены: сервер (fspirat-watch) по ней понимает, что смена автоматическая, а не ручная
+    echo "$(date '+%d.%m %H:%M') авто $CUR -> $BEST ${BEST_MS}ms" >> $DIR/switch.log
+    logger -t fspirat "switch $CUR -> $BEST (${BEST_MS} ms)"
     uci set passwall2.$SHUNT.default_node=$BEST
     uci commit passwall2
     /etc/init.d/passwall2 restart >/dev/null 2>&1
     echo 0 > $DIR/fails
-    logger -t fspirat "switch $CUR -> $BEST (${BEST_MS} ms)"
-    echo "$(date '+%d.%m %H:%M') авто $CUR -> $BEST ${BEST_MS}ms" >> $DIR/switch.log
   fi
 fi
 

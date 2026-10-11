@@ -229,7 +229,8 @@ prev=$(get current)
 if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then
   last=$(jq -r '.log[-1] // ""' <<<"$J")
   how="автоматически, текущий перестал отвечать"
-  [[ $last == *вручную* ]] && how="вручную"
+  # «вручную» — только если последняя запись журнала роутера именно о ручном выборе этого сервера
+  [[ $last == *вручную* && $last == *"-> $cur"* ]] && how="вручную"
   send "🔁 VPN-сервер сменён ($how): $(get current_name) → $name"
 fi
 put current "$cur"; put current_name "$name"
