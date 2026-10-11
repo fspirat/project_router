@@ -219,6 +219,7 @@ function fsr_next(string $next): string
 {
     if (preg_match('~^/router/[A-Za-z0-9/._?=&%-]*$~', $next) && !str_starts_with($next, '/router/login')) return $next;
     if (preg_match('~^https://router\.fspirat\.online/[A-Za-z0-9/._?=&%;:+-]*$~', $next)) return $next;
+    if (preg_match('~^/vds/[A-Za-z0-9/._?=&%-]*$~', $next)) return $next;   // панель домашнего сервера (MacBook)
     return '/router/';
 }
 
