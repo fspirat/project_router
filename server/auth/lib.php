@@ -150,7 +150,10 @@ function fsr_session_start(bool $remember): void
     $tok = bin2hex(random_bytes(32));
     $ttl = $remember ? FSR_TTL_LONG : FSR_TTL_SHORT;
     $db = fsr_db();
-    $db->prepare('DELETE FROM sessions WHERE seen + ttl < ?')->execute([time()]);
+    // время — числом: строковый параметр SQLite считает «больше любого числа», и удалялись ВСЕ сессии (вход выкидывал другие устройства)
+    $st = $db->prepare('DELETE FROM sessions WHERE seen + ttl < ?');
+    $st->bindValue(1, time(), PDO::PARAM_INT);
+    $st->execute();
     $db->prepare('INSERT INTO sessions(hash, created, seen, ttl, ip, ua) VALUES(?,?,?,?,?,?)')
        ->execute([hash('sha256', $tok), time(), time(), $ttl, fsr_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 200)]);
     fsr_cookie($tok, $remember ? time() + $ttl : 0);
