@@ -383,7 +383,7 @@ function when(ts){
   if(d.toDateString() === t.toDateString()) return 'вчера ' + hm;
   return two(d.getDate()) + '.' + two(d.getMonth() + 1) + ' ' + hm;
 }
-const LEVEL = {offline: 'err', vpn_down: 'err', auto: 'warn', reboot: 'warn', newdev: 'warn', online: 'ok', vpn_up: 'ok'};
+const LEVEL = {offline: 'err', vpn_down: 'err', auto: 'warn', xraymem: 'warn', reboot: 'warn', newdev: 'warn', online: 'ok', vpn_up: 'ok'};
 const LEVEL_TXT = {err: 'Ошибка', warn: 'Внимание', ok: 'Успех', info: 'Действие'};
 function events(){
   if(hist && hist.events && hist.events.length) return hist.events.map(e => ({ts: e[0], kind: e[1], text: String(e[2]).replace(/\b_direct\b/g, DIRECT_NAME)}));

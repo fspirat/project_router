@@ -20,6 +20,10 @@ for id in $(sed 's/},{/}\n{/g' $DIR/ping.json 2>/dev/null | grep -o '"id":"[A-Za
     cp $DIR/targets.json $SVC/$id.json 2>/dev/null
     continue
   fi
+  # второй Xray (~30 МБ) — только если свободно не меньше 70 МБ: иначе вместе с основным он доводит роутер до нехватки
+  # памяти, и система завершает основной Xray (VPN). Пропущенные серверы перемеряются через 30 минут.
+  avail=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
+  if [ "${avail:-0}" -lt 70 ]; then logger -t fspirat-svcping "мало памяти (${avail} МБ свободно) — замер через другие серверы пропущен"; break; fi
   lua /usr/lib/lua/luci/passwall2/util_xray.lua gen_config \
     "{\"node\":\"$id\",\"flag\":\"fsx\",\"local_socks_address\":\"127.0.0.1\",\"local_socks_port\":\"$P\",\"loglevel\":\"none\"}" > $DIR/svc-xray.json 2>/dev/null || continue
   /usr/bin/xray run -c $DIR/svc-xray.json >/dev/null 2>&1 & X=$!

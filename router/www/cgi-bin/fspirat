@@ -96,6 +96,7 @@ devices_json() {
 }
 
 sys_json() {
+  xr=0; for xp in $(pidof xray); do v=$(sed -n 's/^VmRSS:[^0-9]*\([0-9]*\).*/\1/p' /proc/$xp/status 2>/dev/null); [ "${v:-0}" -gt $xr ] && xr=$v; done   # основной Xray — самый крупный
   dev=$(wan_dev)
   set -- $(cpu_sample); t1=$1; i1=$2
   set -- $(net_sample $dev); r1=${1:-0}; x1=${2:-0}
@@ -114,7 +115,7 @@ sys_json() {
   up=$(cut -d. -f1 /proc/uptime)
   model=$(cat /tmp/sysinfo/model 2>/dev/null | jesc)
   fw=$(. /etc/openwrt_release; echo "$DISTRIB_DESCRIPTION" | jesc)
-  echo "{\"cpu\":$cpu,\"cores\":$cores,\"load\":\"$load\",\"mem_total\":$mt,\"mem_avail\":$ma,\"disk_total\":$dtot,\"disk_used\":$dused,\"tmp_total\":$ttot,\"tmp_used\":$tused,\"temp\":$temp,\"uptime\":$up,\"model\":\"$model\",\"fw\":\"$fw\",\"net\":$(net_json "$dev" $r1 $x1 $r2 $x2)}"
+  echo "{\"cpu\":$cpu,\"cores\":$cores,\"load\":\"$load\",\"mem_total\":$mt,\"mem_avail\":$ma,\"disk_total\":$dtot,\"disk_used\":$dused,\"tmp_total\":$ttot,\"tmp_used\":$tused,\"temp\":$temp,\"uptime\":$up,\"model\":\"$model\",\"fw\":\"$fw\",\"xray_rss\":$xr,\"net\":$(net_json "$dev" $r1 $x1 $r2 $x2)}"
 }
 
 SOCKS=127.0.0.1:1070

@@ -235,6 +235,14 @@ if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then
 fi
 put current "$cur"; put current_name "$name"
 
+# Память роутера: основной Xray обычно 30–40 МБ; больше 80 МБ — разросся (так было перед нехваткой памяти 11.10).
+# Только уведомление, VPN не трогаем. Снова сообщить — после того как опустится ниже 60 МБ.
+xr=$(jq -r '.sys.xray_rss // 0' <<<"$J"); ma=$(jq -r '.sys.mem_avail // 0' <<<"$J")
+if [ "$xr" -ge 81920 ] 2>/dev/null && [ "$(get xraymem)" != 1 ]; then
+  send "🧠 Xray на роутере занимает $((xr / 1024)) МБ памяти (обычно 30–40). Свободно $((ma / 1024)) МБ. Если память кончится, система завершит Xray и VPN переподключится — помогает «Перезапустить VPN» в панели."
+  event "$NOW" xraymem "Xray занимает $((xr / 1024)) МБ памяти"; put xraymem 1
+elif [ "$xr" -gt 0 ] && [ "$xr" -lt 61440 ] 2>/dev/null; then put xraymem 0; fi
+
 # Флеш-память
 pct=$(jq -r '.sys | if .disk_total > 0 then (.disk_used * 100 / .disk_total | floor) else 0 end' <<<"$J")
 if [ "$pct" -ge 90 ] && [ "$(get flash)" != 1 ]; then
