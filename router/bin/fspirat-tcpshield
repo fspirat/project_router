@@ -3,7 +3,7 @@
 # Скачивает https://tcpshield.com/v4 (напрямую, при неудаче — через VPN), проверяет и обновляет живой набор
 # и строку elements в /etc/nftables.d/20-fspirat-mc.nft (чтобы список пережил перезагрузку).
 # Любая ошибка — список не меняется (не открываем всем). Запуск: cron раз в сутки.
-URL=https://tcpshield.com/v4
+URL=https://tcpshield.com/v4/   # без / сайт отвечает 301
 F=/etc/nftables.d/20-fspirat-mc.nft
 SET=fspirat_mc_tcpshield
 T=/tmp/fspirat-tcpshield.$$
@@ -11,7 +11,7 @@ trap 'rm -f $T $T.n' EXIT INT TERM
 log() { logger -t fspirat-tcpshield "$*"; echo "$*"; }
 
 [ -f $F ] || { log "нет $F — нечего обновлять"; exit 1; }
-curl -fsS -m 20 "$URL" -o $T 2>/dev/null || curl -fsS -m 30 -x socks5h://127.0.0.1:1070 "$URL" -o $T 2>/dev/null \
+curl -fsSL -m 20 "$URL" -o $T 2>/dev/null || curl -fsSL -m 30 -x socks5h://127.0.0.1:1070 "$URL" -o $T 2>/dev/null \
   || { log "ошибка загрузки — список не изменён"; exit 1; }
 tr -d '\r' < $T | awk 'NF{print $1}' | sort -u > $T.n
 n=$(grep -c . $T.n)
