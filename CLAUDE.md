@@ -62,7 +62,16 @@
 - Cookie `fsr_session` не уходит на роутер (LuCI): map в `server/nginx/conf.d/fsr-luci-cookie.conf`.
 - Пользователь `tunnel` — оболочка `/usr/sbin/nologin` (только проброс портов).
 - Ключ `deploy` — только rrsync в /var/www/fspirat.online (workflow `Restrict deploy key`); пути в rsync — от этой папки.
-- Telegram-прокси mtg: `server/mtproxy/` (workflow `MTProxy setup`), 443 делит nginx stream по SNI.
+- Telegram-прокси mtg **выключен 12.10.2026** (владельцу не нужен): `server/mtproxy/remove.sh`, конфиг с секретом оставлен,
+  вернуть — `remove.sh --rollback <копии>`. 443 делит nginx stream по SNI (`nl.*` → xray, остальное → сайты).
+
+## Переезд на fspirat.xyz (12.10.2026, идёт)
+
+Новые имена работают параллельно со старыми (`*.fspirat.online` продлеваются), переключение — после проверки владельцем.
+- Панель: `fspirat.xyz/router/` и `router.fspirat.xyz` (`server/domain/panel-new-domain.sh`); вход на каждом домене свой —
+  `PANEL_ALIASES` в `/etc/fspirat-router/deploy.conf` → `site.json panels` → `fsr_panel()` в `server/auth/lib.php`.
+- VPN: `server/domain/vpn-new-name.sh prep|xray НОВОЕ СТАРОЕ` — сертификат и обложка (prep), имя в Reality serverNames (xray).
+- Дальше: PANEL_DOMAIN/LUCI_DOMAIN → xyz (бот, ссылки fspirat-watch, webhook), 301 со старых адресов.
 
 ## Доступ к роутеру с сервера
 
