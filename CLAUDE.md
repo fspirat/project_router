@@ -1,7 +1,7 @@
 # CLAUDE.md — контекст проекта fspirat-router
 
 Ты работаешь с проектом домашнего VPN-роутера пользователя и веб-панели к нему
-на https://fspirat.online/router/. Общайся с пользователем **по-русски**, объясняй
+на https://fspirat.xyz/router/. Общайся с пользователем **по-русски**, объясняй
 простыми словами, давай команды по одной-две за раз. Пользователь на Windows (PowerShell),
 подключается к машинам по SSH.
 
@@ -19,9 +19,9 @@
 Сервер NL Aeza 203.0.113.10 (Ubuntu 24.04)
    127.0.0.1:8081 ─► LuCI роутера (через туннель)
    nginx:
-     router.fspirat.online  → весь LuCI (вход через страницу fspirat.online/router/login + пароль роутера)
-     fspirat.online/router/ → страница web/index.html (вход через свою страницу, см. ниже)
-     fspirat.online/router/api → CGI /cgi-bin/fspirat на роутере (nginx добавляет токен cookie)
+     router.fspirat.xyz  → весь LuCI (вход через страницу fspirat.xyz/router/login + пароль роутера)
+     fspirat.xyz/router/ → страница web/index.html (вход через свою страницу, см. ниже)
+     fspirat.xyz/router/api → CGI /cgi-bin/fspirat на роутере (nginx добавляет токен cookie)
    cron: fspirat-watch раз в минуту → уведомления в Telegram (@FSRouter_bot)
    fail2ban: sshd, nginx-http-auth, 3x-ipl
 ```
@@ -30,7 +30,7 @@
 
 | В репозитории | Где на самом деле | Как выкладывать |
 |---|---|---|
-| `web/index.html` | сервер `/var/www/fspirat.online/router/index.html` | push в main → GitHub Actions (`deploy-web.yml`) |
+| `web/index.html` | сервер `/var/www/fspirat.xyz/router/index.html` | push в main → GitHub Actions (`deploy-web.yml`) |
 | `router/bin/fspirat-ping` | роутер `/usr/bin/fspirat-ping` (cron */5) | workflow `Deploy router` (или `bash scripts/deploy-router.sh` из дома) |
 | `router/www/cgi-bin/fspirat` | роутер `/www/cgi-bin/fspirat` | workflow `Deploy router` |
 | `router/etc/init.d/fstunnel` | роутер `/etc/init.d/fstunnel` | workflow `Deploy router` (перезапуск туннеля — только с разрешения) |
@@ -65,13 +65,13 @@
 - Telegram-прокси mtg **выключен 12.10.2026** (владельцу не нужен): `server/mtproxy/remove.sh`, конфиг с секретом оставлен,
   вернуть — `remove.sh --rollback <копии>`. 443 делит nginx stream по SNI (`nl.*` → xray, остальное → сайты).
 
-## Переезд на fspirat.xyz (12.10.2026, идёт)
+## Домен: fspirat.xyz (переезд 12.10.2026 завершён)
 
-Новые имена работают параллельно со старыми (`*.fspirat.online` продлеваются), переключение — после проверки владельцем.
-- Панель: `fspirat.xyz/router/` и `router.fspirat.xyz` (`server/domain/panel-new-domain.sh`); вход на каждом домене свой —
-  `PANEL_ALIASES` в `/etc/fspirat-router/deploy.conf` → `site.json panels` → `fsr_panel()` в `server/auth/lib.php`.
-- VPN: `server/domain/vpn-new-name.sh prep|xray НОВОЕ СТАРОЕ` — сертификат и обложка (prep), имя в Reality serverNames (xray).
-- Дальше: PANEL_DOMAIN/LUCI_DOMAIN → xyz (бот, ссылки fspirat-watch, webhook), 301 со старых адресов.
+Всё работает только на `fspirat.xyz`; `*.fspirat.online` выключены по решению владельца (главная страница fspirat.online —
+зона сессии homeserver). Панель `fspirat.xyz/router/`, LuCI `router.fspirat.xyz`, VPN-имена `nl.fspirat.xyz` / `de.fspirat.xyz`
+(узлы PassWall `fspiratNL` / `fspiratDE` — tls_serverName на .xyz). Скрипты и откаты — `server/domain/`:
+`panel-new-domain.sh`, `vpn-new-name.sh`, `old-domain-off.sh` (копии в `/root/fspirat-backups/` на NL и DE).
+Несколько доменов панели сразу — `PANEL_ALIASES` в `/etc/fspirat-router/deploy.conf` (`fsr_panel()` в `server/auth/lib.php`).
 
 ## Доступ к роутеру с сервера
 
@@ -90,9 +90,9 @@ fspirat-watch раз в минуту пишет в `/var/lib/fspirat/`: `history
 
 ## Вход в панель (server/auth)
 
-Вместо окна браузера (auth_basic) — своя страница `fspirat.online/router/login` (PHP в `/var/www/router-auth/`).
+Вместо окна браузера (auth_basic) — своя страница `fspirat.xyz/router/login` (PHP в `/var/www/router-auth/`).
 nginx перед каждым запросом спрашивает `check.php` (`auth_request /_fsr_auth`); cookie `fsr_session` на домен
-`fspirat.online` — один вход и для `/router/`, и для `router.fspirat.online`.
+`fspirat.xyz` — один вход и для `/router/`, и для `router.fspirat.xyz`.
 - Пароль: пока нет `/var/lib/fspirat-router-auth/password`, проверяется по `/etc/nginx/.htpasswd_router` (apr1),
   после первого входа сохраняется там же в bcrypt. Сменить пароль: удалить этот файл и обновить .htpasswd_router
   (`htpasswd /etc/nginx/.htpasswd_router bob`).
@@ -155,7 +155,7 @@ nginx перед каждым запросом спрашивает `check.php` 
 
 - **uhttpd не передаёт в CGI свои заголовки** (X-Fspirat-Token терялся) → токен идёт cookie.
 - **procd-служба без `HOME=/root`** → dbclient падал молча (known_hosts). Поэтому `env HOME=/root`.
-- **Домен fspirat.online обслуживает Cloudflare DNS**, а не Reg.ru. Записи DNS — в Cloudflare
+- **Домены fspirat.online и fspirat.xyz обслуживает Cloudflare DNS** (регистраторы Reg.ru и Sav.com). Записи DNS — в Cloudflare
   (для certbot — «DNS only», серое облако).
 - **Speedtest Cloudflare**: `/meta` отдаёт `{}` → IP/страну берём из `/cdn-cgi/trace`;
   файлы >~100 МБ не отдаются → качаем кусками по 25 МБ.
