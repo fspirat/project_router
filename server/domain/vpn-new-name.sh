@@ -67,11 +67,12 @@ fi
 
 [ "$MODE" = xray ] || { echo "режим: prep или xray"; exit 1; }
 [ -f /etc/letsencrypt/live/$NEW/fullchain.pem ] || { echo "❌ сначала prep (нет сертификата $NEW)"; exit 1; }
+XN=${X%.json}.new.json
 cp $X "$B/config.json"; [ -f $S ] && cp $S "$B/"
 jq -e --arg o "$OLD" 'any(.inbounds[]; (.streamSettings.realitySettings.serverNames // []) | index($o))' $X >/dev/null || { echo "❌ в xray нет inbound с $OLD"; exit 1; }
-( umask 077; jq --arg o "$OLD" --arg n "$NEW" '(.inbounds[] | select((.streamSettings.realitySettings.serverNames // []) | index($o)) | .streamSettings.realitySettings.serverNames) |= (. + [$n] | unique)' $X > $X.new )
-/usr/local/bin/xray run -test -config $X.new >/dev/null || { rm -f $X.new; echo "❌ xray -test не прошёл — ничего не меняю"; exit 1; }
-cat $X.new > $X; rm -f $X.new
+( umask 077; jq --arg o "$OLD" --arg n "$NEW" '(.inbounds[] | select((.streamSettings.realitySettings.serverNames // []) | index($o)) | .streamSettings.realitySettings.serverNames) |= (. + [$n] | unique)' $X > $XN )
+/usr/local/bin/xray run -test -config $XN >/tmp/xt 2>&1 || { rm -f $XN; grep -iE "fail|error|invalid" /tmp/xt | tail -3 | cut -c1-200; echo "❌ xray -test не прошёл — ничего не меняю"; exit 1; }
+cat $XN > $X; rm -f $XN
 systemctl restart xray; sleep 2; systemctl is-active --quiet xray || { journalctl -u xray -n 5 --no-pager | cut -c1-200; restore "xray не запустился"; }
 echo "xray: $(systemctl is-active xray), имена: $(jq -c '[.inbounds[].streamSettings.realitySettings.serverNames // empty] | add' $X)"
 if [ -f $S ] && ! grep -qE "^\s*${NEW//./\\.}\s" $S; then
