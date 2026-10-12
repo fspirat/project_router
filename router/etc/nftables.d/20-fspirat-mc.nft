@@ -1,0 +1,14 @@
+# /etc/nftables.d/20-fspirat-mc.nft — входит в таблицу inet fw4 (переживает перезагрузку и fw4 reload).
+# Сервер Minecraft на MacBook (192.168.7.108): проброс WAN TCP 25565 делает uci-правило firewall «MC-MacBook».
+# Здесь — защита от флуда: не больше 20 новых соединений в минуту с одного адреса (запас 10), остальное — drop.
+set fspirat_mc_flood {
+	type ipv4_addr
+	size 4096
+	flags dynamic, timeout
+	timeout 2m
+}
+
+chain fspirat_mc_limit {
+	type filter hook forward priority filter - 1; policy accept;
+	iifname "wan" ip daddr 192.168.7.108 tcp dport 25565 ct state new add @fspirat_mc_flood { ip saddr limit rate over 20/minute burst 10 packets } counter drop comment "fspirat: MC flood"
+}
