@@ -23,7 +23,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['csrf'])) out
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-    if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org')) out(['error' => 'origin'], 403);
+    if ($origin !== fsr_origin()) out(['error' => 'origin'], 403);
     $mac = strtolower(trim((string)($_POST['mac'] ?? '')));
     if (!preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $mac)) out(['error' => 'bad mac'], 400);
     $name = trim(preg_replace('/[\x00-\x1f\x7f]/u', '', (string)($_POST['name'] ?? '')) ?? '');

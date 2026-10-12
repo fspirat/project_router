@@ -32,7 +32,8 @@ function fsr_dir(): string { return rtrim(getenv('FSR_DIR') ?: FSR_DIR, '/'); }
 // Открытые настройки установки (пишет Deploy server из deploy.conf): ссылка LuCI, имя бота, свой Telegram-прокси
 function fsr_site(): array {
     $j = json_decode((string)@file_get_contents(fsr_dir() . '/site.json'), true);
-    return ['luci' => (string)($j['luci'] ?? ''), 'bot' => (string)($j['bot'] ?? ''), 'mtg' => (string)($j['mtg'] ?? '')];
+    $panels = array_values(array_filter((array)($j['panels'] ?? []), fn($d) => is_string($d) && preg_match('~^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$~', $d)));
+    return ['luci' => (string)($j['luci'] ?? ''), 'bot' => (string)($j['bot'] ?? ''), 'mtg' => (string)($j['mtg'] ?? ''), 'panels' => $panels];
 }
 
 function fsr_db(): PDO
@@ -53,8 +54,23 @@ function fsr_db(): PDO
     return $db;
 }
 
+/**
+ * Домен панели этого запроса. Обычно один (PANEL_DOMAIN), но при переезде на новый домен панель работает на обоих
+ * (site.json «panels» — PANEL_DOMAIN и PANEL_ALIASES из deploy.conf): на каждом свой вход, cookie — на свой домен.
+ * Поддомены (LuCI: router.<домен>) относятся к своему домену. Чужой Host — основной домен.
+ */
+function fsr_panel(): string
+{
+    $host = strtolower((string)preg_replace('~:\d+$~', '', (string)($_SERVER['HTTP_HOST'] ?? '')));
+    foreach (fsr_site()['panels'] as $d) {
+        if ($host === $d || str_ends_with($host, '.' . $d)) return $d;
+    }
+    return FSR_COOKIE_DOMAIN;
+}
 /** Домен cookie (для локальных тестов — FSR_COOKIE_DOMAIN="" — без домена). */
-function fsr_cookie_domain(): string { $d = getenv('FSR_COOKIE_DOMAIN'); return $d === false ? FSR_COOKIE_DOMAIN : $d; }
+function fsr_cookie_domain(): string { $d = getenv('FSR_COOKIE_DOMAIN'); return $d === false ? fsr_panel() : $d; }
+/** Origin страницы панели — с ним приходят действия (POST); для тестов — FSR_ORIGIN. */
+function fsr_origin(): string { return getenv('FSR_ORIGIN') ?: 'https://' . fsr_panel(); }
 
 function fsr_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? ''; }
 
@@ -221,7 +237,8 @@ function fsr_audit(string $action, string $detail = ''): void
 function fsr_next(string $next): string
 {
     if (preg_match('~^/router/[A-Za-z0-9/._?=&%-]*$~', $next) && !str_starts_with($next, '/router/login')) return $next;
-    if (preg_match('~^https://router\.fspirat\.online/[A-Za-z0-9/._?=&%;:+-]*$~', $next)) return $next;
+    // LuCI и другие поддомены того же домена панели (router.<домен>) — cookie входа общая
+    if (preg_match('~^https://([a-z0-9.-]+)/[A-Za-z0-9/._?=&%;:+-]*$~', $next, $m) && str_ends_with($m[1], '.' . fsr_panel())) return $next;
     if (preg_match('~^/vds/[A-Za-z0-9/._?=&%-]*$~', $next)) return $next;   // панель домашнего сервера (MacBook)
     return '/router/';
 }

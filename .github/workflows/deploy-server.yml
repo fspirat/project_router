@@ -58,7 +58,7 @@ jobs:
             . $D/deploy.conf
             # открытые настройки для панели и бота; без своего Telegram-прокси — без команды /tgproxy
             install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
-            jq -n --arg l "https://$LUCI_DOMAIN/" --arg b "$TG_BOT" --arg m "${MTG_DOMAIN:-}" "{luci: \$l, bot: \$b, mtg: \$m}" > /var/lib/fspirat-router-auth/site.json.tmp
+            jq -n --arg l "https://$LUCI_DOMAIN/" --arg b "$TG_BOT" --arg m "${MTG_DOMAIN:-}" --arg p "$PANEL_DOMAIN ${PANEL_ALIASES:-}" "{luci: \$l, bot: \$b, mtg: \$m, panels: (\$p | split(\" \") | map(select(length > 0)))}" > /var/lib/fspirat-router-auth/site.json.tmp
             install -m 644 -o www-data -g www-data /var/lib/fspirat-router-auth/site.json.tmp /var/lib/fspirat-router-auth/site.json && rm -f /var/lib/fspirat-router-auth/site.json.tmp
             if [ -n "${MTG_DOMAIN:-}" ]; then install -m 644 $D/auth/tgbot-commands.json /var/www/router-auth/
             else jq "{commands: [.commands[] | select(.command != \"tgproxy\")]}" $D/auth/tgbot-commands.json > /var/www/router-auth/tgbot-commands.json; chmod 644 /var/www/router-auth/tgbot-commands.json; fi

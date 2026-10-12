@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 [ -n "$DEPLOY_LOCAL" ] && [ -s "$DEPLOY_LOCAL" ] && . "$DEPLOY_LOCAL"
 ok() { printf '%s' "$2" | grep -qE "$1" || { echo "deploy.conf: неверное значение «$2»" >&2; exit 1; }; }
 D='^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'
-ok "$D" "$PANEL_DOMAIN"; ok "$D" "$LUCI_DOMAIN"; ok '^[A-Za-z0-9_]{3,40}$' "$TG_BOT"
+ok "$D" "$PANEL_DOMAIN"; ok "$D" "$LUCI_DOMAIN"; for a in ${PANEL_ALIASES:-}; do ok "$D" "$a"; done; ok '^[A-Za-z0-9_]{3,40}$' "$TG_BOT"
 e() { printf '%s' "$1" | sed 's/[.]/\\./g'; }
 files=$(for p in "$@"; do if [ -d "$p" ]; then find "$p" -type f \( -name '*.html' -o -name '*.js' -o -name '*.php' -o -name '*.py' -o -name '*.json' -o -name '*.conf' -o -name 'fspirat-*' \); else echo "$p"; fi; done)
 [ -n "$files" ] || exit 0
