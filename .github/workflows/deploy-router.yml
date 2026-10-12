@@ -19,7 +19,7 @@ jobs:
 
       - name: Checks
         run: |
-          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/bin/fspirat-tgws router/bin/fspirat-led router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret router/etc/init.d/fspirat-tgws; do sh -n "$f"; done
+          for f in router/bin/fspirat-ping router/bin/fspirat-targets router/bin/fspirat-svcping router/bin/fspirat-fw router/bin/fspirat-sub router/bin/fspirat-zapret router/bin/fspirat-tgws router/bin/fspirat-led router/bin/fspirat-tcpshield router/www/cgi-bin/fspirat router/etc/init.d/fstunnel router/etc/init.d/fspirat-zapret router/etc/init.d/fspirat-tgws; do sh -n "$f"; done
           if command -v luac >/dev/null; then luac -p router/bin/fspirat-subs; fi
 
       - name: SSH
@@ -69,6 +69,7 @@ jobs:
           push router/bin/fspirat-fw      /usr/bin/fspirat-fw
           push router/bin/fspirat-sub     /usr/bin/fspirat-sub
           push router/bin/fspirat-led     /usr/bin/fspirat-led
+          push router/bin/fspirat-tcpshield /usr/bin/fspirat-tcpshield
           # zapret: скрипт, служба и списки; сам движок (nfqws) ставит workflow «Zapret install». Режим не включается.
           if ssh vps "$R '[ -d /usr/share/fspirat-tgws ]'"; then   # Telegram через tg-ws-proxy (если установлен)
             push router/bin/fspirat-tgws        /usr/bin/fspirat-tgws
@@ -87,6 +88,8 @@ jobs:
           ssh vps "$R 'c=0; grep -q \"fspirat-fw schedule\" /etc/crontabs/root || { echo \"* * * * * /usr/bin/fspirat-fw schedule\" >> /etc/crontabs/root; c=1; }
             [ \"\$(uci -q get system.@system[0].cronloglevel)\" = 9 ] || { uci set system.@system[0].cronloglevel=9; uci commit system; c=1; }
             [ \$c = 1 ] && /etc/init.d/cron restart; crontab -l'"
+          # адреса TCPShield для проброса Minecraft — раз в сутки (только если проброс настроен: есть 20-fspirat-mc.nft)
+          ssh vps "$R '[ -f /etc/nftables.d/20-fspirat-mc.nft ] || exit 0; grep -q fspirat-tcpshield /etc/crontabs/root || { echo \"23 4 * * * /usr/bin/fspirat-tcpshield >/dev/null 2>&1\" >> /etc/crontabs/root; /etc/init.d/cron restart; }'"
 
       - name: Verify
         run: |
