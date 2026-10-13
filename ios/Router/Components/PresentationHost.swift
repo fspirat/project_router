@@ -1,9 +1,9 @@
 import SwiftUI
 import RouterCore
 
-/// A place that can show the toast and present the 428 confirm sheet: each tab root and each app sheet.
-/// Only the topmost visible host shows them, so a confirm started inside a sheet (server card, Settings)
-/// opens on top of that sheet, and a toast is never hidden under a sheet.
+/// A place that can show the toast, the «Проверить?» pre-dialog and the 428 confirm sheet: each tab root and
+/// each app sheet. Only the topmost visible host shows them, so a confirm started inside a sheet (server card,
+/// Settings) opens on top of that sheet, and a toast is never hidden under a sheet.
 struct PresentationHostEntry: Equatable {
     let id: UUID
     let isSheet: Bool
@@ -21,16 +21,45 @@ struct PresentationHostModifier: ViewModifier {
         let isTop = store.hostStack.last?.id == hostID
         content
             .overlay(alignment: .bottom) {
-                if isTop {
+                // While a 428 sheet is up the toast shows on that sheet (it would be hidden under it here).
+                if isTop && store.pendingConfirm == nil {
                     ToastOverlay()
                 }
             }
-            .sheet(item: isTop ? $bindableStore.confirmSelection : .constant(nil)) { value in
+            .sheet(
+                item: isTop ? $bindableStore.confirmSelection : .constant(nil),
+                onDismiss: {
+                    store.confirmSheetDidDismiss()
+                }
+            ) { value in
                 ConfirmSheet(pending: value)
+                    .overlay(alignment: .bottom) {
+                        // Exactly one toast overlay at a time: here while the 428 is pending, on the host after.
+                        if store.pendingConfirm != nil {
+                            ToastOverlay()
+                        }
+                    }
+                    .onAppear {
+                        store.confirmSheetShown = true
+                    }
                     .privacyCover(includeLock: true)
                     .environment(store)
                     .environment(lock)
                     .preferredColorScheme(theme.colorScheme)
+            }
+            // The stage 3 «Проверить?» pre-dialog, on whichever screen asked (Summary «Проверить» or
+            // VPN «Проверить все серверы»): only the topmost host binds it, so it never shows twice.
+            .confirmationDialog(
+                PingPreDialog.title,
+                isPresented: isTop ? $bindableStore.showPingPreDialog : .constant(false),
+                titleVisibility: .visible
+            ) {
+                Button(PingPreDialog.confirm) {
+                    store.startPing()
+                }
+                Button(PingPreDialog.cancel, role: .cancel) {}
+            } message: {
+                Text(PingPreDialog.text)
             }
             .onAppear {
                 store.pushHost(hostID, isSheet: isSheet)

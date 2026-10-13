@@ -11,8 +11,6 @@ struct VPNServerSheet: View {
     @Environment(RouterStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let serverID: String
-    /// When this phone last ran `pingone` for the server («Проверено только что»).
-    @State private var pingedAt: TimeInterval? = nil
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 15)) { context in
@@ -31,7 +29,8 @@ struct VPNServerSheet: View {
 
     @ViewBuilder
     private func content(now: TimeInterval) -> some View {
-        if let status = store.status, let detail = VPN.serverDetail(status, id: serverID, now: now, pingedAt: pingedAt) {
+        // «Проверено только что» after `pingone`: the stamp is kept by the store (survives closing the card).
+        if let status = store.status, let detail = VPN.serverDetail(status, id: serverID, now: now, pingedAt: store.pingedAt[serverID]) {
             VPNServerHeader(detail: detail, close: close)
             if store.vpnShowsStaleData {
                 StaleDataNote()
@@ -44,7 +43,7 @@ struct VPNServerSheet: View {
                 )
             }
             VPNServerServices(detail: detail)
-            VPNServerButtons(detail: detail, onPinged: markPinged, onSwitched: close)
+            VPNServerButtons(detail: detail, onSwitched: close)
         } else {
             HStack {
                 Spacer(minLength: 0)
@@ -60,10 +59,6 @@ struct VPNServerSheet: View {
 
     private func close() {
         dismiss()
-    }
-
-    private func markPinged() {
-        pingedAt = Date().timeIntervalSince1970
     }
 }
 
@@ -175,11 +170,10 @@ struct VPNServerServices: View {
 struct VPNServerButtons: View {
     @Environment(RouterStore.self) private var store
     let detail: VPNServerDetail
-    let onPinged: () -> Void
     let onSwitched: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
+        GlassGroup(axis: .vertical, spacing: 10) {
             if let ping = detail.pingAction {
                 let busy = store.isRunning(ping)
                 AppButton(
@@ -188,11 +182,7 @@ struct VPNServerButtons: View {
                     kind: .secondary,
                     isBusy: busy
                 ) {
-                    store.perform(ping, label: detail.name) { result in
-                        if result.isSuccess {
-                            onPinged()
-                        }
-                    }
+                    store.perform(ping, label: detail.name)
                 }
                 .disabled(!store.canPerform(ping))
                 .accessibilityHint("Пинг одного сервера, меньше секунды, без вопроса.")
@@ -229,30 +219,9 @@ struct VPNServerButtons: View {
                     .disabled(!store.canPerform(connect))
                     .accessibilityHint("VPN перезапустится. Сначала спросит подтверждение.")
                 }
-                VPNLockCountdown(action: connect)
+                LockCountdownNote(actions: [connect], centered: true)
             }
         }
         .padding(.top, 4)
-    }
-}
-
-/// «Можно снова через N с» while the action is locked (PassWall pause after a restart, 429 `retry_after`).
-struct VPNLockCountdown: View {
-    @Environment(RouterStore.self) private var store
-    let action: RouterAction
-
-    var body: some View {
-        if store.isLocked(action) {
-            TimelineView(.periodic(from: Date(), by: 1)) { context in
-                let left = store.lockSecondsLeft(action, now: context.date)
-                if left > 0 {
-                    Text("Можно снова через \(left)" + Fmt.nbsp + "с")
-                        .font(.footnote)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.dim)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-        }
     }
 }

@@ -44,7 +44,7 @@ struct ConfirmSheet: View {
                 if let error = store.confirmError {
                     Banner(tone: .warn, text: error)
                 }
-                VStack(spacing: 10) {
+                GlassGroup(axis: .vertical, spacing: 10) {
                     AppButton(
                         title: store.confirmError == nil ? prompt.displayButton : "Повторить",
                         kind: destructive ? .destructiveFill : .primary,

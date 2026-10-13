@@ -75,7 +75,7 @@ struct Countdown: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Ждём нажатия в боте… \(left) с")
+                    Text("Ждём нажатия в боте… \(left)" + Fmt.nbsp + "с")
                         .font(.subheadline)
                         .foregroundStyle(Theme.dim)
                         .monospacedDigit()

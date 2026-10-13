@@ -40,7 +40,7 @@ struct TgwsCard: View {
                 if store.verifyingTgws {
                     BypassCaption("Проверяю, что роутер переключил прокси…", systemImage: "clock")
                 } else {
-                    BypassLockNote(actions: [info.toggleAction])
+                    LockCountdownNote(actions: [info.toggleAction])
                 }
             }
         }

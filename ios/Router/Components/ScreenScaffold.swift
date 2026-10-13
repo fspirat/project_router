@@ -59,12 +59,17 @@ struct StatusPillBar: View {
     @Environment(RouterStore.self) private var store
 
     var body: some View {
-        if store.appDisabled || store.quietBanner != nil || store.offline {
-            pill
-                .padding(.horizontal, Metrics.screenPadding)
-                .padding(.bottom, 6)
-                .transition(.opacity)
+        let shown = store.appDisabled || store.quietBanner != nil || store.offline
+        // The animation sits on a container that always exists, so the pill's insert/remove transition runs.
+        VStack(spacing: 0) {
+            if shown {
+                pill
+                    .padding(.horizontal, Metrics.screenPadding)
+                    .padding(.bottom, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: shown)
     }
 
     @ViewBuilder

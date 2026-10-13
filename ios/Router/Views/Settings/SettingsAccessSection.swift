@@ -148,12 +148,17 @@ struct PhoneAccessRow: View {
 
     private var revokeButton: some View {
         Button(role: .destructive, action: onRevoke) {
-            if isBusy {
-                ProgressView()
-            } else {
-                Text(AccessTexts.revokeButton)
-                    .font(.subheadline.weight(.semibold))
+            Group {
+                if isBusy {
+                    ProgressView()
+                } else {
+                    Text(AccessTexts.revokeButton)
+                        .font(.subheadline.weight(.semibold))
+                }
             }
+            // A 44-pt tap target; borderless, so nothing visible grows.
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         // Borderless: in a Form row only this control reacts, not the whole row.
         .buttonStyle(.borderless)

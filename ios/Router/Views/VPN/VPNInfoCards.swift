@@ -122,12 +122,14 @@ struct VPNUpdateButton: View {
                         .fontWeight(.semibold)
                 }
                 .foregroundStyle(Theme.text)
+                // Full width on every iOS (the iOS 26 glass style sizes to its label otherwise).
+                .frame(maxWidth: .infinity)
             }
             .appButtonStyle(.secondary)
             .disabled(!store.canPerform(action))
             .accessibilityLabel(label.map { "\(title) подписку «\($0)»" } ?? title)
             .accessibilityHint("Список серверов скачается заново, потом VPN перезапустится. Сначала спросит подтверждение.")
-            VPNLockCountdown(action: action)
+            LockCountdownNote(actions: [action], centered: true)
         }
     }
 }
@@ -198,11 +200,13 @@ struct VPNSpeedChannel: View {
                         .fontWeight(.semibold)
                 }
                 .foregroundStyle(Theme.text)
+                // Full width on every iOS (the iOS 26 glass style sizes to its label otherwise).
+                .frame(maxWidth: .infinity)
             }
             .appButtonStyle(.secondary)
             .disabled(!store.canPerform(action))
             .accessibilityLabel(running ? VPNTexts.speedBusy : "\(VPNTexts.speedRun): \(info.title)")
-            VPNLockCountdown(action: action)
+            LockCountdownNote(actions: [action], centered: true)
         }
     }
 }

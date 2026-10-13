@@ -33,6 +33,7 @@ struct JournalRowView: View {
     private var text: some View {
         Text(row.text)
             .font(.body)
+            .monospacedDigit()
             .foregroundStyle(Theme.text)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)

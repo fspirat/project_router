@@ -48,7 +48,8 @@ extension RouterStore {
     }
 
     func canChangeStrategy(_ info: ZapretInfo) -> Bool {
-        return info.showsControls && info.strategyEnabled && verifyingStrategy == nil
+        // One verification at a time (the store keeps one): no strategy change while tgwsset is checked either.
+        return info.showsControls && info.strategyEnabled && verification == nil
             && canPerform(.zapretstrat(n: info.strategy))
     }
 
@@ -80,7 +81,8 @@ extension RouterStore {
     }
 
     func canToggleTgws(_ info: TgwsInfo) -> Bool {
-        return info.showsToggle && !verifyingTgws && canPerform(info.toggleAction)
+        // One verification at a time (the store keeps one): no toggle while a strategy is checked either.
+        return info.showsToggle && verification == nil && canPerform(info.toggleAction)
     }
 
     // MARK: - Сервисы напрямую
@@ -110,13 +112,10 @@ extension RouterStore {
         return MyDirect.info(list, query: query)
     }
 
-    /// `/mydirect` answered `500 no rule` (or never loaded and failed): the card shows the message instead of
-    /// the lists; add/remove are disabled (contract-stage4 §5.4.6).
+    /// The last `/mydirect` read answered `500 no rule` (by code, not by text): the card shows the message
+    /// instead of the lists; add/remove are disabled (contract-stage4 §5.4.6).
     var myDirectRuleMissing: Bool {
-        guard let message = readError(.mydirect) else {
-            return false
-        }
-        return message.contains("MyDirect")
+        return readErrorCode(.mydirect) == "no rule"
     }
 
     /// Add/remove may be offered at all (the list is known and the rule exists).

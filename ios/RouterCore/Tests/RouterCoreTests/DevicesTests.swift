@@ -34,7 +34,7 @@ final class DevicesTests: XCTestCase {
         XCTAssertEqual(five[1].subtitle, "192.168.1.23 · 866\u{00A0}Мбит/с", "no «скрытый MAC» because it has a name")
         XCTAssertEqual(five[1].signalLevel, 4)
         XCTAssertEqual(five[1].signalAccessibility, "Сигнал \u{2212}51\u{00A0}dBm")
-        XCTAssertEqual(five[1].todayText, "↓ 1,5\u{00A0}ГБ")
+        XCTAssertEqual(five[1].todayText, "↓\u{00A0}1,5\u{00A0}ГБ")
 
         let tv = l.sections[1].rows[0]
         XCTAssertEqual(tv.title, "tv-living")
@@ -47,7 +47,7 @@ final class DevicesTests: XCTestCase {
         XCTAssertEqual(wired.labels, [DeviceLabel(text: "мимо VPN", tone: .info, symbol: nil)])
         XCTAssertEqual(wired.subtitle, "192.168.1.40")
         XCTAssertNil(wired.signalLevel)
-        XCTAssertEqual(wired.todayText, "↓ 10\u{00A0}МБ")
+        XCTAssertEqual(wired.todayText, "↓\u{00A0}10\u{00A0}МБ")
 
         let off = l.sections[3].rows
         XCTAssertEqual(off.map { $0.title }, ["old-laptop", "Без имени"])
@@ -154,7 +154,7 @@ final class DevicesTests: XCTestCase {
         XCTAssertEqual(phone.rows.map { $0.label }, ["Статус", "IP", "MAC", "Сигнал", "Сегодня", "За месяц", "Интернет", "Через VPN", "Расписание"])
         XCTAssertEqual(phone.rows.map { $0.value }, [
             "В сети · Wi-Fi 5\u{00A0}ГГц", "192.168.1.23", "5a:00:5e:00:53:01", "\u{2212}51\u{00A0}dBm · 866\u{00A0}Мбит/с",
-            "↓ 1,5\u{00A0}ГБ · ↑ 50\u{00A0}МБ", "↓ 27,0\u{00A0}ГБ · ↑ 700\u{00A0}МБ", "Есть", "Да", "Нет"
+            "↓\u{00A0}1,5\u{00A0}ГБ · ↑\u{00A0}50\u{00A0}МБ", "↓\u{00A0}27,0\u{00A0}ГБ · ↑\u{00A0}700\u{00A0}МБ", "Есть", "Да", "Нет"
         ])
         XCTAssertEqual(phone.rows[2].caption, "Скрытый MAC: телефон сам придумал этот адрес для приватности. Он может измениться.")
         XCTAssertEqual(phone.renamePrefill, "iPhone владельца")

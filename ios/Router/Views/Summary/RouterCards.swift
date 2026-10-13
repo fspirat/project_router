@@ -259,10 +259,12 @@ struct ActionsCard: View {
     var body: some View {
         Card(spacing: 10) {
             CardTitle("Действия", symbol: "bolt")
-            ActionButton(button: .check, kind: .secondary, busyText: ActionTexts.pingBusy)
-            ActionButton(button: .restartVPN, kind: .secondary, busyText: nil)
-            ActionButton(button: .updateSubs, kind: .secondary, busyText: nil)
-            ActionButton(button: .reboot, kind: .destructiveOutline, busyText: nil)
+            GlassGroup(axis: .vertical, spacing: 10) {
+                ActionButton(button: .check, kind: .secondary, busyText: ActionTexts.pingBusy)
+                ActionButton(button: .restartVPN, kind: .secondary, busyText: nil)
+                ActionButton(button: .updateSubs, kind: .secondary, busyText: nil)
+                ActionButton(button: .reboot, kind: .destructiveOutline, busyText: nil)
+            }
             if store.offline {
                 Text(OfflineBanner.note)
                     .font(.footnote)

@@ -20,8 +20,13 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         self.session = session
     }
 
+    /// The app's session: ephemeral and never following redirects (`NoRedirectDelegate`).
     public convenience init() {
-        self.init(session: URLSession(configuration: URLSessionTransport.makeConfiguration()))
+        self.init(session: URLSession(
+            configuration: URLSessionTransport.makeConfiguration(),
+            delegate: NoRedirectDelegate(),
+            delegateQueue: nil
+        ))
     }
 
     /// Ephemeral, no cookies, no URL cache. The per-request `timeoutInterval` (15 or 30 s)
@@ -63,6 +68,21 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         }, onCancel: {
             box.cancel()
         })
+    }
+}
+
+/// The app API never redirects: a 3xx is returned as it is (mapped by `APIError.fromHTTP`) instead of being
+/// followed, so the `Authorization: Bearer` header is never re-sent to another URL (the https / no-token-in-URL
+/// checks of `makeRequest` apply to the original URL only).
+final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 

@@ -177,20 +177,27 @@ extension RouterStore {
         guard isLoggedIn else {
             return
         }
-        pollingCount += 1
-        defer {
-            pollingCount -= 1
-        }
         // `/me` first and alone (contract §2.5, §7.1): it validates the token before the parallel reads,
         // so a stale token costs one `401 token_*` instead of several (`token_invalid` counts toward fail2ban),
         // and it re-reads `/me` on launch and unlock. Not again within a minute: Control Center or the
         // Face ID sheet also flip the scene inactive → active.
+        // Polling counts as active only after it: scopes that appear meanwhile (tab switch, range change)
+        // must not fire their reads in parallel with the token check.
         if lastReadAt[.me].map({ Date().timeIntervalSince($0) > RouterStore.meRecheckAfter }) ?? true {
             await read(.me)
+            // A `/me` started elsewhere (login, Settings) is still running: wait for it instead of racing it.
+            while inFlight.contains(.me) && !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
             guard isLoggedIn, !Task.isCancelled else {
                 return
             }
         }
+        pollingCount += 1
+        defer {
+            pollingCount -= 1
+        }
+        updateDevicesBadge()
         await withDiscardingTaskGroup { group in
             var force = true
             while !Task.isCancelled {

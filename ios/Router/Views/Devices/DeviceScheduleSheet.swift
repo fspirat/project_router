@@ -31,7 +31,7 @@ struct DeviceScheduleSheet: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.dim)
                 hints(window)
-                VStack(spacing: 10) {
+                GlassGroup(axis: .vertical, spacing: 10) {
                     AppButton(title: ScheduleTexts.save, systemImage: "checkmark", kind: .primary, isBusy: saving) {
                         save(window, detail: detail)
                     }
@@ -48,7 +48,7 @@ struct DeviceScheduleSheet: View {
                     .disabled(saving || clearing)
                 }
                 .padding(.top, 4)
-                DeviceLockNote(actions: [saveAction])
+                LockCountdownNote(actions: [saveAction])
             }
             .padding(20)
         }

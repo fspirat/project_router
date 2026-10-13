@@ -173,16 +173,21 @@ extension View {
 
 // MARK: - Chips and filters (control layer: interactive glass in a container)
 
-/// Surface of one chip. iOS 26: interactive glass, selected = accent-tinted glass.
+/// Surface of one chip. iOS 26: interactive glass, selected = glass tinted with `acc` at 35 % (contract-stage4
+/// §8 rule 7) and a neutral label, so the label contrast does not depend on the backdrop; the selection also
+/// shows in the weight, the checkmark (where used) and the `.isSelected` trait.
+/// `isInteractive: false` for a chip that is not a control (no touch reaction on inert glass).
 struct ChipSurface: ViewModifier {
     let isSelected: Bool
+    var isInteractive: Bool = true
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            let glass: Glass = isSelected ? Glass.regular.tint(Theme.acc).interactive() : Glass.regular.interactive()
+            let base: Glass = isSelected ? Glass.regular.tint(Theme.acc.opacity(0.35)) : Glass.regular
+            let glass: Glass = base.interactive(isInteractive)
             content
-                .foregroundStyle(isSelected ? Theme.onAcc : Theme.text)
+                .foregroundStyle(Theme.text)
                 .glassEffect(glass, in: Capsule())
         } else {
             content
@@ -196,8 +201,8 @@ struct ChipSurface: ViewModifier {
 }
 
 extension View {
-    func glassChip(selected: Bool) -> some View {
-        modifier(ChipSurface(isSelected: selected))
+    func glassChip(selected: Bool, interactive: Bool = true) -> some View {
+        modifier(ChipSurface(isSelected: selected, isInteractive: interactive))
     }
 }
 
@@ -227,7 +232,7 @@ struct GlassChip: View {
             .font(.subheadline.weight(isSelected ? .semibold : .regular))
             .lineLimit(1)
             .padding(.horizontal, 14)
-            .frame(minHeight: 40)
+            .frame(minHeight: 44)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -265,6 +270,46 @@ struct GlassChipRow<Content: View>: View {
             }
         } else {
             HStack(spacing: 8) {
+                content
+            }
+        }
+    }
+}
+
+/// A group of interactive glass controls (mode segments, a card's action buttons): iOS 26 puts them in one
+/// `GlassEffectContainer` (one render pass, shared sampling); a plain stack earlier. The container spacing is
+/// smaller than the stack spacing, so the shapes never melt together at rest.
+struct GlassGroup<Content: View>: View {
+    var axis: Axis = .horizontal
+    var spacing: CGFloat = 8
+    var containerSpacing: CGFloat = 0
+    private let content: Content
+
+    init(axis: Axis = .horizontal, spacing: CGFloat = 8, containerSpacing: CGFloat = 0, @ViewBuilder content: () -> Content) {
+        self.axis = axis
+        self.spacing = spacing
+        self.containerSpacing = containerSpacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: containerSpacing) {
+                stack
+            }
+        } else {
+            stack
+        }
+    }
+
+    @ViewBuilder
+    private var stack: some View {
+        if axis == .horizontal {
+            HStack(spacing: spacing) {
+                content
+            }
+        } else {
+            VStack(spacing: spacing) {
                 content
             }
         }
@@ -350,7 +395,8 @@ struct AppButton: View {
     }
 }
 
-/// Small round icon button inside content (e.g. «Проверить сейчас» next to a server row).
+/// Small round icon button inside content (e.g. «Проверить сейчас» next to a server row, the sheet's close
+/// button). The 30-pt label plus the circle style's insets give a ≥ 44-pt circle (HIG tap target).
 struct GlassIconButton: View {
     let systemImage: String
     let accessibilityLabel: String
@@ -359,7 +405,9 @@ struct GlassIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .frame(width: 22, height: 22)
+                .font(.body.weight(.semibold))
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
         }
         .glassIconStyle()
         .accessibilityLabel(accessibilityLabel)

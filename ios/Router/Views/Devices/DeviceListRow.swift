@@ -160,9 +160,11 @@ enum DeviceAccessibility {
         }
     }
 
-    /// «↓ 1,5 ГБ» → «скачано 1,5 ГБ».
+    /// «↓ 1,5 ГБ» → «скачано 1,5 ГБ» (RouterCore puts an NBSP after the arrows; a plain space is still accepted).
     static func traffic(_ text: String) -> String {
         return text
+            .replacingOccurrences(of: "↓" + Fmt.nbsp, with: "скачано ")
+            .replacingOccurrences(of: "↑" + Fmt.nbsp, with: "отдано ")
             .replacingOccurrences(of: "↓ ", with: "скачано ")
             .replacingOccurrences(of: "↑ ", with: "отдано ")
             .replacingOccurrences(of: " · ", with: ", ")

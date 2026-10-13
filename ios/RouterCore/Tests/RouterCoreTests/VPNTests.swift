@@ -179,6 +179,18 @@ final class VPNTests: XCTestCase {
         XCTAssertEqual(chips[3].icon, "cube")
     }
 
+    func testBestChipsTieGoesToLowerPing() throws {
+        // Two alive nodes with the same YouTube value, listed slower first: the faster one wins (web app.js).
+        let s = try statusWith { o in
+            o["ping"] = try! JSONValue.parse(#"{"updated":1791886200,"current":"Kq7Lm2Xp","socks":true,"real":48,"nodes":[{"id":"Kq7Lm2Xp","name":"fspiratNL","ms":41,"group":"fspirat","own":true},{"id":"Sl0w0001","name":"Slow","ms":90,"group":"nosok"},{"id":"Fa5t0002","name":"Fast","ms":45,"group":"nosok"}]}"#)
+            o["svc"] = try! JSONValue.parse(#"{"Sl0w0001":{"ts":1791884600,"list":[{"kind":"web","name":"YouTube","host":"www.youtube.com","vpn":50}]},"Fa5t0002":{"ts":1791884600,"list":[{"kind":"web","name":"YouTube","host":"www.youtube.com","vpn":50}]}}"#)
+        }
+        let chips = VPN.bestChips(s)
+        let youtube = try XCTUnwrap(chips.first { $0.service == "YouTube" })
+        XCTAssertEqual(youtube.nodeID, "Fa5t0002")
+        XCTAssertEqual(youtube.ms, 50)
+    }
+
     func testServerDetail() throws {
         let s = try status()
         let nl = try XCTUnwrap(VPN.serverDetail(s, id: "Pz1Yc4Ue", now: nowT))

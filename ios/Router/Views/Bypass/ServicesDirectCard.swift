@@ -34,7 +34,7 @@ struct ServicesDirectCard: View {
                     }
                 }
                 // Locks are per action name: one probe covers every service toggle.
-                BypassLockNote(actions: Array(rows.compactMap { $0.toggleAction }.prefix(1)))
+                LockCountdownNote(actions: Array(rows.compactMap { $0.toggleAction }.prefix(1)))
             }
         }
     }

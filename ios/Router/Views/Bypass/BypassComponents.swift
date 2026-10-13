@@ -50,95 +50,17 @@ struct BypassStatusLine: View {
     }
 
     private var accessibilityText: String {
-        var parts = [Theme.levelWord(tone), summary]
+        // A neutral state (off, not installed) has no level word: «проверяется» would be wrong there. The loading
+        // state (spinner) keeps it.
+        var parts: [String] = []
+        if tone != .neutral || showsProgress {
+            parts.append(Theme.levelWord(tone))
+        }
+        parts.append(summary)
         if let counter = counter {
             parts.append(counter)
         }
         return parts.joined(separator: ", ")
-    }
-}
-
-/// A system toggle that never flips by itself: it always shows the **server** value (`isOn`); a tap only
-/// asks for the change (`onRequest` → `store.perform`, which shows the server's 428 confirm). The switch moves
-/// after the router has applied it and the next read says so (contract-stage4 §5.4.1).
-struct ConfirmToggle: View {
-    let title: String
-    var subtitle: String? = nil
-    var systemImage: String? = nil
-    let isOn: Bool
-    var isBusy: Bool = false
-    let isEnabled: Bool
-    var accessibilityHint: String = "Изменение нужно будет подтвердить"
-    let onRequest: @MainActor () -> Void
-
-    var body: some View {
-        Toggle(isOn: request) {
-            HStack(alignment: .center, spacing: 12) {
-                if let systemImage = systemImage {
-                    Image(systemName: systemImage)
-                        .foregroundStyle(Theme.dim)
-                        .frame(width: 24)
-                        .accessibilityHidden(true)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(Theme.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let subtitle = subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.dim)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Выполняется")
-                }
-            }
-        }
-        .tint(Theme.acc)
-        .frame(minHeight: 44)
-        .disabled(!isEnabled)
-        .accessibilityHint(accessibilityHint)
-    }
-
-    /// Reads the server value; a tap that would change it asks for the action instead of storing anything.
-    private var request: Binding<Bool> {
-        let current = isOn
-        let ask = onRequest
-        return Binding(
-            get: {
-                current
-            },
-            set: { @MainActor newValue in
-                if newValue != current {
-                    ask()
-                }
-            }
-        )
-    }
-}
-
-/// «Повтори через N с» while one of `actions` is locked (429 `retry_after`, PW lock-out, verification).
-struct BypassLockNote: View {
-    @Environment(RouterStore.self) private var store
-    let actions: [RouterAction]
-
-    var body: some View {
-        if actions.contains(where: { store.isLocked($0) }) {
-            TimelineView(.periodic(from: Date(), by: 1)) { context in
-                let left = actions.map { store.lockSecondsLeft($0, now: context.date) }.max() ?? 0
-                if left > 0 {
-                    Label("Повтори через \(left)" + Fmt.nbsp + "с", systemImage: "hourglass")
-                        .font(.footnote)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.dim)
-                }
-            }
-        }
     }
 }
 

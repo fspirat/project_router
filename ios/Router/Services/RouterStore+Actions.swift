@@ -127,7 +127,7 @@ extension RouterStore {
     /// line (unless the action is server-only: rename, revokes), not locked, no other action or dialog running
     /// (jobs block only other jobs).
     func canPerform(_ action: RouterAction) -> Bool {
-        guard isLoggedIn, !appDisabled else {
+        guard isLoggedIn, !appDisabled, !uiLocked else {
             return false
         }
         if offline && !action.worksOffline {
@@ -227,6 +227,14 @@ extension RouterStore {
         case .confirm(let prompt):
             clearRunning(request)
             confirmError = nil
+            if uiLocked {
+                // The 428 arrived after the lock screen came up: never open a confirm sheet under the lock.
+                if pendingConfirm?.request.id == request.id {
+                    pendingConfirm = nil
+                }
+                finishCompletion(request, .cancelled)
+                return
+            }
             pendingConfirm = PendingConfirm(request: request, prompt: prompt)
         case .done(let value):
             clearRunning(request)
@@ -415,6 +423,9 @@ extension RouterStore {
                 status = s.applyingSuccess(of: action, result: value)
             }
         }
+        if case .pingone(let id) = action {
+            pingedAt[id] = Date().timeIntervalSince1970
+        }
         successTick += 1
         if let text = toastText {
             showToast(text, tone: text == ActionTexts.staleResult ? .info : .ok)
@@ -590,11 +601,34 @@ extension RouterStore {
         finishCompletion(request, .failed(e))
     }
 
+    /// Runs the screen's completion. While a 428 sheet is closing (shown, nothing pending any more) it waits
+    /// until the sheet is gone: a completion that closes its own sheet (schedule, server card) would otherwise
+    /// dismiss two stacked sheets in one update.
     func finishCompletion(_ request: ActionRequest, _ result: ActionResult) {
         guard let completion = completions.removeValue(forKey: request.id) else {
             return
         }
+        if confirmSheetShown && pendingConfirm == nil {
+            afterConfirmDismissed.append {
+                completion(result)
+            }
+            // Fallback in case the sheet's onDismiss is never reported.
+            after(1.0) { [weak self] in
+                self?.confirmSheetDidDismiss()
+            }
+            return
+        }
         completion(result)
+    }
+
+    /// The 428 sheet is gone (PresentationHost `onDismiss`): run the completions held back meanwhile.
+    func confirmSheetDidDismiss() {
+        confirmSheetShown = false
+        let queued = afterConfirmDismissed
+        afterConfirmDismissed = []
+        for work in queued {
+            work()
+        }
     }
 
     // MARK: - Quiet windows, locks, disabled Summary buttons

@@ -71,7 +71,7 @@ private struct MyDirectAddedSection: View {
                     if index > 0 {
                         LineDivider()
                     }
-                    MyDirectAddedRow(row: row, useGlass: rows.count <= 12)
+                    MyDirectAddedRow(row: row)
                 }
             }
         }
@@ -81,8 +81,6 @@ private struct MyDirectAddedSection: View {
 private struct MyDirectAddedRow: View {
     @Environment(RouterStore.self) private var store
     let row: MyDirectRow
-    /// Glass buttons only for a short list (no glass per row in long lists).
-    let useGlass: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -110,7 +108,7 @@ private struct MyDirectAddedRow: View {
                     }
                     .foregroundStyle(Theme.err)
                 }
-                .removeButtonStyle(useGlass: useGlass)
+                .removeButtonStyle()
                 .disabled(!store.myDirectEditable || !store.canPerform(action))
                 .accessibilityLabel(MyDirectTexts.remove + " " + row.domain)
                 .accessibilityHint("Сайт снова пойдёт через VPN. Нужно будет подтвердить")
@@ -121,28 +119,13 @@ private struct MyDirectAddedRow: View {
 }
 
 private extension View {
-    /// Small «Убрать»: glass capsule on iOS 26 (short lists), a bordered capsule otherwise.
-    @ViewBuilder
-    func removeButtonStyle(useGlass: Bool) -> some View {
-        if #available(iOS 26.0, *) {
-            if useGlass {
-                self
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.small)
-            } else {
-                self.borderedRemoveStyle()
-            }
-        } else {
-            self.borderedRemoveStyle()
-        }
-    }
-
-    func borderedRemoveStyle() -> some View {
+    /// «Убрать»: one non-glass red bordered capsule for every list length (a long list never gets glass per
+    /// row, and the control does not change its look as the list grows). Regular size: ~34–36 pt in a 44-pt row.
+    func removeButtonStyle() -> some View {
         self
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
-            .controlSize(.small)
+            .controlSize(.regular)
             .tint(Theme.err)
     }
 }
@@ -238,7 +221,7 @@ private struct MyDirectAddSection: View {
                 add()
             }
             .disabled(!canAdd)
-            BypassLockNote(actions: [probe])
+            LockCountdownNote(actions: [probe])
         }
     }
 

@@ -11,11 +11,17 @@ struct VPNServersSection: View {
     @AppStorage("vpnSort") private var sortStorage: String = ServerSort.default.storageValue
     let status: RouterStatus
     let now: TimeInterval
+    /// «Выбери сервер ниже…» after «Через VPN» while direct: right above the list, where the scroll lands
+    /// (contract-stage4 §5.1.1).
+    var showsChooseHint: Bool = false
     let openServer: (String) -> Void
 
     var body: some View {
         let list = VPN.serverList(status, sort: ServerSort(storage: sortStorage), now: now)
         VStack(alignment: .leading, spacing: Metrics.cardSpacing) {
+            if showsChooseHint && VPN.mode(status) == .direct {
+                Banner(tone: .info, text: VPNTexts.chooseServerHint, symbol: "hand.point.down")
+            }
             if !list.groups.isEmpty {
                 VPNSortChips(sort: list.sort, services: list.services) { key in
                     sortStorage = list.sort.tapped(key).storageValue
@@ -212,7 +218,7 @@ struct VPNServerRowView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(row.name)
                         .font(.body.weight(row.isCurrent ? .semibold : .regular))
-                        .foregroundStyle(Theme.text)
+                        .foregroundStyle(row.isDead ? Theme.dim : Theme.text)
                         .lineLimit(2)
                     if let tag = row.tag {
                         ToneChip(text: tag, tone: row.isDirect ? .warn : .neutral)
@@ -221,6 +227,7 @@ struct VPNServerRowView: View {
                 if !row.cells.isEmpty {
                     Text(VPNServiceText.line(row.cells))
                         .font(.footnote)
+                        .monospacedDigit()
                         .lineLimit(2)
                 } else if row.isDead {
                     Text("не отвечает")
@@ -241,7 +248,6 @@ struct VPNServerRowView: View {
         .padding(.vertical, 6)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
-        .opacity(row.isDead ? 0.6 : 1)
     }
 }
 
@@ -286,7 +292,8 @@ enum VPNServiceText {
             var value = AttributedString(cell.text)
             value.foregroundColor = valueColor(cell)
             if cell.isBest {
-                let bold: Font = Font.footnote.weight(.bold)
+                // An explicit run font overrides the Text's modifiers: keep the digits tabular here too.
+                let bold: Font = Font.footnote.weight(.bold).monospacedDigit()
                 value.font = bold
             }
             out.append(value)

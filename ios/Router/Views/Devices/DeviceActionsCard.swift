@@ -17,7 +17,7 @@ struct DeviceActionsCard: View {
         Card {
             CardTitle("Действия", symbol: "slider.horizontal.3")
             notes
-            VStack(spacing: 10) {
+            GlassGroup(axis: .vertical, spacing: 10) {
                 AppButton(title: DeviceTexts.rename, systemImage: "pencil", kind: .secondary) {
                     showRename = true
                 }
@@ -26,7 +26,7 @@ struct DeviceActionsCard: View {
                 directButton
                 scheduleButton
             }
-            DeviceLockNote(actions: lockableActions)
+            LockCountdownNote(actions: lockableActions)
         }
     }
 
@@ -143,26 +143,6 @@ struct DeviceActionsCard: View {
         store.perform(action, label: label, symbol: "checkmark") { result in
             if result.isSuccess && duringWindow {
                 store.showToast(ScheduleTexts.unblockDuringWindow, tone: .info)
-            }
-        }
-    }
-}
-
-/// «Повтори через N с» while an action is locked (429 `retry_after`, PW lock-out after «мимо VPN»).
-struct DeviceLockNote: View {
-    @Environment(RouterStore.self) private var store
-    let actions: [RouterAction]
-
-    var body: some View {
-        if actions.contains(where: { store.isLocked($0) }) {
-            TimelineView(.periodic(from: Date(), by: 1)) { context in
-                let left = actions.map { store.lockSecondsLeft($0, now: context.date) }.max() ?? 0
-                if left > 0 {
-                    Label("Повтори через \(left)" + Fmt.nbsp + "с", systemImage: "hourglass")
-                        .font(.footnote)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.dim)
-                }
             }
         }
     }

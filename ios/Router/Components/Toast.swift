@@ -17,12 +17,14 @@ struct ToastMessage: Identifiable, Equatable {
 
 /// Bottom overlay that shows `store.toast` for a few seconds. Tap to hide.
 /// Placed by the topmost presentation host (tab root or app sheet), above the tab bar.
+/// Hidden while the app is locked (the texts name devices, servers, sites); its timer still runs.
 struct ToastOverlay: View {
     @Environment(RouterStore.self) var store
+    @Environment(AppLock.self) var lock
 
     var body: some View {
         ZStack {
-            if let toast = store.toast {
+            if let toast = store.toast, !lock.isLocked {
                 ToastView(toast: toast)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .onTapGesture {

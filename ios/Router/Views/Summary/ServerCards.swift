@@ -33,10 +33,50 @@ struct ServerCard: View {
 /// «Проверка через VPN» (contract-stage4 §9.4): the title on one line, the big value on the right,
 /// the explanation («Задержка — как пинг: …») below the title, «Проверено …» under the value.
 /// VoiceOver: «Проверка через VPN, задержка 48 мс».
+/// At accessibility text sizes the title, value, caption and footer are stacked (nothing truncates).
 struct LatencyRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let latency: LatencyTile
 
     var body: some View {
+        Group {
+            if typeSize.isAccessibilitySize {
+                stacked
+            } else {
+                regular
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(LatencyTile.accessibilityLabel(value: latency.value))
+        .accessibilityValue(latency.footer ?? "")
+    }
+
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(LatencyTile.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(latency.value)
+                .font(.title3.weight(.semibold))
+                .numericValue(latency.value)
+                .foregroundStyle(Theme.levelText(latency.tone))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(LatencyTile.caption)
+                .font(.caption)
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+            if let footer = latency.footer {
+                Text(footer)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var regular: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(LatencyTile.title)
@@ -69,9 +109,6 @@ struct LatencyRow: View {
                 }
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(LatencyTile.accessibilityLabel(value: latency.value))
-        .accessibilityValue(latency.footer ?? "")
     }
 }
 
@@ -135,11 +172,11 @@ struct InternetCard: View {
                 Text("С момента включения: ↓\u{00A0}\(Fmt.bytes(net.rxTotal)) · ↑\u{00A0}\(Fmt.bytes(net.txTotal))")
                     .font(.caption)
                     .monospacedDigit()
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Theme.dim)
             } else {
                 Text(store.offline ? "Скорость появится, когда роутер снова будет на связи." : "—")
                     .font(.subheadline)
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Theme.dim)
             }
             if let traffic = today, traffic.isVisible {
                 LineDivider()

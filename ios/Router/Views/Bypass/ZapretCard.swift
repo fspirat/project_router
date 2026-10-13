@@ -73,7 +73,7 @@ private struct ZapretControls: View {
         ZapretCheckSection(info: info)
         if store.verifyingStrategy == nil {
             // While a strategy is verified its caption says so; the short lock needs no countdown.
-            BypassLockNote(actions: [info.toggleAction, .zapretstrat(n: info.strategy), .zapretcheck])
+            LockCountdownNote(actions: [info.toggleAction, .zapretstrat(n: info.strategy), .zapretcheck])
         }
         if !info.details.isEmpty {
             DisclosureGroup(isExpanded: $showsDetails) {

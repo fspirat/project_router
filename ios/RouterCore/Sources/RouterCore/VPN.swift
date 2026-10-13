@@ -591,9 +591,10 @@ public enum VPN {
     }
 
     /// «Лучший сервер для …» chips (no chip for a service without an alive measured node).
+    /// Alive nodes are taken in ping order, so a tie on the service value goes to the lower ping (web app.js).
     public static func bestChips(_ s: RouterStatus) -> [BestServerChip] {
         let nodes = s.ping?.nodes ?? []
-        let alive = nodes.filter { $0.ms > 0 }
+        let alive = stableSorted(nodes.filter { $0.ms > 0 }) { $0.ms < $1.ms }
         var out: [BestServerChip] = []
         for x in services(s) {
             var bestNode: PingNode? = nil

@@ -4,17 +4,34 @@ import SwiftUI
 ///
 /// Stage 4 (contract-stage4 §1.3): the app-switcher snapshot shows the real screen by default. The cover is
 /// drawn while the scene is not active only when Settings «Скрывать в переключателе приложений» is on.
-/// Sheets (`includeLock: true`) are also covered while the app is locked.
+/// Sheets (`includeLock: true`) show the lock screen while the app is locked (a sheet left open stays up
+/// under the lock, contract-stage4 §1.3), so «Разблокировать» is reachable without swiping the sheet away.
+///
+/// Whatever is covered is also taken out of the accessibility tree and stops taking touches: an overlay
+/// alone hides the content only visually, and VoiceOver could still read and activate the sheet's controls
+/// while the app is locked.
 struct PrivacyCoverModifier: ViewModifier {
     @Environment(\.scenePhase) var scenePhase
     @Environment(AppLock.self) var lock
     @AppStorage(AppSettings.hideInSwitcherKey) var hideInSwitcher = false
     let includeLock: Bool
 
+    private var lockedHere: Bool {
+        return includeLock && lock.isLocked
+    }
+
+    private var covered: Bool {
+        return (hideInSwitcher && scenePhase != .active) || lockedHere
+    }
+
     func body(content: Content) -> some View {
         content
+            .accessibilityHidden(covered)
+            .allowsHitTesting(!lockedHere)
             .overlay {
-                if (hideInSwitcher && scenePhase != .active) || (includeLock && lock.isLocked) {
+                if lockedHere {
+                    LockView()
+                } else if covered {
                     PrivacyCoverView()
                 }
             }
@@ -30,6 +47,7 @@ struct PrivacyCoverView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Роутер")
+        .accessibilityAddTraits(.isModal)
     }
 }
 
@@ -42,10 +60,12 @@ extension View {
     /// presentation host (toasts and 428 confirm sheets show on top of this sheet while it is open).
     /// (Sheets are separate presentations: the root overlays do not cover them.)
     /// Prefer `.appSheet(isPresented:)` / `.appSheet(item:)` on the presenting view — they apply this.
+    /// The cover is outside the host, so the host's toast is covered too (never drawn above the logo or the
+    /// lock screen).
     func sheetChrome(store: RouterStore, lock: AppLock, theme: ThemeChoice) -> some View {
         self
-            .privacyCover(includeLock: true)
             .presentationHost(isSheet: true)
+            .privacyCover(includeLock: true)
             .environment(store)
             .environment(lock)
             .preferredColorScheme(theme.colorScheme)

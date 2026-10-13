@@ -6,6 +6,8 @@ import RouterCore
 /// (only the session closes). Works offline (server-only).
 struct BrowserSessionsView: View {
     @Environment(RouterStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(AppSettings.hideInSwitcherKey) private var hideInSwitcher = false
     @State private var now = Date()
     @State private var closeTarget: BrowserRow? = nil
 
@@ -38,6 +40,13 @@ struct BrowserSessionsView: View {
         }
         .onAppear {
             now = Date()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // «Скрывать в переключателе приложений» on: the alert (with the browser's IP) is drawn above the
+            // in-view cover — close it before the app-switcher snapshot (contract-stage4 §1.3).
+            if phase != .active && hideInSwitcher {
+                closeTarget = nil
+            }
         }
     }
 

@@ -13,6 +13,8 @@ import RouterCore
 struct SettingsView: View {
     @Environment(RouterStore.self) var store
     @Environment(\.dismiss) var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(AppSettings.hideInSwitcherKey) private var hideInSwitcher = false
     @State private var bio = BiometricInfo.unknown
     @State private var now = Date()
     @State private var confirmLogout = false
@@ -65,6 +67,14 @@ struct SettingsView: View {
                 Button("Отмена", role: .cancel) {}
             } message: { _ in
                 Text(AccessTexts.revokeText)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // «Скрывать в переключателе приложений» on: system dialogs are drawn above the in-view cover,
+                // so close them before the app-switcher snapshot (stage 3 rule, contract-stage4 §1.3).
+                if phase != .active && hideInSwitcher {
+                    revokeTarget = nil
+                    confirmLogout = false
+                }
             }
         }
         // On the stack (not the Form): pushing «Браузеры» / «Журнал входов» keeps the scope, no extra reads.

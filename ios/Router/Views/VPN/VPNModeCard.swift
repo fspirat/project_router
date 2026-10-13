@@ -1,39 +1,15 @@
 import SwiftUI
 import RouterCore
 
-/// Interactive glass capsules share one `GlassEffectContainer` on iOS 26 (one render pass); a plain HStack earlier.
-struct VPNGlassGroup<Content: View>: View {
-    var spacing: CGFloat = 8
-    private let content: Content
-
-    init(spacing: CGFloat = 8, @ViewBuilder content: () -> Content) {
-        self.spacing = spacing
-        self.content = content()
-    }
-
-    var body: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 4) {
-                HStack(spacing: spacing) {
-                    content
-                }
-            }
-        } else {
-            HStack(spacing: spacing) {
-                content
-            }
-        }
-    }
-}
-
 // MARK: - Mode (§5.1.1)
 
 /// «Через VPN» / «Напрямую» + «Подключён: …» + the Split warning.
 /// The segment shows the server state and never flips before the 200 (the switch goes through 428 + Face ID).
+/// The «Выбери сервер ниже» hint after «Через VPN» is shown above the server list (VPNServersSection),
+/// where the scroll lands.
 struct VPNModeCard: View {
     @Environment(RouterStore.self) private var store
     let status: RouterStatus
-    let showsChooseHint: Bool
     let chooseServer: () -> Void
 
     var body: some View {
@@ -74,16 +50,14 @@ struct VPNModeCard: View {
             if let warning = VPN.splitWarning(status) {
                 Banner(tone: .warn, text: warning)
             }
-            if showsChooseHint && isDirect {
-                Banner(tone: .info, text: VPNTexts.chooseServerHint, symbol: "hand.point.down")
-            }
         }
     }
 }
 
 /// Two glass segments. «Напрямую» starts the dangerous switch (critical); «Через VPN» while direct only
-/// scrolls to the server list (a server has to be chosen).
+/// scrolls to the server list (a server has to be chosen). Side by side; stacked at accessibility text sizes.
 struct VPNModeSwitch: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let isDirect: Bool
     let isBusy: Bool
     let isEnabled: Bool
@@ -92,7 +66,7 @@ struct VPNModeSwitch: View {
     let onDirect: () -> Void
 
     var body: some View {
-        VPNGlassGroup(spacing: 8) {
+        GlassGroup(axis: typeSize.isAccessibilitySize ? .vertical : .horizontal, spacing: 8, containerSpacing: 4) {
             VPNModeSegment(
                 title: VPNTexts.modeVPN,
                 symbol: "lock.shield",
@@ -118,6 +92,7 @@ struct VPNModeSwitch: View {
 }
 
 struct VPNModeSegment: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let title: String
     let symbol: String
     let isSelected: Bool
@@ -138,7 +113,7 @@ struct VPNModeSegment: View {
                         .accessibilityHidden(true)
                 }
                 Text(title)
-                    .lineLimit(1)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                     .minimumScaleFactor(0.8)
             }
             .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -197,8 +172,9 @@ struct VPNBestChip: View {
             .accessibilityLabel("Лучший для \(chip.service): \(chip.nodeName), \(Fmt.ms(chip.ms))")
             .accessibilityHint("Подключить этот сервер. Сначала спросит подтверждение.")
         } else {
+            // Not a control: no interactive (touch-reacting) glass.
             label(busy: false)
-                .glassChip(selected: true)
+                .glassChip(selected: true, interactive: false)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Лучший для \(chip.service): \(chip.nodeName), \(Fmt.ms(chip.ms)), уже подключён")
         }
@@ -220,7 +196,7 @@ struct VPNBestChip: View {
         .font(.subheadline.weight(chip.isCurrent ? .semibold : .regular))
         .lineLimit(1)
         .padding(.horizontal, 14)
-        .frame(minHeight: 40)
+        .frame(minHeight: 44)
         .contentShape(Capsule())
     }
 }

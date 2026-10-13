@@ -7,19 +7,11 @@ struct SummaryView: View {
     @Environment(RouterStore.self) var store
 
     var body: some View {
-        @Bindable var bindableStore = store
+        // The «Проверить?» pre-dialog is shown by the presentation host (PresentationHost.swift).
         ScreenScroll(refresh: SummaryKinds.all) {
             SummaryContent()
         }
         .pollingScope(SummaryKinds.all)
-        .confirmationDialog(PingPreDialog.title, isPresented: $bindableStore.showPingPreDialog, titleVisibility: .visible) {
-            Button(PingPreDialog.confirm) {
-                store.startPing()
-            }
-            Button(PingPreDialog.cancel, role: .cancel) {}
-        } message: {
-            Text(PingPreDialog.text)
-        }
     }
 }
 

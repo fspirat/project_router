@@ -53,13 +53,10 @@ extension RouterStore {
     }
 
     /// «Проверить все серверы» = the Summary «Проверить» (ping job, ~20 s). When VPN does not pass right now
-    /// the stage 3 pre-dialog is needed: it lives on «Сводка», so switch there and let it ask.
+    /// `tap` asks the stage 3 pre-dialog first; the topmost presentation host shows it on this tab.
     func vpnCheckAll() {
         guard isEnabled(.check) else {
             return
-        }
-        if PingPreDialog.isNeeded(status) {
-            selectedTab = .summary
         }
         tap(.check)
     }

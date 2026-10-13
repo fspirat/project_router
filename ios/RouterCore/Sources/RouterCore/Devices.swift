@@ -322,7 +322,7 @@ public enum Devices {
         let level = signalLevel(d.signal)
         var today: String? = nil
         if let t = traffic[d.mac.lowercased()] {
-            today = "↓ " + Fmt.bytes(t.dayDown)
+            today = "↓" + Fmt.nbsp + Fmt.bytes(t.dayDown)
         }
         return DeviceRowInfo(
             mac: d.mac,
@@ -452,8 +452,9 @@ public enum Devices {
             rows.append(DetailRow(label: "Сигнал", value: v))
         }
         if let t = traffic[mac] {
-            rows.append(DetailRow(label: "Сегодня", value: "↓ " + Fmt.bytes(t.dayDown) + " · ↑ " + Fmt.bytes(t.dayUp)))
-            rows.append(DetailRow(label: "За месяц", value: "↓ " + Fmt.bytes(t.monthDown) + " · ↑ " + Fmt.bytes(t.monthUp)))
+            // NBSP after the arrows: an arrow never wraps away from its value (contract-stage4 §9.3).
+            rows.append(DetailRow(label: "Сегодня", value: "↓" + Fmt.nbsp + Fmt.bytes(t.dayDown) + " · ↑" + Fmt.nbsp + Fmt.bytes(t.dayUp)))
+            rows.append(DetailRow(label: "За месяц", value: "↓" + Fmt.nbsp + Fmt.bytes(t.monthDown) + " · ↑" + Fmt.nbsp + Fmt.bytes(t.monthUp)))
         }
         if let d = device {
             let internet: (String, Tone)

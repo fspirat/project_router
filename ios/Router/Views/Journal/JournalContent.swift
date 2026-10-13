@@ -254,7 +254,7 @@ private struct JournalNoDataState: View {
             Card {
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Загружаем журнал…")
+                    Text("Загружаю журнал…")
                         .font(.subheadline)
                         .foregroundStyle(Theme.dim)
                 }

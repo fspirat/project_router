@@ -136,6 +136,25 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(c.timeoutIntervalForRequest, 30)
     }
 
+    func testDefaultTransportRefusesRedirects() throws {
+        // The default session has the no-redirect delegate, which answers every redirect with nil.
+        let transport = URLSessionTransport()
+        let delegate = try XCTUnwrap(transport.session.delegate as? NoRedirectDelegate)
+        let from = URL(string: "https://example.test/router/app/v1/status")!
+        let to = URL(string: "https://other.example/steal")!
+        let response = try XCTUnwrap(HTTPURLResponse(url: from, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": to.absoluteString]))
+        var next = URLRequest(url: to)
+        next.setValue("Bearer fsr1_test", forHTTPHeaderField: "Authorization")
+        let task = transport.session.dataTask(with: URLRequest(url: from))
+        let answered = expectation(description: "completion")
+        delegate.urlSession(transport.session, task: task, willPerformHTTPRedirection: response, newRequest: next) { request in
+            XCTAssertNil(request)
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 1)
+        transport.session.invalidateAndCancel()
+    }
+
     // MARK: - Reads
 
     func testReadsDecode() async throws {

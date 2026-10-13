@@ -72,11 +72,11 @@ struct VPNContent: View {
             if stale {
                 StaleDataNote()
             }
-            VPNModeCard(status: status, showsChooseHint: showsChooseHint, chooseServer: chooseServer)
+            VPNModeCard(status: status, chooseServer: chooseServer)
                 .staleDimmed(stale)
             VPNBestServers(status: status)
                 .staleDimmed(stale)
-            VPNServersSection(status: status, now: now, openServer: openServer)
+            VPNServersSection(status: status, now: now, showsChooseHint: showsChooseHint, openServer: openServer)
                 .staleDimmed(stale)
                 .id(VPNView.serversAnchor)
         } else {

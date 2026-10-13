@@ -80,16 +80,17 @@ struct VPNChartMarker: Identifiable {
 
 // MARK: - Connection history
 
+/// The selection is read only by the tooltip line and the overlay rule (their own bodies), so dragging over
+/// the chart does not rebuild the marks (up to ~2 900 for «24 ч»).
 struct VPNHistoryChartView: View {
     let chart: HistoryChart
     let now: TimeInterval
     @State private var selection: Date? = nil
 
     var body: some View {
-        let tip = selection.flatMap { chart.tooltip(at: $0.timeIntervalSince1970, now: now) }
         VStack(alignment: .leading, spacing: 6) {
-            VPNTooltipLine(time: tip?.time, value: tip?.value, tone: tip?.tone ?? .neutral)
-            VPNHistoryPlot(chart: chart, selectedTS: tip?.ts, selection: $selection)
+            VPNHistoryTooltip(chart: chart, now: now, selection: $selection)
+            VPNHistoryPlot(chart: chart, now: now, selection: $selection)
                 .frame(height: 180)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("График: " + chart.title)
@@ -98,9 +99,21 @@ struct VPNHistoryChartView: View {
     }
 }
 
+/// The tooltip of the connection chart (reads the selection).
+struct VPNHistoryTooltip: View {
+    let chart: HistoryChart
+    let now: TimeInterval
+    @Binding var selection: Date?
+
+    var body: some View {
+        let tip = selection.flatMap { chart.tooltip(at: $0.timeIntervalSince1970, now: now) }
+        VPNTooltipLine(time: tip?.time, value: tip?.value, tone: tip?.tone ?? .neutral)
+    }
+}
+
 struct VPNHistoryPlot: View {
     let chart: HistoryChart
-    let selectedTS: Int?
+    let now: TimeInterval
     @Binding var selection: Date?
 
     var body: some View {
@@ -110,7 +123,6 @@ struct VPNHistoryPlot: View {
         let dots = VPNHistoryPlot.singlePoints(chart)
         let bands = VPNHistoryPlot.bands(chart, top: top)
         let fails = VPNHistoryPlot.fails(chart, top: top)
-        let rules = VPNHistoryPlot.selection(selectedTS, top: top)
         let span = max(1, chart.to - chart.from)
         let ticks = VPNChartAxis.ticks(from: chart.from, to: chart.to)
         let fromDate = VPNChartAxis.date(chart.from)
@@ -160,16 +172,16 @@ struct VPNHistoryPlot: View {
                 .foregroundStyle(Theme.err)
                 .lineStyle(StrokeStyle(lineWidth: 2))
             }
-            ForEach(rules) { mark in
-                RuleMark(x: .value("Время", mark.from))
-                    .foregroundStyle(Theme.dim)
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            }
         }
         .chartXScale(domain: fromDate...toDate)
         .chartYScale(domain: 0.0...top)
         .chartLegend(.hidden)
         .chartXSelection(value: $selection)
+        .chartOverlay { proxy in
+            VPNSelectionRule(selection: $selection, proxy: proxy) { [chart, now] date in
+                chart.tooltip(at: date.timeIntervalSince1970, now: now).map { VPNChartAxis.date($0.ts) }
+            }
+        }
         .chartXAxis {
             AxisMarks(values: ticks) { value in
                 AxisGridLine()
@@ -186,9 +198,12 @@ struct VPNHistoryPlot: View {
                 AxisGridLine()
                     .foregroundStyle(Theme.chartGrid)
                 AxisValueLabel()
+                    .font(.caption2.monospacedDigit())
                     .foregroundStyle(Theme.dim)
             }
         }
+        // The automatic Y labels follow the environment locale: decimal comma whatever the phone's region.
+        .environment(\.locale, Locale(identifier: "ru_RU"))
     }
 
     /// Segments with 2+ samples: one series per segment so gaps stay gaps.
@@ -227,14 +242,6 @@ struct VPNHistoryPlot: View {
         }
     }
 
-    static func selection(_ ts: Int?, top: Double) -> [VPNChartMarker] {
-        guard let t = ts else {
-            return []
-        }
-        let d = VPNChartAxis.date(t)
-        return [VPNChartMarker(id: 0, from: d, to: d, height: top)]
-    }
-
     /// VoiceOver summary: failures and offline periods in words, plus the scale.
     static func summary(_ chart: HistoryChart) -> String {
         var parts: [String] = []
@@ -249,6 +256,30 @@ struct VPNHistoryPlot: View {
         }
         parts.append(chart.caption)
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The dashed rule at the selected sample, drawn over the plot (`chartOverlay`). It reads the selection in its
+/// own body, so the chart marks are not rebuilt while the finger moves. `snap` maps the finger's date to the
+/// sample shown in the tooltip (nil = no rule).
+struct VPNSelectionRule: View {
+    @Binding var selection: Date?
+    let proxy: ChartProxy
+    let snap: (Date) -> Date?
+
+    var body: some View {
+        GeometryReader { geo in
+            if let picked = selection, let date = snap(picked), let plot = proxy.plotFrame, let x = proxy.position(forX: date) {
+                let frame = geo[plot]
+                Path { path in
+                    path.move(to: CGPoint(x: frame.minX + x, y: frame.minY))
+                    path.addLine(to: CGPoint(x: frame.minX + x, y: frame.maxY))
+                }
+                .stroke(Theme.dim, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -288,15 +319,15 @@ struct VPNTooltipLine: View {
 // MARK: - Speed history
 
 /// «История загрузки, Мбит/с»: one line + square points per channel (VPN = acc, напрямую = info).
+/// Like the connection chart, only the tooltip and the overlay rule read the selection.
 struct VPNSpeedChartView: View {
     let chart: SpeedHistoryChart
     @State private var selection: Date? = nil
 
     var body: some View {
-        let tip = selection.flatMap { VPNSpeedChartView.nearest(chart, to: $0) }
         VStack(alignment: .leading, spacing: 6) {
-            VPNTooltipLine(time: nil, value: tip?.tooltip, tone: .info)
-            VPNSpeedPlot(chart: chart, selectedTS: tip?.ts, selection: $selection)
+            VPNSpeedTooltip(chart: chart, selection: $selection)
+            VPNSpeedPlot(chart: chart, selection: $selection)
                 .frame(height: 170)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(VPNTexts.speedHistoryTitle)
@@ -326,9 +357,19 @@ struct VPNSpeedChartView: View {
     }
 }
 
+/// The tooltip of the speed chart (reads the selection).
+struct VPNSpeedTooltip: View {
+    let chart: SpeedHistoryChart
+    @Binding var selection: Date?
+
+    var body: some View {
+        let tip = selection.flatMap { VPNSpeedChartView.nearest(chart, to: $0) }
+        VPNTooltipLine(time: nil, value: tip?.tooltip, tone: .info)
+    }
+}
+
 struct VPNSpeedPlot: View {
     let chart: SpeedHistoryChart
-    let selectedTS: Int?
     @Binding var selection: Date?
 
     struct Sample: Identifiable {
@@ -343,7 +384,6 @@ struct VPNSpeedPlot: View {
         let samples = VPNSpeedPlot.samples(chart)
         let top = max(chart.yMax / 1e6, 1)
         let span = max(1, chart.to - chart.from)
-        let rules = VPNHistoryPlot.selection(selectedTS, top: top)
         let fromDate = VPNChartAxis.date(chart.from)
         let toDate = VPNChartAxis.date(max(chart.to, chart.from + 1))
         Chart {
@@ -365,16 +405,16 @@ struct VPNSpeedPlot: View {
                 .symbolSize(22)
                 .foregroundStyle(sample.color)
             }
-            ForEach(rules) { mark in
-                RuleMark(x: .value("Время", mark.from))
-                    .foregroundStyle(Theme.dim)
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            }
         }
         .chartXScale(domain: fromDate...toDate)
         .chartYScale(domain: 0.0...top)
         .chartLegend(.hidden)
         .chartXSelection(value: $selection)
+        .chartOverlay { proxy in
+            VPNSelectionRule(selection: $selection, proxy: proxy) { [chart] date in
+                VPNSpeedChartView.nearest(chart, to: date).map { VPNChartAxis.date($0.ts) }
+            }
+        }
         .chartXAxis {
             AxisMarks(values: VPNChartAxis.ticks(from: chart.from, to: chart.to)) { value in
                 AxisGridLine()
@@ -391,9 +431,12 @@ struct VPNSpeedPlot: View {
                 AxisGridLine()
                     .foregroundStyle(Theme.chartGrid)
                 AxisValueLabel()
+                    .font(.caption2.monospacedDigit())
                     .foregroundStyle(Theme.dim)
             }
         }
+        // The automatic Y labels follow the environment locale: decimal comma whatever the phone's region.
+        .environment(\.locale, Locale(identifier: "ru_RU"))
     }
 
     static func samples(_ chart: SpeedHistoryChart) -> [Sample] {

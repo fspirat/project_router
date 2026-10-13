@@ -30,7 +30,7 @@ struct LoginView: View {
                 }
                 Text("Пароль не сохраняется. После входа на телефоне остаётся только ключ доступа в Keychain.")
                     .font(.footnote)
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Theme.dim)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
             }
@@ -95,7 +95,7 @@ struct LoginView: View {
                 .fieldBackground()
             Text("Так телефон будет подписан в боте и в веб-панели.")
                 .font(.footnote)
-                .foregroundStyle(Theme.faint)
+                .foregroundStyle(Theme.dim)
         }
     }
 
@@ -138,7 +138,7 @@ struct LoginButton: View {
     /// «Войти можно через 42 с» / «… через 15 мин».
     static func waitText(_ seconds: Int) -> String {
         if seconds < 60 {
-            return "Войти можно через \(seconds) с"
+            return "Войти можно через \(seconds)" + Fmt.nbsp + "с"
         }
         return "Войти можно через " + Fmt.minutes((seconds + 59) / 60)
     }

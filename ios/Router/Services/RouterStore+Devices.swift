@@ -92,11 +92,22 @@ extension RouterStore {
         return Devices.unseenCount(latestData?.newdevs ?? [], seenAt: seenAt)
     }
 
-    /// The Devices tab is on screen: everything in `newdevs` counts as seen, the badge goes away.
+    /// Recomputes the badge, or clears it when the Devices tab is really on screen (polling runs only while
+    /// the app is active and unlocked). Called after every `/data` read and names update, when polling starts
+    /// and when the tab changes — so it works also before the Devices tab was ever opened in this launch.
+    func updateDevicesBadge() {
+        if selectedTab == .devices && pollingActive {
+            markDevicesSeen()
+        } else {
+            refreshDevicesBadge()
+        }
+    }
+
+    /// The Devices tab is on screen: everything in `newdevs` that was shown counts as seen, the badge goes away.
+    /// The mark is the newest `ts` shown (not the phone's clock), so a device that a later `/data` read brings
+    /// in with an earlier `ts` is not lost.
     func markDevicesSeen() {
-        let now = Int(Date().timeIntervalSince1970)
-        let newest = (latestData?.newdevs ?? []).map { $0.ts }.max() ?? 0
-        let seenAt = max(now, newest)
+        let seenAt = (latestData?.newdevs ?? []).map { $0.ts }.max() ?? 0
         if UserDefaults.standard.integer(forKey: DevicesStorage.seenAtKey) < seenAt {
             UserDefaults.standard.set(seenAt, forKey: DevicesStorage.seenAtKey)
         }

@@ -6,7 +6,9 @@ import RouterCore
 
 /// A card (panel): material + light rim, radius 24 (`CardSurface`), optional 3 pt accent line on top
 /// and an optional level tint. Rows inside are plain views — never glass on glass.
+/// Under `.staleDimmed(true)` only the content is dimmed; the surface stays opaque.
 struct Card<Content: View>: View {
+    @Environment(\.isStaleData) private var isStale
     private let accent: Color?
     private let tint: Color?
     private let spacing: CGFloat
@@ -24,6 +26,8 @@ struct Card<Content: View>: View {
         VStack(alignment: .leading, spacing: spacing) {
             content
         }
+        .opacity(isStale ? 0.7 : 1)
+        .saturation(isStale ? 0.3 : 1)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(CardSurface(cornerRadius: Metrics.cardRadius, tint: tint))
@@ -430,11 +434,24 @@ struct SegmentedPicker<Value: Hashable>: View {
     }
 }
 
-/// Last known router data while the router is offline: dims the content (contract-stage4 §4.3).
-/// Put `StaleDataNote()` above the dimmed block.
+/// Last known router data while the router is offline (contract-stage4 §4.3).
+private struct StaleDataKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// The data shown is the last known copy: `Card` dims its content (not its material surface).
+    var isStaleData: Bool {
+        get { self[StaleDataKey.self] }
+        set { self[StaleDataKey.self] = newValue }
+    }
+}
+
+/// Dims the content of the cards inside (the material stays opaque, so text keeps its contrast against the
+/// card, and glass chips outside cards keep working). Put `StaleDataNote()` above the dimmed block.
 extension View {
     func staleDimmed(_ isStale: Bool) -> some View {
-        self.opacity(isStale ? 0.55 : 1)
+        environment(\.isStaleData, isStale)
     }
 }
 

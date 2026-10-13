@@ -31,8 +31,13 @@ struct RootView: View {
                 lock.reset()
             }
         }
-        .onChange(of: lock.isLocked) { _, locked in
+        .onChange(of: lock.isLocked, initial: true) { _, locked in
+            // The store refuses actions and 428 sheets while the lock screen is up.
+            store.uiLocked = locked
             if locked {
+                // iOS restores the focused field (and its keyboard, above every overlay) on return: a Return
+                // there would still submit (MyDirect «Добавить сайт»). Resign it before anything else.
+                Keyboard.dismiss()
                 store.dismissPresentations()
             }
         }

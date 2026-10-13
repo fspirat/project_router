@@ -75,6 +75,8 @@ struct MainTabView: View {
         }
         .onChange(of: store.selectedTab) { _, tab in
             storedTab = tab
+            // The Devices badge is kept by the store (also before the Devices tab is first opened).
+            store.updateDevicesBadge()
         }
         .task(id: pollingEnabled) { [store, enabled = pollingEnabled] in
             if enabled {

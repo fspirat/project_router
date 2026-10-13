@@ -5,9 +5,8 @@ import RouterCore
 /// «Новые за неделю», then one card per group (Wi-Fi 5 ГГц / 2,4 ГГц / по кабелю / не в сети).
 /// The shell (TabRoot) gives the NavigationStack, title, gear, status pill, toasts and confirm sheets.
 /// Taps only open cards; nothing here starts a router action (no swipe actions).
+/// The tab badge is kept by the store (`updateDevicesBadge`): tab content loads lazily, so it cannot live here.
 struct DevicesView: View {
-    @Environment(RouterStore.self) private var store
-    @Environment(\.scenePhase) private var scenePhase
     /// UI state only (not router data).
     @SceneStorage("devicesFilter") private var filter: DeviceFilter = .all
     @State private var query = ""
@@ -25,27 +24,6 @@ struct DevicesView: View {
             DeviceDetailView(mac: route.mac)
         }
         .pollingScope(DevicesView.kinds)
-        .onAppear {
-            updateBadge()
-        }
-        .onChange(of: store.latestData?.newdevs) { _, _ in
-            updateBadge()
-        }
-        .onChange(of: store.selectedTab) { _, _ in
-            updateBadge()
-        }
-        .onChange(of: scenePhase) { _, _ in
-            updateBadge()
-        }
-    }
-
-    /// On screen → everything is seen (badge 0); on another tab → count what came since the last visit.
-    private func updateBadge() {
-        if store.selectedTab == .devices && scenePhase == .active {
-            store.markDevicesSeen()
-        } else {
-            store.refreshDevicesBadge()
-        }
     }
 }
 
@@ -226,7 +204,7 @@ struct DeviceSectionCard: View {
                     .rotationEffect(.degrees(expanded ? 180 : 0))
                     .accessibilityHidden(true)
             }
-            .frame(minHeight: 32)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

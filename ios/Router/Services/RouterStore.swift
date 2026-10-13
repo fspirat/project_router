@@ -36,13 +36,13 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// SF Symbols (inventory §9.4).
+    /// SF Symbols (contract-stage4 §1.1).
     var symbol: String {
         switch self {
         case .summary:
             return "gauge.with.dots.needle.67percent"
         case .vpn:
-            return "checkmark.shield"
+            return "lock.shield"
         case .devices:
             return "macbook.and.iphone"
         case .bypass:
@@ -117,8 +117,9 @@ final class RouterStore {
     var vds: VdsResponse? = nil
     /// `GET /devices` (who has access: phones, browsers, login journal).
     var accessList: AccessList? = nil
-    /// The last read error to show per kind (see `readError(_:)`); cleared by the next success.
-    var readErrors: [ReadKind: String] = [:]
+    /// The last read error to show per kind (see `readError(_:)`, `readErrorCode(_:)`); cleared by the next
+    /// success.
+    var readErrors: [ReadKind: APIError] = [:]
 
     /// The last successful `/status` (or ping job result).
     var lastStatusAt: Date? = nil
@@ -165,6 +166,12 @@ final class RouterStore {
     var errorTick: Int = 0
     /// Toast/confirm hosts on screen, bottom to top (tab roots and app sheets; see PresentationHost.swift).
     var hostStack: [PresentationHostEntry] = []
+    /// The lock screen is up (mirrored from `AppLock` by RootView): no action starts and no 428 sheet opens.
+    /// Observed, so controls re-enable as soon as the app is unlocked.
+    var uiLocked: Bool = false
+    /// When `pingone` last succeeded per node id (Unix time): the server card says «Проверено только что»
+    /// for a minute (contract-stage4 §5.1.4), also after the card is closed and opened again.
+    var pingedAt: [String: TimeInterval] = [:]
 
     // MARK: Bookkeeping (not observed)
 
@@ -182,7 +189,8 @@ final class RouterStore {
     @ObservationIgnored var quietUntil: Date? = nil
     @ObservationIgnored var disabledUntil: [SummaryButton: Date] = [:]
     @ObservationIgnored var lockedUntil: [String: Date] = [:]
-    @ObservationIgnored var timers: [Task<Void, Never>] = []
+    /// Pending `after(_:_:)` timers; each removes itself when it fires.
+    @ObservationIgnored var timers: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored var actionTask: Task<Void, Never>? = nil
     @ObservationIgnored var jobTask: Task<Void, Never>? = nil
     @ObservationIgnored var loginTask: Task<Void, Never>? = nil
@@ -194,6 +202,10 @@ final class RouterStore {
     @ObservationIgnored var verificationID: UUID? = nil
     @ObservationIgnored var completions: [UUID: ActionCompletion] = [:]
     @ObservationIgnored var tabRestored: Bool = false
+    /// A 428 sheet has appeared and its dismissal has not been reported yet (PresentationHost).
+    @ObservationIgnored var confirmSheetShown: Bool = false
+    /// Completions held back until the closing 428 sheet is gone (see `finishCompletion`).
+    @ObservationIgnored var afterConfirmDismissed: [@MainActor () -> Void] = []
 
     init(keychain: KeychainStore = KeychainStore(), baseURL: URL = AppConfig.baseURL) {
         let box = TokenBox()
@@ -254,7 +266,12 @@ final class RouterStore {
     /// A read error to show for `kind`, or nil. Router 502/504 and bad replies count only from the second
     /// failure in a row (contract-stage4 §4.3); other errors (e.g. `/mydirect` `500 no rule`) at once.
     func readError(_ kind: ReadKind) -> String? {
-        return readErrors[kind]
+        return readErrors[kind]?.userMessage
+    }
+
+    /// The API error code behind `readError(kind)` (e.g. "no rule"), or nil.
+    func readErrorCode(_ kind: ReadKind) -> String? {
+        return readErrors[kind]?.code
     }
 
     /// Switch to the Journal tab with filter «Все» and `range` (contract-stage4 §5.1.5).
@@ -442,10 +459,10 @@ final class RouterStore {
         jobTask = nil
         loginTask?.cancel()
         loginTask = nil
-        for timer in timers {
+        for timer in timers.values {
             timer.cancel()
         }
-        timers = []
+        timers = [:]
         keychain.deleteToken()
         tokenBox.set(nil)
         RouterStore.clearSessionInfo()
@@ -497,6 +514,7 @@ final class RouterStore {
         vds = nil
         accessList = nil
         readErrors = [:]
+        pingedAt = [:]
         lastStatusAt = nil
         firstLoadFinished = false
         offline = false
@@ -526,6 +544,8 @@ final class RouterStore {
         zapretFastSince = nil
         verificationID = nil
         completions = [:]
+        confirmSheetShown = false
+        afterConfirmDismissed = []
     }
 
     // MARK: - Reads
@@ -542,7 +562,10 @@ final class RouterStore {
         inFlight.insert(kind)
         lastAttemptAt[kind] = Date()
         defer {
-            inFlight.remove(kind)
+            // A read left over from the previous session must not free the new session's slot.
+            if epoch == sessionEpoch {
+                inFlight.remove(kind)
+            }
         }
         do {
             switch kind {
@@ -565,6 +588,7 @@ final class RouterStore {
                 }
                 dataByRange[range] = value
                 latestData = value
+                updateDevicesBadge()
             case .led:
                 let value = try await client.led()
                 guard epoch == sessionEpoch else {
@@ -664,6 +688,7 @@ final class RouterStore {
         if let latest = latestData {
             latestData = latest.replacingNames(names)
         }
+        updateDevicesBadge()
     }
 
     func handleReadError(_ e: APIError, kind: ReadKind) {
@@ -726,9 +751,19 @@ final class RouterStore {
         }
         let transient = e.entersOfflineMode || e.isBadReply || e.isNoConnection || e.kind == .badResponse
         if transient && (streak < 2 || isQuiet) {
+            if streak == 1 && !isQuiet && (effectiveInterval(kind) ?? .infinity) > 30 {
+                // No timer brings the 2nd failure soon (`/mydirect`, `/devices`: none; `/vds`: 5 min), and the
+                // screen would keep «Загружаю…» meanwhile: retry once.
+                after(5) { [weak self] in
+                    guard let self = self, self.pollingActive, self.activeKinds.contains(kind), self.shouldPoll(kind) else {
+                        return
+                    }
+                    await self.read(kind)
+                }
+            }
             return
         }
-        readErrors[kind] = e.userMessage
+        readErrors[kind] = e
     }
 
     // MARK: - Toasts and timers
@@ -762,19 +797,23 @@ final class RouterStore {
     /// Runs `work` after `seconds` unless the session changed meanwhile.
     func after(_ seconds: TimeInterval, _ work: @escaping @MainActor @Sendable () async -> Void) {
         let epoch = sessionEpoch
+        let id = UUID()
         let task = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: RouterStore.nanoseconds(seconds))
             } catch {
                 return
             }
-            guard let self = self, self.sessionEpoch == epoch else {
+            guard let self = self else {
+                return
+            }
+            self.timers[id] = nil
+            guard self.sessionEpoch == epoch else {
                 return
             }
             await work()
         }
-        timers.removeAll { $0.isCancelled }
-        timers.append(task)
+        timers[id] = task
     }
 
     // MARK: - Helpers
