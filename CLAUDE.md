@@ -117,6 +117,18 @@ nginx перед каждым запросом спрашивает `check.php` 
 - fail2ban: jail **`fspirat-router-app`** (неверный токен, отказ во входе, токен в адресе — 10 за 10 мин → бан 15 мин, как и у входа в панель);
   неверный пароль из приложения — в `fspirat-router-auth`. Снять бан: `fail2ban-client set fspirat-router-app unbanip <IP>`.
 - iPhone-сборка — GitHub → TestFlight (`docs/ios/inventory.md` §9.5); ключи `*.p8`/`*.p12` только в секретах GitHub.
+- **Код приложения** (этап 3, отчёт — `docs/ios/stage3-report.md`):
+  - `ios/RouterCore/` — Swift-пакет без UI: модели API, клиент (только `Authorization: Bearer`, ephemeral-сессия),
+    вход/подтверждения/задачи, правила «Сводки» (порт `web/app.js`), форматирование. Тесты — `swift test --package-path ios/RouterCore`
+    (workflow `iOS core tests` на Linux при каждом push в `ios/RouterCore/**`).
+  - `ios/Router/` — SwiftUI (iOS 17+, Swift 5 mode): вход, Keychain (`ThisDeviceOnly`), Face ID, «Сводка», мини-Настройки.
+    `ios/project.yml` — XcodeGen; `.xcodeproj` и `Router/Info.plist` генерируются и в git не идут.
+  - Тексты, поля API и правила клиента — контракт этапа 3 (вывод из кода сервера и веба); при расхождении прав код сервера.
+- **Сборка `iOS TestFlight`** (`.github/workflows/ios-testflight.yml`, macos-26, минута ≈ 10 минут квоты):
+  - push в `ios/**` — задача пропускается (0 минут), если в сообщении коммита нет `[ios build]`; с меткой — только проверка сборки без подписи;
+  - в TestFlight отправляет только запуск из `main` (кнопка Run workflow или раз в 2 месяца) и только если заданы 4 секрета
+    `ASC_ISSUER_ID`, `ASC_KEY_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`; иначе — проверка сборки;
+  - номер сборки `run_number.run_attempt`; подпись `auto` = Apple Development (нужен iPhone в developer.apple.com → Devices), при ошибке ad-hoc.
 
 ## Важные константы
 
