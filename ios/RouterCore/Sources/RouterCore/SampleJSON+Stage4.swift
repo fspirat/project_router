@@ -1,5 +1,5 @@
-// Generated from the stage 4 client contract (contract-stage4.md §2, §3.3, §10) and the observed responses of the
-// real app.php (scratchpad/stage4h/out4.txt). Reference time: `SampleJSON.now`.
+// Generated from the stage 4 client contract (docs/ios/contract-stage4.md §2, §3.3, §10) and the observed responses of the
+// real app.php (local run against the test stubs). Reference time: `SampleJSON.now`.
 // No real addresses, tokens or secrets: MACs/IPs are documentation ranges, ids and confirms are dummies.
 
 extension SampleJSON {
@@ -228,7 +228,7 @@ extension SampleJSON {
 {"error":"confirm_invalid","message":"Подтверждение не подошло — повтори действие."}
 """#
 
-    /// 428 observed (scratchpad/stage4h/out4.txt).
+    /// 428 observed (local run against the test stubs; texts in docs/ios/contract-stage4.md §3.3).
     public static let confirmSwitchNode: String = #"""
 {"error":"confirm_required","message":"Нужно подтверждение.","confirm":"ea66e344f7d0a0a8f140aef4d38eeb04","expires_in":60,"danger":"high","title":"Подключить «🇩🇪 Германия»?","text":"VPN перезапустится, связь через VPN пропадёт на несколько секунд.","button":"Подключить"}
 """#

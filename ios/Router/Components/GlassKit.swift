@@ -1,7 +1,7 @@
 import SwiftUI
 import RouterCore
 
-// Liquid Glass design kit for «Роутер» (stage 4; guide: scratchpad stage3/liquid-glass.md).
+// Liquid Glass design kit for «Роутер» (stage 4; guide: docs/ios/liquid-glass.md).
 // Deployment target iOS 17, built with the iOS 26 SDK, Swift 5 mode.
 // Rule of thumb: real Liquid Glass (glassEffect / .glass button styles) only on the
 // control layer — buttons, chips, floating toasts. Content cards use standard materials.

@@ -26,10 +26,12 @@ Swift-пакет без зависимостей (только Foundation) — �
 - `Format.swift`, `Format+Stage4.swift` — форматирование чисел, скоростей, размеров и времени (время — Самара, UTC+4).
   С этапа 4 — десятичная запятая («9,2 ГБ») и неразрывный пробел перед единицей («64 мс»).
 - `Validation.swift`, `Session.swift` — проверки ввода, сроки входа, ссылки для настроек.
-- `SampleJSON.swift`, `SampleJSON+Stage4.swift` — образцы ответов из контрактов этапов 3 и 4 (для превью и тестов,
+- `SampleJSON.swift`, `SampleJSON+Stage4.swift` — образцы ответов из контрактов этапов 3 и 4
+  (`docs/ios/contract-stage3.md` §8, `docs/ios/contract-stage4.md` §10; для превью и тестов,
   без настоящих адресов и ключей).
 
-Правила взяты из контрактов этапов 3 и 4 (сервер `server/auth/app.php` и веб `web/app.js`).
+Правила взяты из контрактов этапов 3 и 4 — `docs/ios/contract-stage3.md` и `docs/ios/contract-stage4.md`
+(вывод из кода сервера `server/auth/app.php` и веба `web/app.js`; при расхождении прав код).
 
 ## Тесты
 
