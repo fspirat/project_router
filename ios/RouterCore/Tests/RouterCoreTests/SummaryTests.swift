@@ -42,7 +42,7 @@ final class SummaryTests: XCTestCase {
             VerdictItem(name: "Роутер", level: .ok, text: "в сети"),
             VerdictItem(name: "VPN", level: .ok, text: "работает"),
             VerdictItem(name: "Интернет", level: .ok, text: "есть"),
-            VerdictItem(name: "Серверы", level: .ok, text: "3 из 5"),
+            VerdictItem(name: "Серверы", level: .ok, text: "3\u{00A0}из\u{00A0}5"),
             VerdictItem(name: "Сервисы", level: .warn, text: "нет ответа: Discord")
         ])
         XCTAssertNil(v.splitWarning)
@@ -76,13 +76,13 @@ final class SummaryTests: XCTestCase {
         let v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
         XCTAssertEqual(item(v, "VPN"), VerdictItem(name: "VPN", level: .warn, text: "выключен — всё напрямую"))
         XCTAssertEqual(item(v, "Сервисы"), VerdictItem(name: "Сервисы", level: .warn, text: "нет ответа: YouTube, Discord, Telegram"))
-        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .ok, text: "2 из 2"))
+        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .ok, text: "2\u{00A0}из\u{00A0}2"))
         XCTAssertEqual(v.title, "Требует внимания")
         XCTAssertEqual(Summary.currentServer(s).name, "Напрямую (без VPN)")
         XCTAssertEqual(Summary.currentServer(s).tag, "без VPN")
         XCTAssertTrue(Summary.currentServer(s).isDirect)
-        XCTAssertEqual(Summary.routerFacts(s.sys)[0].value, "51 °C")
-        XCTAssertEqual(Summary.routerFacts(s.sys)[1].value, "1 ч 1 мин")
+        XCTAssertEqual(Summary.routerFacts(s.sys)[0].value, "51\u{00A0}°C")
+        XCTAssertEqual(Summary.routerFacts(s.sys)[1].value, "1\u{00A0}ч 1\u{00A0}мин")
         XCTAssertEqual(Summary.routerTitle(s.sys), "Роутер")
     }
 
@@ -91,7 +91,7 @@ final class SummaryTests: XCTestCase {
         let v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
         XCTAssertEqual(item(v, "VPN"), VerdictItem(name: "VPN", level: .err, text: "не проходит"))
         XCTAssertEqual(item(v, "Интернет"), VerdictItem(name: "Интернет", level: .ok, text: "есть"))
-        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .warn, text: "1 из 2"))
+        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .warn, text: "1\u{00A0}из\u{00A0}2"))
         XCTAssertEqual(v.level, .err)
         XCTAssertEqual(v.title, "Есть проблема")
         XCTAssertEqual(Summary.latency(s, now: nowT).value, "VPN не проходит")
@@ -129,7 +129,7 @@ final class SummaryTests: XCTestCase {
         s.ping?.real = 300
         v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
         XCTAssertEqual(item(v, "VPN"), VerdictItem(name: "VPN", level: .warn, text: "работает"))
-        XCTAssertEqual(Summary.latency(s, now: nowT).value, "300 мс")
+        XCTAssertEqual(Summary.latency(s, now: nowT).value, "300\u{00A0}мс")
         XCTAssertEqual(Summary.latency(s, now: nowT).tone, .err)
     }
 
@@ -159,7 +159,7 @@ final class SummaryTests: XCTestCase {
         var s = try status(SampleJSON.statusNormal)
         s.ping?.nodes = []
         var v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
-        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .err, text: "0 из 0"))
+        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .err, text: "0\u{00A0}из\u{00A0}0"))
         XCTAssertEqual(v.level, .err)
 
         s = try status(SampleJSON.statusNormal)
@@ -167,7 +167,7 @@ final class SummaryTests: XCTestCase {
             s.ping?.nodes[i].ms = (i == 2) ? 50 : 0
         }
         v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
-        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .warn, text: "1 из 5"))
+        XCTAssertEqual(item(v, "Серверы"), VerdictItem(name: "Серверы", level: .warn, text: "1\u{00A0}из\u{00A0}5"))
     }
 
     func testSubscriptionItems() throws {
@@ -175,11 +175,11 @@ final class SummaryTests: XCTestCase {
         // 2 days left
         s.subs?[0].expire = SampleJSON.now + 2 * 86400 + 100
         var v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
-        XCTAssertEqual(item(v, "Подписка"), VerdictItem(name: "Подписка", level: .warn, text: "осталось 2 дн."))
+        XCTAssertEqual(item(v, "Подписка"), VerdictItem(name: "Подписка", level: .warn, text: "осталось 2\u{00A0}дн."))
         // 3 days left: still shown
         s.subs?[0].expire = SampleJSON.now + 3 * 86400 + 100
         v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
-        XCTAssertEqual(item(v, "Подписка"), VerdictItem(name: "Подписка", level: .warn, text: "осталось 3 дн."))
+        XCTAssertEqual(item(v, "Подписка"), VerdictItem(name: "Подписка", level: .warn, text: "осталось 3\u{00A0}дн."))
         // 4 days: hidden
         s.subs?[0].expire = SampleJSON.now + 4 * 86400 + 100
         v = Summary.verdict(status: s, isOffline: false, firstLoadFinished: true, now: nowT)
@@ -214,9 +214,9 @@ final class SummaryTests: XCTestCase {
         XCTAssertEqual(c.tag, "свой")
         XCTAssertFalse(c.isDirect)
         let l = Summary.latency(s, now: nowT)
-        XCTAssertEqual(l.value, "48 мс")
+        XCTAssertEqual(l.value, "48\u{00A0}мс")
         XCTAssertEqual(l.tone, .ok)
-        XCTAssertEqual(l.footer, "Проверено 6 мин назад")
+        XCTAssertEqual(l.footer, "Проверено 6\u{00A0}мин назад")
         XCTAssertFalse(Summary.needsPingPreDialog(s))
 
         var other = s
@@ -240,7 +240,7 @@ final class SummaryTests: XCTestCase {
         let s = try status(SampleJSON.statusNormal)
         let tiles = Summary.services(s)
         XCTAssertEqual(tiles.map { $0.name }, ["YouTube", "Discord", "Telegram"])
-        XCTAssertEqual(tiles.map { $0.valueText }, ["61 мс", "нет ответа", "74 мс"])
+        XCTAssertEqual(tiles.map { $0.valueText }, ["61\u{00A0}мс", "нет ответа", "74\u{00A0}мс"])
         XCTAssertEqual(tiles.map { $0.tone }, [.ok, .err, .ok])
         XCTAssertEqual(tiles.map { $0.icon }, ["play.rectangle", "bubble.left.and.bubble.right", "paperplane"])
 
@@ -250,7 +250,7 @@ final class SummaryTests: XCTestCase {
         t.current = "Hd3Fs9Qa"
         let tiles2 = Summary.services(t)
         XCTAssertEqual(tiles2.map { $0.host }, ["www.youtube.com", "discord.com", "api.telegram.org"])
-        XCTAssertEqual(tiles2.map { $0.valueText }, ["88 мс", "95 мс", "102 мс"])
+        XCTAssertEqual(tiles2.map { $0.valueText }, ["88\u{00A0}мс", "95\u{00A0}мс", "102\u{00A0}мс"])
 
         // no results for the current server → «—»
         t.current = "Pz1Yc4Ue"
@@ -273,7 +273,7 @@ final class SummaryTests: XCTestCase {
     func testSubscriptionLine() throws {
         let s = try status(SampleJSON.statusNormal)
         let line = try XCTUnwrap(Summary.subscriptionLine(s, now: nowT))
-        XCTAssertEqual(line.text, "Подписка до 31 октября · осталось 17 дн. · израсходовано 39.2 ГБ из 200.0 ГБ")
+        XCTAssertEqual(line.text, "Подписка до 31 октября · осталось 17\u{00A0}дн. · израсходовано 39,2\u{00A0}ГБ из 200,0\u{00A0}ГБ")
         XCTAssertEqual(line.prefix, "Подписка до ")
         XCTAssertEqual(line.date, "31 октября")
         XCTAssertEqual(line.daysLeft, 17)
@@ -288,7 +288,7 @@ final class SummaryTests: XCTestCase {
         second.up = 0
         many.subs?.append(second)
         let line2 = try XCTUnwrap(Summary.subscriptionLine(many, now: nowT))
-        XCTAssertEqual(line2.text, "«backup» до 24 октября · осталось 10 дн. · израсходовано 1.0 ГБ, без лимита")
+        XCTAssertEqual(line2.text, "«backup» до 24 октября · осталось 10\u{00A0}дн. · израсходовано 1,0\u{00A0}ГБ, без лимита")
 
         // fallback to status.sub when subs carry no expiry
         var fb = s
@@ -304,31 +304,31 @@ final class SummaryTests: XCTestCase {
         let m = Summary.meters(s.sys)
         XCTAssertEqual(m[0].title, "Процессор")
         XCTAssertEqual(m[0].percent, 7)
-        XCTAssertEqual(m[0].caption, "Средняя нагрузка 0.21 0.17 0.15, ядер: 2")
+        XCTAssertEqual(m[0].caption, "Средняя нагрузка 0,21 0,17 0,15 · ядер: 2")
         XCTAssertEqual(m[0].tone, .ok)
         XCTAssertEqual(m[1].percent, 50)
-        XCTAssertEqual(m[1].caption, "121 МБ из 240 МБ")
+        XCTAssertEqual(m[1].caption, "121\u{00A0}МБ из 240\u{00A0}МБ")
         XCTAssertEqual(m[2].percent, 35)
-        XCTAssertEqual(m[2].caption, "31 МБ из 87 МБ: пакеты и настройки")
+        XCTAssertEqual(m[2].caption, "31\u{00A0}МБ из 87\u{00A0}МБ: пакеты и настройки")
         XCTAssertEqual(Summary.meterTone(percent: 64), .ok)
         XCTAssertEqual(Summary.meterTone(percent: 65), .warn)
         XCTAssertEqual(Summary.meterTone(percent: 85), .err)
         let facts = Summary.routerFacts(s.sys)
-        XCTAssertEqual(facts, [Fact(label: "Температура", value: "нет датчика"), Fact(label: "Работает без перезагрузки", value: "4 д 2 ч")])
+        XCTAssertEqual(facts, [Fact(label: "Температура", value: "нет датчика"), Fact(label: "Работает без перезагрузки", value: "4\u{00A0}д 2\u{00A0}ч")])
         XCTAssertEqual(Summary.routerTitle(s.sys), "Xiaomi Mi Router AX3000T")
         XCTAssertEqual(Summary.onlineCount(s), 3)
-        XCTAssertEqual(Summary.onlineText(s), "3 в сети")
+        XCTAssertEqual(Summary.onlineText(s), "3\u{00A0}в сети")
         XCTAssertEqual(Summary.tmpMeter(s.sys).percent, 3)
 
         let reboot = try status(SampleJSON.statusAfterReboot)
-        XCTAssertEqual(Summary.routerFacts(reboot.sys)[1].value, "1 мин")
+        XCTAssertEqual(Summary.routerFacts(reboot.sys)[1].value, "1\u{00A0}мин")
     }
 
     func testTrafficEventsAndDevices() throws {
         let d = try decodeJSON(DataResponse.self, SampleJSON.dataDay)
         let today = Summary.trafficToday(d)
-        XCTAssertEqual(today.downText, "1.5 ГБ")
-        XCTAssertEqual(today.upText, "51 МБ")
+        XCTAssertEqual(today.downText, "1,5\u{00A0}ГБ")
+        XCTAssertEqual(today.upText, "51\u{00A0}МБ")
         XCTAssertTrue(today.isVisible)
         XCTAssertFalse(Summary.trafficToday(try decodeJSON(DataResponse.self, SampleJSON.dataDayEmpty)).isVisible)
 
@@ -357,13 +357,13 @@ final class SummaryTests: XCTestCase {
 
     func testOfflineBanner() throws {
         let d = try decodeJSON(DataResponse.self, SampleJSON.dataDayOffline)
-        XCTAssertEqual(OfflineBanner.line(data: d, now: nowT), "Не на связи с 14:04 · уже 12 мин · последний ответ 14:03")
+        XCTAssertEqual(OfflineBanner.line(data: d, now: nowT), "Не на связи с 14:04 · уже 12\u{00A0}мин · последний ответ 14:03")
         let e = try decodeJSON(DataResponse.self, SampleJSON.dataDayEmpty)
         XCTAssertEqual(OfflineBanner.line(data: e, now: nowT), "Сервер не получает ответа от роутера")
         XCTAssertEqual(OfflineBanner.line(data: nil, now: nowT), "Сервер не получает ответа от роутера")
         var same = d
         same.offlineSince = nil
-        XCTAssertEqual(OfflineBanner.line(data: same, now: nowT), "Не на связи с 14:03 · уже 13 мин")
+        XCTAssertEqual(OfflineBanner.line(data: same, now: nowT), "Не на связи с 14:03 · уже 13\u{00A0}мин")
     }
 
     func testChart() throws {
@@ -393,14 +393,14 @@ final class SummaryTests: XCTestCase {
         XCTAssertEqual(Summary.emptyChart, "данных за этот период пока нет")
 
         let facts = Summary.statsFacts(d.stats)
-        XCTAssertEqual(facts.map { $0.value }, ["50 мс", "47 мс", "52 мс", "1", "1 мин"])
+        XCTAssertEqual(facts.map { $0.value }, ["50\u{00A0}мс", "47\u{00A0}мс", "52\u{00A0}мс", "1", "1\u{00A0}мин"])
         let emptyFacts = Summary.statsFacts(try decodeJSON(DataResponse.self, SampleJSON.dataDayEmpty).stats)
-        XCTAssertEqual(emptyFacts.map { $0.value }, ["—", "—", "—", "0", "0 мин"])
+        XCTAssertEqual(emptyFacts.map { $0.value }, ["—", "—", "—", "0", "0\u{00A0}мин"])
     }
 
     func testUpdatedLabelAndExpiry() throws {
         XCTAssertNil(Summary.updatedLabel(lastSuccess: nil, now: nowT))
-        XCTAssertEqual(Summary.updatedLabel(lastSuccess: nowT - 12, now: nowT), "обновлено 12 сек назад")
+        XCTAssertEqual(Summary.updatedLabel(lastSuccess: nowT - 12, now: nowT), "обновлено 12\u{00A0}сек назад")
 
         let me = try decodeJSON(MeResponse.self, SampleJSON.meExpiring)
         XCTAssertEqual(

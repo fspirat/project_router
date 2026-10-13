@@ -9,47 +9,68 @@ enum SessionState: Equatable {
     case loggedIn
 }
 
-/// The reads that are polled while «Сводка» is on screen (contract §7.1).
-enum ReadKind: Hashable, CaseIterable {
-    case status
-    case net
-    case data
-    case led
-    case me
+/// The bottom tabs (contract-stage4 §1.1). Settings is the gear on every tab, not a tab.
+enum AppTab: String, CaseIterable, Identifiable, Hashable {
+    case summary
+    case vpn
+    case devices
+    case bypass
+    case journal
 
-    /// Seconds between reads.
-    var interval: TimeInterval {
+    var id: String {
+        return rawValue
+    }
+
+    var title: String {
         switch self {
-        case .status:
-            return 30
-        case .net:
-            return 3
-        case .data:
-            return 60
-        case .led:
-            return 300
-        case .me:
-            return 1800
+        case .summary:
+            return "Сводка"
+        case .vpn:
+            return "VPN"
+        case .devices:
+            return "Устройства"
+        case .bypass:
+            return "Обход"
+        case .journal:
+            return "Журнал"
+        }
+    }
+
+    /// SF Symbols (inventory §9.4).
+    var symbol: String {
+        switch self {
+        case .summary:
+            return "gauge.with.dots.needle.67percent"
+        case .vpn:
+            return "checkmark.shield"
+        case .devices:
+            return "macbook.and.iphone"
+        case .bypass:
+            return "arrow.triangle.branch"
+        case .journal:
+            return "scroll"
         }
     }
 }
 
-/// A 428 dialog waiting for the user.
-struct PendingConfirm: Identifiable, Equatable {
-    let action: RouterAction
-    let button: SummaryButton
-    let prompt: ConfirmPrompt
+/// «Все в журнале» from the VPN switch history (contract-stage4 §5.1.5): the Journal tab opens with
+/// filter «Все» and this range. Set by `RouterStore.openJournal(range:)`; the Journal screen consumes it.
+struct JournalLink: Equatable {
+    let id: UUID
+    let range: DataRange
 
-    var id: String {
-        return prompt.confirm
+    init(range: DataRange) {
+        self.id = UUID()
+        self.range = range
     }
 }
 
-/// The single app state (inventory §9.1): session, data, polling and actions.
+/// The single app state (inventory §9.1): session, data caches, polling and actions.
 ///
 /// - Data lives only in memory; the token is in Keychain, `SessionInfo` (not secret) in UserDefaults.
-/// - Polling runs only while the Summary is visible and the app is active (`runPolling()` is started
-///   from the view's `.task(id:)` and cancelled with it). One request per kind at a time.
+/// - Polling (RouterStore+Polling.swift) runs only while the app is active, unlocked and logged in, and only
+///   for the reads of the screens on display (`.pollingScope(_:)`). One request per kind at a time.
+/// - Actions (RouterStore+Actions.swift): one generic runner with the 428 confirm flow, jobs, aftermath.
 /// - Any `401 token_*` → LOGOUT: token deleted, polling stopped, login screen with the server message.
 @Observable
 @MainActor
@@ -73,53 +94,106 @@ final class RouterStore {
     var loginDeadline: Date? = nil
     var offerFaceID: Bool = false
 
-    // MARK: Data (memory only)
+    // MARK: Data caches (memory only; contract-stage4 §1.2)
 
+    /// `/status` (or the ping job result). Shared by Summary, VPN, Devices, Bypass.
     var status: RouterStatus? = nil
+    /// `/net` (Summary «Интернет сейчас» only).
     var net: NetStats? = nil
+    /// `/led`.
     var led: LedState? = nil
-    var dayData: DataResponse? = nil
+    /// `/data?range=…`, one cache per range. Read with `data(_:)`.
+    var dataByRange: [DataRange: DataResponse] = [:]
+    /// The newest `/data` response of any range: use it for `names`, `traffic`, `newdevs`, `speed`, `site`
+    /// (the same in every range).
+    var latestData: DataResponse? = nil
+    /// `/zapret`.
+    var zapret: ZapretState? = nil
+    /// `/tgws`.
+    var tgws: TgwsState? = nil
+    /// `/mydirect`.
+    var mydirect: MyDirectList? = nil
+    /// `/vds` (own servers, read-only).
+    var vds: VdsResponse? = nil
+    /// `GET /devices` (who has access: phones, browsers, login journal).
+    var accessList: AccessList? = nil
+    /// The last read error to show per kind (see `readError(_:)`); cleared by the next success.
+    var readErrors: [ReadKind: String] = [:]
+
     /// The last successful `/status` (or ping job result).
     var lastStatusAt: Date? = nil
     var firstLoadFinished: Bool = false
-    /// Offline mode (contract §7.5).
+    /// Offline mode (contract §7.5): only `/status` 502/504 outside a quiet window switches it on.
     var offline: Bool = false
-    /// `503 app_disabled`: full-screen state, the token is kept.
+    /// `503 app_disabled`: full-screen state on Summary, a pill elsewhere; the token is kept.
     var appDisabled: Bool = false
     /// A `/status` error that is not offline mode (server down, no connection, …).
     var statusError: String? = nil
 
+    // MARK: Navigation (shared between screens)
+
+    /// The selected tab. Screens may switch it (e.g. Summary «Все устройства» → `.devices`).
+    var selectedTab: AppTab = .summary
+    /// Badge per tab (0 / missing = none). The Devices screen may set `.devices` (new devices this week).
+    var tabBadges: [AppTab: Int] = [:]
+    /// «Все в журнале»: consumed (set to nil) by the Journal screen.
+    var journalLink: JournalLink? = nil
+    var isSettingsPresented: Bool = false
+
     // MARK: Actions and presentation
 
-    var runningAction: SummaryButton? = nil
+    /// A non-job action in flight (its request or its 428 fetch). Other non-job actions are disabled meanwhile.
+    var runningAction: RunningAction? = nil
+    /// A job (ping, speedtest) being polled. Another job cannot start meanwhile; other actions can.
+    var runningJob: RunningAction? = nil
+    /// «Сводка» buttons disabled after an action (stage 3 aftermath `disabledButtons`).
     var disabledButtons: Set<SummaryButton> = []
+    /// Action names (`RouterAction.name`) disabled app-wide right now: PW lock-out, reboot, 429 `retry_after`,
+    /// verification windows. Use `isLocked(_:)` / `canPerform(_:)`.
+    var lockedActionNames: Set<String> = []
+    /// Quiet-window banner («VPN перезапускается…»): Summary shows it as a banner, other tabs as a pill.
     var quietBanner: String? = nil
     var ledBusy: Bool = false
     var pendingConfirm: PendingConfirm? = nil
     var confirmBusy: Bool = false
     var confirmError: String? = nil
+    /// A check that runs on the re-reads after `zapretstrat` / `tgwsset` (spinner on the control meanwhile).
+    var verification: Verification? = nil
     var showPingPreDialog: Bool = false
-    var isSettingsPresented: Bool = false
     var toast: ToastMessage? = nil
     var successTick: Int = 0
     var errorTick: Int = 0
+    /// Toast/confirm hosts on screen, bottom to top (tab roots and app sheets; see PresentationHost.swift).
+    var hostStack: [PresentationHostEntry] = []
 
     // MARK: Bookkeeping (not observed)
 
-    /// The «Интернет сейчас» card is on screen (`/net` is polled only then).
-    @ObservationIgnored var netCardVisible: Bool = false
     /// Bumped on every login/logout: late answers of an old session are dropped.
     @ObservationIgnored var sessionEpoch: Int = 0
     @ObservationIgnored var inFlight: Set<ReadKind> = []
     @ObservationIgnored var retryUntil: [ReadKind: Date] = [:]
+    /// Last successful read per kind.
     @ObservationIgnored var lastReadAt: [ReadKind: Date] = [:]
+    /// Last started read per kind (success or not): the polling schedule counts from it.
+    @ObservationIgnored var lastAttemptAt: [ReadKind: Date] = [:]
+    /// Failed reads in a row per kind (router 502/504 on zapret/tgws/mydirect are shown only from the 2nd).
+    @ObservationIgnored var readFailures: [ReadKind: Int] = [:]
     @ObservationIgnored var badReplyStreak: Int = 0
     @ObservationIgnored var quietUntil: Date? = nil
     @ObservationIgnored var disabledUntil: [SummaryButton: Date] = [:]
+    @ObservationIgnored var lockedUntil: [String: Date] = [:]
     @ObservationIgnored var timers: [Task<Void, Never>] = []
     @ObservationIgnored var actionTask: Task<Void, Never>? = nil
+    @ObservationIgnored var jobTask: Task<Void, Never>? = nil
     @ObservationIgnored var loginTask: Task<Void, Never>? = nil
     @ObservationIgnored var pollingCount: Int = 0
+    /// Visible polling scopes (`.pollingScope(_:)`), by scope id.
+    @ObservationIgnored var scopes: [UUID: Set<ReadKind>] = [:]
+    /// Fast `/zapret` polling (3 s while busy/checking, ≤ 2 min per trigger).
+    @ObservationIgnored var zapretFastSince: Date? = nil
+    @ObservationIgnored var verificationID: UUID? = nil
+    @ObservationIgnored var completions: [UUID: ActionCompletion] = [:]
+    @ObservationIgnored var tabRestored: Bool = false
 
     init(keychain: KeychainStore = KeychainStore(), baseURL: URL = AppConfig.baseURL) {
         let box = TokenBox()
@@ -165,6 +239,28 @@ final class RouterStore {
             return false
         }
         return until > Date()
+    }
+
+    /// `/data` for one range (nil until the first read of that range).
+    func data(_ range: DataRange) -> DataResponse? {
+        return dataByRange[range]
+    }
+
+    /// `/data?range=day` (Summary, Settings links).
+    var dayData: DataResponse? {
+        return dataByRange[.day]
+    }
+
+    /// A read error to show for `kind`, or nil. Router 502/504 and bad replies count only from the second
+    /// failure in a row (contract-stage4 §4.3); other errors (e.g. `/mydirect` `500 no rule`) at once.
+    func readError(_ kind: ReadKind) -> String? {
+        return readErrors[kind]
+    }
+
+    /// Switch to the Journal tab with filter «Все» and `range` (contract-stage4 §5.1.5).
+    func openJournal(range: DataRange) {
+        journalLink = JournalLink(range: range)
+        selectedTab = .journal
     }
 
     // MARK: - Login (contract §7.6)
@@ -323,6 +419,8 @@ final class RouterStore {
         sessionEpoch += 1
         loginMessage = nil
         loginBlockedUntil = nil
+        selectedTab = .summary
+        tabRestored = true
         session = .loggedIn
         offerFaceID = BiometricGate.canAuthenticate && !AppSettings.lockOnOpen
         if !saved {
@@ -340,6 +438,8 @@ final class RouterStore {
         sessionEpoch += 1
         actionTask?.cancel()
         actionTask = nil
+        jobTask?.cancel()
+        jobTask = nil
         loginTask?.cancel()
         loginTask = nil
         for timer in timers {
@@ -373,10 +473,14 @@ final class RouterStore {
         _ = try? await oneShot.logout()
     }
 
-    /// Close sheets and dialogs (lock screen, logout).
+    /// Close store-owned sheets and dialogs (lock screen, logout). Screen-owned sheets stay under the
+    /// lock/privacy cover (`sheetChrome`).
     func dismissPresentations() {
         isSettingsPresented = false
-        pendingConfirm = nil
+        if let pending = pendingConfirm {
+            pendingConfirm = nil
+            finishCompletion(pending.request, .cancelled)
+        }
         confirmError = nil
         showPingPreDialog = false
     }
@@ -385,116 +489,46 @@ final class RouterStore {
         status = nil
         net = nil
         led = nil
-        dayData = nil
+        dataByRange = [:]
+        latestData = nil
+        zapret = nil
+        tgws = nil
+        mydirect = nil
+        vds = nil
+        accessList = nil
+        readErrors = [:]
         lastStatusAt = nil
         firstLoadFinished = false
         offline = false
         appDisabled = false
         statusError = nil
         runningAction = nil
+        runningJob = nil
         disabledButtons = []
+        lockedActionNames = []
         quietBanner = nil
         ledBusy = false
         confirmBusy = false
         confirmError = nil
+        verification = nil
         toast = nil
+        tabBadges = [:]
+        journalLink = nil
         inFlight = []
         retryUntil = [:]
         lastReadAt = [:]
+        lastAttemptAt = [:]
+        readFailures = [:]
         badReplyStreak = 0
         quietUntil = nil
         disabledUntil = [:]
+        lockedUntil = [:]
+        zapretFastSince = nil
+        verificationID = nil
+        completions = [:]
     }
 
-    // MARK: - Polling (contract §7.1)
-
-    /// Runs until the calling task is cancelled (view hidden, app inactive, locked).
-    func runPolling() async {
-        guard isLoggedIn else {
-            return
-        }
-        pollingCount += 1
-        defer {
-            pollingCount -= 1
-        }
-        // `/me` first and alone (contract §2.5, §7.1): it validates the token before the parallel reads,
-        // so a stale token costs one `401 token_*` instead of 4–5 (`token_invalid` counts toward fail2ban),
-        // and it re-reads `/me` on launch and unlock. Not again within a minute: Control Center or the
-        // Face ID sheet also flip the scene inactive → active.
-        if lastReadAt[.me].map({ Date().timeIntervalSince($0) > RouterStore.meRecheckAfter }) ?? true {
-            await read(.me)
-            guard isLoggedIn, !Task.isCancelled else {
-                return
-            }
-        }
-        await withTaskGroup(of: Void.self) { group in
-            for kind in ReadKind.allCases {
-                group.addTask {
-                    await self.pollLoop(kind)
-                }
-            }
-        }
-    }
-
-    func pollLoop(_ kind: ReadKind) async {
-        if kind == .me, let last = lastReadAt[.me] {
-            // `/me` is read first by `runPolling()` (launch, unlock), on login and when Settings opens;
-            // this loop only adds a read every 30 min.
-            let wait = kind.interval - Date().timeIntervalSince(last)
-            if wait > 0 {
-                do {
-                    try await Task.sleep(nanoseconds: RouterStore.nanoseconds(wait))
-                } catch {
-                    return
-                }
-            }
-        }
-        while !Task.isCancelled {
-            if shouldPoll(kind) {
-                await read(kind)
-            }
-            do {
-                try await Task.sleep(nanoseconds: RouterStore.nanoseconds(kind.interval))
-            } catch {
-                return
-            }
-        }
-    }
-
-    func shouldPoll(_ kind: ReadKind) -> Bool {
-        guard isLoggedIn, !appDisabled else {
-            return false
-        }
-        switch kind {
-        case .net:
-            // A sheet (Settings, confirm) does not fire the card's onDisappear: stop /net under it too.
-            return netCardVisible && !offline && !isQuiet && !isSettingsPresented && pendingConfirm == nil
-        case .led:
-            return !offline
-        case .status, .data, .me:
-            return true
-        }
-    }
-
-    /// Pull-to-refresh: re-reads `/me` (token check first), then status, data and LED once. Never runs actions.
-    func refreshAll() async {
-        guard isLoggedIn else {
-            return
-        }
-        appDisabled = false
-        await read(.me)
-        guard isLoggedIn else {
-            return
-        }
-        let kinds: [ReadKind] = [.status, .data, .led]
-        await withTaskGroup(of: Void.self) { group in
-            for kind in kinds {
-                group.addTask {
-                    await self.read(kind)
-                }
-            }
-        }
-    }
+    // MARK: - Reads
 
     /// One read. Skipped while the same kind is in flight or blocked by `retry_after`.
     func read(_ kind: ReadKind) async {
@@ -506,6 +540,7 @@ final class RouterStore {
         }
         let epoch = sessionEpoch
         inFlight.insert(kind)
+        lastAttemptAt[kind] = Date()
         defer {
             inFlight.remove(kind)
         }
@@ -523,12 +558,13 @@ final class RouterStore {
                     return
                 }
                 net = value
-            case .data:
-                let value = try await client.data(range: .day)
+            case .data(let range):
+                let value = try await client.data(range: range)
                 guard epoch == sessionEpoch else {
                     return
                 }
-                dayData = value
+                dataByRange[range] = value
+                latestData = value
             case .led:
                 let value = try await client.led()
                 guard epoch == sessionEpoch else {
@@ -543,8 +579,42 @@ final class RouterStore {
                     return
                 }
                 applyMe(value)
+            case .zapret:
+                let value = try await client.zapret()
+                guard epoch == sessionEpoch else {
+                    return
+                }
+                applyZapret(value)
+            case .tgws:
+                let value = try await client.tgws()
+                guard epoch == sessionEpoch else {
+                    return
+                }
+                tgws = value
+            case .mydirect:
+                let value = try await client.mydirect()
+                guard epoch == sessionEpoch else {
+                    return
+                }
+                mydirect = value
+            case .vds:
+                let value = try await client.vds()
+                guard epoch == sessionEpoch else {
+                    return
+                }
+                vds = value
+            case .devices:
+                let value = try await client.accessList()
+                guard epoch == sessionEpoch else {
+                    return
+                }
+                accessList = value
             }
             lastReadAt[kind] = Date()
+            readFailures[kind] = nil
+            if readErrors[kind] != nil {
+                readErrors[kind] = nil
+            }
             appDisabled = false
         } catch {
             guard epoch == sessionEpoch else {
@@ -572,6 +642,30 @@ final class RouterStore {
         RouterStore.saveSessionInfo(info)
     }
 
+    /// `/zapret` with the fast-poll bookkeeping: a new trigger starts when busy/checking appears.
+    func applyZapret(_ value: ZapretState) {
+        zapret = value
+        if value.busy || value.checking {
+            if zapretFastSince == nil {
+                zapretFastSince = Date()
+            }
+        } else {
+            zapretFastSince = nil
+        }
+    }
+
+    /// After `rename`: the whole names map replaces `names` in every `/data` cache.
+    func applyNames(_ names: [String: String]) {
+        var updated: [DataRange: DataResponse] = [:]
+        for (range, value) in dataByRange {
+            updated[range] = value.replacingNames(names)
+        }
+        dataByRange = updated
+        if let latest = latestData {
+            latestData = latest.replacingNames(names)
+        }
+    }
+
     func handleReadError(_ e: APIError, kind: ReadKind) {
         if e.isCancelled {
             return
@@ -589,7 +683,8 @@ final class RouterStore {
             retryUntil[kind] = Date().addingTimeInterval(TimeInterval(seconds))
         }
         guard kind == .status else {
-            // net / data / led / me: keep the old data, try again on the next tick.
+            // Other kinds keep the old data; the error is shown per screen via `readError(_:)`.
+            noteReadFailure(e, kind: kind)
             return
         }
         firstLoadFinished = true
@@ -613,6 +708,27 @@ final class RouterStore {
             return
         }
         statusError = e.userMessage
+    }
+
+    /// Router 502/504, bad replies and no connection count from the 2nd failure in a row; other errors at once.
+    /// `.net`, `.led`, `.me` stay silent as in stage 3.
+    func noteReadFailure(_ e: APIError, kind: ReadKind) {
+        let streak = (readFailures[kind] ?? 0) + 1
+        readFailures[kind] = streak
+        switch kind {
+        case .net, .led, .me:
+            return
+        default:
+            break
+        }
+        if e.isRateLimited || e.isBusy {
+            return
+        }
+        let transient = e.entersOfflineMode || e.isBadReply || e.isNoConnection || e.kind == .badResponse
+        if transient && (streak < 2 || isQuiet) {
+            return
+        }
+        readErrors[kind] = e.userMessage
     }
 
     // MARK: - Toasts and timers
@@ -657,6 +773,7 @@ final class RouterStore {
             }
             await work()
         }
+        timers.removeAll { $0.isCancelled }
         timers.append(task)
     }
 

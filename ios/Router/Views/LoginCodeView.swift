@@ -25,18 +25,15 @@ struct LoginCodeView: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.dim)
                     .multilineTextAlignment(.center)
-                Button {
+                AppButton(title: LoginTexts.cancelButton, kind: .secondary) {
                     store.cancelLogin()
-                } label: {
-                    Text(LoginTexts.cancelButton)
                 }
-                .buttonStyle(ActionButtonStyle(kind: .secondary))
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
         .background {
-            Theme.bg.ignoresSafeArea()
+            AppBackground()
         }
     }
 }

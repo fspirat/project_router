@@ -209,7 +209,7 @@ final class APIClientTests: XCTestCase {
             XCTFail("expected an error")
         } catch let e as APIError {
             XCTAssertEqual(e.retryAfter, 2)
-            XCTAssertEqual(e.userMessage, "Слишком часто — подожди немного. Повтори через 2 с.")
+            XCTAssertEqual(e.userMessage, "Слишком часто — подожди немного. Повтори через 2\u{00A0}с.")
         }
     }
 
@@ -305,7 +305,7 @@ final class APIClientTests: XCTestCase {
         } catch let e as APIError {
             XCTAssertTrue(e.isRateLimited)
             XCTAssertEqual(e.retryAfter, 15)
-            XCTAssertEqual(e.actionMessage, "Слишком часто — подожди немного. Повтори через 15 с.")
+            XCTAssertEqual(e.actionMessage, "Слишком часто — подожди немного. Повтори через 15\u{00A0}с.")
         }
     }
 

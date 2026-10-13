@@ -220,7 +220,8 @@ struct StatsGrid: View {
                         .font(.caption)
                         .foregroundStyle(Theme.dim)
                     Text(fact.value)
-                        .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
                         .foregroundStyle(Theme.text)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

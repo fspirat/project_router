@@ -25,31 +25,53 @@ struct ServerCard: View {
             }
             .accessibilityElement(children: .combine)
             LineDivider()
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Проверка через VPN · \(LatencyTile.label)")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Theme.text)
-                    Text(LatencyTile.caption)
-                        .font(.caption)
-                        .foregroundStyle(Theme.faint)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            LatencyRow(latency: latency)
+        }
+    }
+}
+
+/// «Проверка через VPN» (contract-stage4 §9.4): the title on one line, the big value on the right,
+/// the explanation («Задержка — как пинг: …») below the title, «Проверено …» under the value.
+/// VoiceOver: «Проверка через VPN, задержка 48 мс».
+struct LatencyRow: View {
+    let latency: LatencyTile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(LatencyTile.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .allowsTightening(true)
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(latency.value)
-                        .font(.system(.title3, design: .monospaced, weight: .semibold))
-                        .foregroundStyle(Theme.levelText(latency.tone))
+                Text(latency.value)
+                    .font(.title3.weight(.semibold))
+                    .numericValue(latency.value)
+                    .foregroundStyle(Theme.levelText(latency.tone))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(LatencyTile.caption)
+                    .font(.caption)
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if let footer = latency.footer {
+                    Text(footer)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.dim)
                         .multilineTextAlignment(.trailing)
-                    if let footer = latency.footer {
-                        Text(footer)
-                            .font(.caption)
-                            .foregroundStyle(Theme.dim)
-                    }
                 }
             }
-            .accessibilityElement(children: .combine)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(LatencyTile.accessibilityLabel(value: latency.value))
+        .accessibilityValue(latency.footer ?? "")
     }
 }
 
@@ -86,13 +108,12 @@ struct ServiceTileView: View {
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
             Text(tile.valueText)
-                .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
                 .foregroundStyle(Theme.levelText(tile.tone))
                 .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .innerTile()
         .accessibilityElement(children: .combine)
     }
 }
@@ -103,7 +124,7 @@ struct InternetCard: View {
 
     var body: some View {
         let current: NetStats? = store.offline ? nil : (store.net ?? store.status?.sys.net)
-        let today: TrafficToday? = store.dayData.map { Summary.trafficToday($0) }
+        let today: TrafficToday? = (store.dayData ?? store.latestData).map { Summary.trafficToday($0) }
         Card {
             CardTitle("Интернет сейчас", symbol: "speedometer")
             if let net = current {
@@ -111,8 +132,9 @@ struct InternetCard: View {
                     SpeedValue(symbol: "arrow.down", label: "Загрузка", value: Fmt.speed(net.rx))
                     SpeedValue(symbol: "arrow.up", label: "Отдача", value: Fmt.speed(net.tx))
                 }
-                Text("С момента включения: ↓ \(Fmt.bytes(net.rxTotal)) · ↑ \(Fmt.bytes(net.txTotal))")
+                Text("С момента включения: ↓\u{00A0}\(Fmt.bytes(net.rxTotal)) · ↑\u{00A0}\(Fmt.bytes(net.txTotal))")
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(Theme.faint)
             } else {
                 Text(store.offline ? "Скорость появится, когда роутер снова будет на связи." : "—")
@@ -122,11 +144,13 @@ struct InternetCard: View {
             if let traffic = today, traffic.isVisible {
                 LineDivider()
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Сегодня ↓ \(traffic.downText)")
-                        .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                    Text("Сегодня ↓\u{00A0}\(traffic.downText)")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
                         .foregroundStyle(Theme.text)
-                    Text("↑ \(traffic.upText)")
-                        .font(.system(.subheadline, design: .monospaced))
+                    Text("↑\u{00A0}\(traffic.upText)")
+                        .font(.subheadline)
+                        .monospacedDigit()
                         .foregroundStyle(Theme.dim)
                     Spacer(minLength: 0)
                 }
@@ -137,12 +161,8 @@ struct InternetCard: View {
                     .foregroundStyle(Theme.faint)
             }
         }
-        .onAppear {
-            store.netCardVisible = true
-        }
-        .onDisappear {
-            store.netCardVisible = false
-        }
+        // `/net` every 3 s only while this card is on screen (and no sheet is up, see `shouldPoll`).
+        .pollingScope([.net])
     }
 }
 
@@ -157,7 +177,8 @@ struct SpeedValue: View {
                 .font(.caption)
                 .foregroundStyle(Theme.dim)
             Text(value)
-                .font(.system(.title2, design: .monospaced, weight: .semibold))
+                .font(.title2.weight(.semibold))
+                .numericValue(value)
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

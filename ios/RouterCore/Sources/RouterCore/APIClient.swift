@@ -276,6 +276,31 @@ public final class APIClient: @unchecked Sendable {
         return try await request(Endpoint.me, as: MeResponse.self)
     }
 
+    /// `GET /zapret`. 502/504 here must NOT switch offline mode on (only `/status` does).
+    public func zapret() async throws -> ZapretState {
+        return try await request(Endpoint.zapret, as: ZapretState.self)
+    }
+
+    /// `GET /tgws`.
+    public func tgws() async throws -> TgwsState {
+        return try await request(Endpoint.tgws, as: TgwsState.self)
+    }
+
+    /// `GET /mydirect`. `500 no rule` → show the message instead of the lists.
+    public func mydirect() async throws -> MyDirectList {
+        return try await request(Endpoint.mydirect, as: MyDirectList.self)
+    }
+
+    /// `GET /vds` (server file; works offline).
+    public func vds() async throws -> VdsResponse {
+        return try await request(Endpoint.vds, as: VdsResponse.self)
+    }
+
+    /// `GET /devices` (who has access; server-only, works offline).
+    public func accessList() async throws -> AccessList {
+        return try await request(Endpoint.devices, as: AccessList.self)
+    }
+
     // MARK: - Auth
 
     /// `POST /auth/login`. Refuses locally (no request) an empty/oversized password or an empty name.
@@ -335,14 +360,14 @@ public final class APIClient: @unchecked Sendable {
         return out
     }
 
-    /// Lowercase letters, digits and single slashes; no leading slash.
+    /// Lowercase letters, digits, `-` (`devices/revoke-all`) and single slashes; no leading slash, no `..`.
     static func isSafePath(_ path: String) -> Bool {
-        if path.isEmpty || path.hasPrefix("/") || path.hasSuffix("/") || path.contains("//") {
+        if path.isEmpty || path.hasPrefix("/") || path.hasSuffix("/") || path.contains("//") || path.hasPrefix("-") {
             return false
         }
         for u in path.unicodeScalars {
             let v = u.value
-            let ok = (v >= 0x61 && v <= 0x7A) || (v >= 0x30 && v <= 0x39) || v == 0x2F
+            let ok = (v >= 0x61 && v <= 0x7A) || (v >= 0x30 && v <= 0x39) || v == 0x2F || v == 0x2D
             if !ok {
                 return false
             }

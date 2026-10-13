@@ -157,6 +157,196 @@ public enum Validation {
         return c == "2" || c == "6" || c == "a" || c == "e"
     }
 
+    // MARK: - Stage 4 action parameters (mirror `app_action_spec`, server/auth/app.php)
+
+    /// Own device name limit (`mb_strlen` after trim on the server → code points).
+    public static let renameMaxLength = 40
+    /// MyDirect domain limit, bytes.
+    public static let domainMaxBytes = 100
+    /// svcdirect service name limit, UTF-8 bytes.
+    public static let serviceNameMaxBytes = 40
+
+    /// Texts for refused parameters (inline under the field).
+    public static let domainHint = "Нужен домен вида site.ru"
+    public static let sameTimeHint = "Укажи разное время выключения и включения."
+    public static let badTimeHint = "Неверное время."
+    public static let serviceNameHint = "Это имя нельзя изменить из приложения."
+
+    /// `^([0-9a-f]{2}:){5}[0-9a-f]{2}$` — lowercase only (uppercase → 400 on the server).
+    public static func isValidMAC(_ mac: String) -> Bool {
+        let s = Array(mac.unicodeScalars)
+        guard s.count == 17 else {
+            return false
+        }
+        for (i, u) in s.enumerated() {
+            if i % 3 == 2 {
+                if u.value != 0x3A {
+                    return false
+                }
+            } else {
+                let v = u.value
+                if !((v >= 0x30 && v <= 0x39) || (v >= 0x61 && v <= 0x66)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    /// Node id for `pingone`/`switch`: `^[A-Za-z0-9]{1,32}$` (so `_direct` never passes; `direct` passes the regex
+    /// but is meaningful only for `switch`).
+    public static func isValidNodeID(_ id: String) -> Bool {
+        let s = Array(id.unicodeScalars)
+        guard s.count >= 1 && s.count <= 32 else {
+            return false
+        }
+        return s.allSatisfy { isAlnum($0.value) }
+    }
+
+    /// Subscription id for `subupdate`: `^[A-Za-z0-9_]{1,32}$`.
+    public static func isValidSubscriptionID(_ sid: String) -> Bool {
+        let s = Array(sid.unicodeScalars)
+        guard s.count >= 1 && s.count <= 32 else {
+            return false
+        }
+        return s.allSatisfy { isAlnum($0.value) || $0.value == 0x5F }
+    }
+
+    /// `^([01][0-9]|2[0-3])[0-5][0-9]$` («2300», «0700»).
+    public static func isValidHHMM(_ t: String) -> Bool {
+        let s = Array(t.unicodeScalars).map { Int($0.value) - 0x30 }
+        guard s.count == 4, s.allSatisfy({ $0 >= 0 && $0 <= 9 }) else {
+            return false
+        }
+        let hour = s[0] * 10 + s[1]
+        return hour <= 23 && s[2] <= 5
+    }
+
+    /// The server domain regex `^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`
+    /// and ≤ 100 bytes. Cyrillic (`.рф`) and uppercase fail.
+    public static func isValidDomain(_ d: String) -> Bool {
+        guard !d.isEmpty, d.utf8.count <= domainMaxBytes else {
+            return false
+        }
+        let labels = d.split(separator: ".", omittingEmptySubsequences: false).map { Array($0.unicodeScalars) }
+        guard labels.count >= 2 else {
+            return false
+        }
+        func lowerAlnum(_ u: Unicode.Scalar) -> Bool {
+            let v = u.value
+            return (v >= 0x30 && v <= 0x39) || (v >= 0x61 && v <= 0x7A)
+        }
+        for (i, label) in labels.enumerated() {
+            let last = i == labels.count - 1
+            if last {
+                // [a-z][a-z0-9-]{0,61}[a-z0-9]: 2…63 characters
+                guard label.count >= 2 && label.count <= 63 else {
+                    return false
+                }
+                let f = label[0].value
+                guard f >= 0x61 && f <= 0x7A else {
+                    return false
+                }
+            } else {
+                // [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?: 1…63 characters
+                guard label.count >= 1 && label.count <= 63, lowerAlnum(label[0]) else {
+                    return false
+                }
+            }
+            guard lowerAlnum(label[label.count - 1]) else {
+                return false
+            }
+            for u in label where !(lowerAlnum(u) || u.value == 0x2D) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// svcdirect name: 1…40 UTF-8 bytes, none of `\x00-\x1f \x7f ~ ! " < > & \ |`.
+    public static func isValidServiceName(_ name: String) -> Bool {
+        let n = name.utf8.count
+        guard n >= 1 && n <= serviceNameMaxBytes else {
+            return false
+        }
+        for u in name.unicodeScalars {
+            let v = u.value
+            if v < 0x20 || v == 0x7F {
+                return false
+            }
+            if "~!\"<>&\\|".unicodeScalars.contains(u) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// 16 lowercase hex (app key id, web session ref).
+    public static func isValidHex16(_ s: String) -> Bool {
+        return isLowerHex(s, length: 16)
+    }
+
+    /// The `rename` value that is sent: trimmed (the server trims too). `""` removes the own name.
+    public static func renameValue(_ name: String) -> String {
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// For the rename text field while typing: removes control characters and limits to 40 code points.
+    public static func limitRenameInput(_ name: String) -> String {
+        var cleaned = String.UnicodeScalarView()
+        for u in name.unicodeScalars where !(u.value < 0x20 || u.value == 0x7F) {
+            cleaned.append(u)
+        }
+        return clampScalars(String(cleaned), max: renameMaxLength)
+    }
+
+    /// `nil` when the server would accept the parameters; else a local error that `APIClient.perform` throws
+    /// without sending (`bad_param`, or `too_long` for a long name). `message` is ready to show.
+    public static func actionError(_ action: RouterAction) -> APIError? {
+        let generic = APIError.client(code: "bad_param", message: APIError.fallbackTexts["bad_param"])
+        switch action {
+        case .ping, .restart, .update, .reboot, .ledset, .subupdateAll, .speedtest, .zapretset, .zapretcheck, .tgwsset, .revokeAll:
+            return nil
+        case .pingone(let id):
+            return isValidNodeID(id) && id != "direct" ? nil : generic
+        case .switchServer(let id):
+            return isValidNodeID(id) ? nil : generic
+        case .subupdate(let sid):
+            return isValidSubscriptionID(sid) ? nil : generic
+        case .block(let mac), .unblock(let mac), .direct(let mac, _), .scheduleClear(let mac):
+            return isValidMAC(mac.lowercased()) ? nil : generic
+        case .schedule(let mac, let off, let on):
+            guard isValidMAC(mac.lowercased()) else {
+                return generic
+            }
+            guard isValidHHMM(off) && isValidHHMM(on) else {
+                return APIError.client(code: "bad_param", message: badTimeHint)
+            }
+            return off == on ? APIError.client(code: "bad_param", message: sameTimeHint) : nil
+        case .diradd(let d), .dirdel(let d):
+            return isValidDomain(d) ? nil : APIError.client(code: "bad_param", message: domainHint)
+        case .svcdirect(let name, _):
+            return isValidServiceName(name) ? nil : APIError.client(code: "bad_param", message: serviceNameHint)
+        case .zapretstrat(let n):
+            return (1...3).contains(n) ? nil : generic
+        case .rename(let mac, let name):
+            guard isValidMAC(mac.lowercased()) else {
+                return generic
+            }
+            for u in name.unicodeScalars where u.value < 0x20 || u.value == 0x7F {
+                return generic
+            }
+            if renameValue(name).unicodeScalars.count > renameMaxLength {
+                return APIError.client(code: "too_long", message: APIError.fallbackTexts["too_long"])
+            }
+            return nil
+        case .revokeApp(let id):
+            return isValidHex16(id) ? nil : generic
+        case .revokeWeb(let ref):
+            return isValidHex16(ref) ? nil : generic
+        }
+    }
+
     // MARK: - Internals
 
     static func isAlnum(_ v: UInt32) -> Bool {

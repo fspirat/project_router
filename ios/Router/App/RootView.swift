@@ -1,20 +1,20 @@
 import SwiftUI
 import RouterCore
 
-/// Login form / number screen / Summary, with the lock screen and the privacy cover on top.
+/// Login form / number screen / the tabs, with the lock screen and the (optional) privacy cover on top.
 struct RootView: View {
     @Environment(RouterStore.self) var store
     @Environment(AppLock.self) var lock
     @Environment(\.scenePhase) var scenePhase
     @AppStorage(AppSettings.lockOnOpenKey) var lockOnOpen = false
+    @AppStorage(AppSettings.hideInSwitcherKey) var hideInSwitcher = false
 
     var body: some View {
         @Bindable var bindableStore = store
         ZStack {
-            Theme.bg
-                .ignoresSafeArea()
+            AppBackground()
             content
-                // VoiceOver must not reach (or activate) the Summary under the lock screen.
+                // VoiceOver must not reach (or activate) the data under the lock screen.
                 .accessibilityHidden(lock.isLocked && store.isLoggedIn)
         }
         .overlay {
@@ -50,7 +50,7 @@ struct RootView: View {
     private var content: some View {
         switch store.session {
         case .loggedIn:
-            SummaryView()
+            MainTabView()
         case .waitingForBot:
             LoginCodeView()
         case .loggedOut:
@@ -59,13 +59,15 @@ struct RootView: View {
     }
 
     private func handle(_ phase: ScenePhase) {
-        if phase != .active {
+        if phase != .active && hideInSwitcher {
             // System dialogs are drawn above the in-view privacy cover: close the «Проверить?» dialog
-            // (it tells the VPN state) before the app-switcher snapshot.
+            // (it tells the VPN state) before the app-switcher snapshot. Without the cover (default) the
+            // snapshot shows the screen anyway, so nothing is closed (contract-stage4 §1.3).
             store.showPingPreDialog = false
         }
         switch phase {
         case .background:
+            // Locks here only with «Сразу» + «Скрывать в переключателе приложений» (AppLock).
             lock.didEnterBackground(loggedIn: store.isLoggedIn)
         case .inactive:
             // On the way back from the background: lock before the scene becomes active.

@@ -53,12 +53,14 @@ struct MeterRow: View {
                     .foregroundStyle(Theme.text)
                 Spacer(minLength: 8)
                 Text(Fmt.percent(meter.percent))
-                    .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
+                    .numericValue(meter.percent)
                     .foregroundStyle(meter.tone == .ok ? Theme.text : Theme.levelText(meter.tone))
             }
             MeterBar(percent: meter.percent, tone: meter.tone)
             Text(meter.caption)
                 .font(.caption)
+                .monospacedDigit()
                 .foregroundStyle(Theme.dim)
         }
         .accessibilityElement(children: .combine)
@@ -110,12 +112,14 @@ struct SubscriptionCard: View {
                 CardTitle("Подписка", symbol: "calendar")
                 Text(line.prefix + line.date)
                     .font(.body.weight(.semibold))
+                    .monospacedDigit()
                     .foregroundStyle(Theme.text)
                 HStack(spacing: 4) {
                     Text("осталось")
                         .foregroundStyle(Theme.dim)
-                    Text("\(line.daysLeft) дн.")
+                    Text("\(line.daysLeft)\u{00A0}дн.")
                         .fontWeight(.semibold)
+                        .monospacedDigit()
                         .foregroundStyle(line.daysLeftIsCritical ? Theme.err : Theme.text)
                     Spacer(minLength: 0)
                 }
@@ -123,10 +127,12 @@ struct SubscriptionCard: View {
                 if let usage = SubscriptionCard.usageText(line.usage) {
                     Text(usage)
                         .font(.subheadline)
+                        .monospacedDigit()
                         .foregroundStyle(Theme.dim)
                 }
                 Text(SubscriptionCard.trafficLeft(pick))
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(.subheadline)
+                    .monospacedDigit()
                     .foregroundStyle(Theme.text)
             }
             .accessibilityElement(children: .combine)
@@ -154,19 +160,20 @@ struct SubscriptionCard: View {
     }
 }
 
-/// Devices online (contract §4.11) with the top 4 by today's download.
+/// Devices online (contract §4.11) with the top 4 by today's download; «Все устройства» opens the tab.
 struct DevicesCard: View {
     @Environment(RouterStore.self) var store
     let status: RouterStatus
 
     var body: some View {
-        let rows = Summary.topOnlineDevices(status, data: store.dayData)
+        let rows = Summary.topOnlineDevices(status, data: store.dayData ?? store.latestData)
         Card {
             HStack(alignment: .firstTextBaseline) {
                 CardTitle("Устройства", symbol: "macbook.and.iphone")
                 Spacer(minLength: 8)
                 Text(Summary.onlineText(status))
-                    .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
                     .foregroundStyle(Theme.accText)
             }
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
@@ -177,13 +184,20 @@ struct DevicesCard: View {
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     if row.todayDown > 0 {
-                        Text("↓ \(Fmt.bytes(row.todayDown))")
-                            .font(.system(.caption, design: .monospaced))
+                        Text("↓\u{00A0}\(Fmt.bytes(row.todayDown))")
+                            .font(.caption)
+                            .monospacedDigit()
                             .foregroundStyle(Theme.dim)
                     }
                 }
                 .accessibilityElement(children: .combine)
             }
+            Button {
+                store.selectedTab = .devices
+            } label: {
+                CardRow("Все устройства", systemImage: "list.bullet", showsChevron: true)
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -196,7 +210,7 @@ struct EventsCard: View {
     var body: some View {
         Card {
             CardTitle("Последние события", symbol: "scroll")
-            if let data = store.dayData {
+            if let data = store.dayData ?? store.latestData {
                 let rows = Summary.recentEvents(data, now: now)
                 if rows.isEmpty {
                     Text(Summary.emptyEvents)
@@ -222,7 +236,8 @@ struct EventRowView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(row.time)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(Theme.dim)
                 ToneChip(text: row.chip, tone: row.level)
                 Spacer(minLength: 0)
@@ -237,13 +252,14 @@ struct EventRowView: View {
 }
 
 /// Router buttons (contract §4.13). Disabled offline, during quiet windows and while another runs.
+/// Liquid Glass (guide §3.7): no coloured prominent button in this group — glass buttons, reboot with a red label.
 struct ActionsCard: View {
     @Environment(RouterStore.self) var store
 
     var body: some View {
-        Card {
+        Card(spacing: 10) {
             CardTitle("Действия", symbol: "bolt")
-            ActionButton(button: .check, kind: .primary, busyText: ActionTexts.pingBusy)
+            ActionButton(button: .check, kind: .secondary, busyText: ActionTexts.pingBusy)
             ActionButton(button: .restartVPN, kind: .secondary, busyText: nil)
             ActionButton(button: .updateSubs, kind: .secondary, busyText: nil)
             ActionButton(button: .reboot, kind: .destructiveOutline, busyText: nil)
@@ -263,21 +279,15 @@ struct ActionButton: View {
     let busyText: String?
 
     var body: some View {
-        let busy = store.runningAction == button
-        Button {
+        let busy = store.isBusy(button)
+        AppButton(
+            title: busy ? (busyText ?? button.title) : button.title,
+            systemImage: button.symbol,
+            kind: kind,
+            isBusy: busy
+        ) {
             store.tap(button)
-        } label: {
-            HStack(spacing: 8) {
-                if busy {
-                    ProgressView()
-                } else {
-                    Image(systemName: button.symbol)
-                        .accessibilityHidden(true)
-                }
-                Text(busy ? (busyText ?? button.title) : button.title)
-            }
         }
-        .buttonStyle(ActionButtonStyle(kind: kind))
         .disabled(!store.isEnabled(button))
     }
 }

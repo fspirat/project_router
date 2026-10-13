@@ -10,9 +10,14 @@ public enum Tone: String, Equatable, Sendable {
     case neutral
 }
 
-/// Formatting ported from `web/app.js` (contract §5). Decimal separator is "." like the web.
+/// Formatting ported from `web/app.js` (contract §5), with the stage 4 changes (contract-stage4 §9):
+/// the Russian decimal comma («9,2 ГБ») and a non-breaking space (U+00A0) between a number and its unit
+/// («64 мс», «18,7 Мбит/с»). Integers, percents, times, dates, IPs and versions are unchanged.
 /// Every time is shown in Europe/Samara (router time, UTC+4, no DST).
 public enum Fmt {
+    /// U+00A0, put between a number and its unit so they never wrap apart.
+    public static let nbsp = "\u{00A0}"
+
     /// Europe/Samara; falls back to a fixed UTC+4 if the tz database is missing.
     public static let samaraTimeZone: TimeZone = TimeZone(identifier: "Europe/Samara") ?? TimeZone(secondsFromGMT: 4 * 3600)!
 
@@ -39,18 +44,18 @@ public enum Fmt {
         return Int(r)
     }
 
-    /// JS `toFixed(1)` for display (half away from zero).
+    /// JS `toFixed(1)` (half away from zero) with the Russian decimal comma: «9,2».
     public static func fixed1(_ x: Double) -> String {
         guard x.isFinite else {
-            return "0.0"
+            return "0,0"
         }
         let scaled = (abs(x) * 10).rounded(.toNearestOrAwayFromZero)
         guard scaled < 9.0e18 else {
-            return "0.0"
+            return "0,0"
         }
         let tenths = Int(scaled)
         let sign = (x < 0 && tenths != 0) ? "-" : ""
-        return "\(sign)\(tenths / 10).\(tenths % 10)"
+        return "\(sign)\(tenths / 10),\(tenths % 10)"
     }
 
     /// JS `toFixed(0)`.
@@ -67,25 +72,25 @@ public enum Fmt {
         return "\(sign)\(n)"
     }
 
-    /// Bits per second → «18.7 Мбит/с», «123 Мбит/с», «640 кбит/с».
+    /// Bits per second → «18,7 Мбит/с», «123 Мбит/с», «640 кбит/с» (NBSP before the unit).
     public static func speed(_ bitsPerSecond: Int) -> String {
         let b = Double(bitsPerSecond)
         if b >= 1e6 {
             let v = b / 1e6
-            return (b >= 1e8 ? fixed0(v) : fixed1(v)) + " Мбит/с"
+            return (b >= 1e8 ? fixed0(v) : fixed1(v)) + nbsp + "Мбит/с"
         }
-        return "\(jsRound(b / 1e3)) кбит/с"
+        return "\(jsRound(b / 1e3))" + nbsp + "кбит/с"
     }
 
-    /// KiB → «121 МБ», «3.4 МБ», «2.0 ГБ».
+    /// KiB → «121 МБ», «3,4 МБ», «2,0 ГБ» (NBSP before the unit).
     public static func mb(_ kib: Double) -> String {
         if kib >= 1048576 {
-            return fixed1(kib / 1048576) + " ГБ"
+            return fixed1(kib / 1048576) + nbsp + "ГБ"
         }
         if kib < 10240 {
-            return fixed1(kib / 1024) + " МБ"
+            return fixed1(kib / 1024) + nbsp + "МБ"
         }
-        return "\(jsRound(kib / 1024)) МБ"
+        return "\(jsRound(kib / 1024))" + nbsp + "МБ"
     }
 
     /// KiB (integer) → see `mb(_: Double)`.
@@ -93,14 +98,14 @@ public enum Fmt {
         return mb(Double(kib))
     }
 
-    /// Bytes → `mb(bytes / 1024)`: «38.0 ГБ», «51 МБ», «0.0 МБ».
+    /// Bytes → `mb(bytes / 1024)`: «38,0 ГБ», «51 МБ», «0,0 МБ».
     public static func bytes(_ b: Int) -> String {
         return mb(Double(b) / 1024)
     }
 
-    /// «48 мс».
+    /// «48 мс» (NBSP).
     public static func ms(_ v: Int) -> String {
-        return "\(v) мс"
+        return "\(v)" + nbsp + "мс"
     }
 
     /// `msCls`: < 120 ok, < 250 warn (mid), else err (slow).
@@ -144,7 +149,7 @@ public enum Fmt {
         guard let t = t else {
             return "нет датчика"
         }
-        return "\(t) °C"
+        return "\(t)" + nbsp + "°C"
     }
 
     /// `n%10==1 && n%100!=11` → one; `n%10 ∈ 2…4 && n%100 ∉ 12…14` → few; else many.
@@ -164,9 +169,9 @@ public enum Fmt {
     /// « Повтори через N с.» (N ≤ 90) or « Повтори через M мин.» (M = ceil(N/60)). Starts with a space.
     public static func retrySuffix(_ seconds: Int) -> String {
         if seconds <= 90 {
-            return " Повтори через \(seconds) с."
+            return " Повтори через \(seconds)" + nbsp + "с."
         }
-        return " Повтори через \((seconds + 59) / 60) мин."
+        return " Повтори через \((seconds + 59) / 60)" + nbsp + "мин."
     }
 
     // MARK: - Durations
@@ -178,9 +183,9 @@ public enum Fmt {
             return "только что"
         }
         if s < 3600 {
-            return "\(jsRound(Double(s) / 60)) мин назад"
+            return "\(jsRound(Double(s) / 60))" + nbsp + "мин назад"
         }
-        return "\(jsRound(Double(s) / 3600)) ч назад"
+        return "\(jsRound(Double(s) / 3600))" + nbsp + "ч назад"
     }
 
     /// «обновлено только что» / «обновлено N сек назад» / «обновлено N мин назад».
@@ -190,9 +195,9 @@ public enum Fmt {
             return "обновлено только что"
         }
         if s < 60 {
-            return "обновлено \(s) сек назад"
+            return "обновлено \(s)" + nbsp + "сек назад"
         }
-        return "обновлено \(jsRound(Double(s) / 60)) мин назад"
+        return "обновлено \(jsRound(Double(s) / 60))" + nbsp + "мин назад"
     }
 
     /// Uptime: «4 д 2 ч», «1 ч 1 мин», «1 мин».
@@ -202,25 +207,25 @@ public enum Fmt {
         let h = s % 86400 / 3600
         let m = s % 3600 / 60
         if d > 0 {
-            return "\(d) д \(h) ч"
+            return "\(d)" + nbsp + "д \(h)" + nbsp + "ч"
         }
         if h > 0 {
-            return "\(h) ч \(m) мин"
+            return "\(h)" + nbsp + "ч \(m)" + nbsp + "мин"
         }
-        return "\(m) мин"
+        return "\(m)" + nbsp + "мин"
     }
 
     /// Minutes: «12 мин», «1 ч 15 мин», «2 ч», «1 д 1 ч».
     public static func minutes(_ minutes: Int) -> String {
         let m = max(0, minutes)
         if m < 60 {
-            return "\(m) мин"
+            return "\(m)" + nbsp + "мин"
         }
         if m < 1440 {
             let rest = m % 60
-            return rest > 0 ? "\(m / 60) ч \(rest) мин" : "\(m / 60) ч"
+            return rest > 0 ? "\(m / 60)" + nbsp + "ч \(rest)" + nbsp + "мин" : "\(m / 60)" + nbsp + "ч"
         }
-        return "\(m / 1440) д \(m % 1440 / 60) ч"
+        return "\(m / 1440)" + nbsp + "д \(m % 1440 / 60)" + nbsp + "ч"
     }
 
     // MARK: - Dates (Europe/Samara)

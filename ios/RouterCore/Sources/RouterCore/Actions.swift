@@ -60,6 +60,12 @@ public struct ConfirmPrompt: Decodable, Equatable, Sendable {
         return danger == .critical
     }
 
+    /// Stage 4 rule (contract-stage4 §3.3): red when `danger == critical` or the action is `block`, `dirdel`
+    /// or `revoke-all`. Face ID still only for `critical` (`requiresBiometrics`).
+    public func isDestructive(for action: RouterAction) -> Bool {
+        return danger == .critical || action.forcesDestructiveConfirm
+    }
+
     /// `danger == critical`: run Face ID / passcode after the tap and before the resend
     /// (when the setting «Для опасных действий» is on).
     public var requiresBiometrics: Bool {
@@ -123,12 +129,15 @@ public struct JobDone: Equatable, Sendable {
     public var result: JSONValue
     /// For `ping`: the result decoded as a full status (replace the stored status with it).
     public var status: RouterStatus?
+    /// For `speedtest`: the result (put it into `status.speed[via]`).
+    public var speed: SpeedResult?
 
-    public init(action: String, http: Int, result: JSONValue, status: RouterStatus?) {
+    public init(action: String, http: Int, result: JSONValue, status: RouterStatus?, speed: SpeedResult? = nil) {
         self.action = action
         self.http = http
         self.result = result
         self.status = status
+        self.speed = speed
     }
 }
 
@@ -146,10 +155,14 @@ public enum JobStatus: Decodable, Equatable, Sendable {
         if state == "done" {
             let result = v["result"] ?? JSONValue.null
             var status: RouterStatus? = nil
+            var speed: SpeedResult? = nil
             if action == "ping" && result.isObject {
                 status = RouterStatus(json: result)
             }
-            self = .done(JobDone(action: action, http: v.num("http") ?? 200, result: result, status: status))
+            if action == "speedtest" && result.isObject {
+                speed = SpeedResult(json: result)
+            }
+            self = .done(JobDone(action: action, http: v.num("http") ?? 200, result: result, status: status, speed: speed))
             return
         }
         if state == "error" {
@@ -179,9 +192,14 @@ public enum JobStatus: Decodable, Equatable, Sendable {
 // MARK: - Client: actions
 
 extension APIClient {
-    /// `POST /action/<name>` with an optional `confirm` (contract §2.10–2.11).
-    /// Never retries. `confirm` is refused locally for non-confirmable actions.
+    /// `POST /action/<name>` (or `/devices/revoke*`) with an optional `confirm` (contract §2.10–2.11).
+    /// Never retries. Refused locally, without a request: parameters the server would reject
+    /// (`Validation.actionError`), and `confirm` on a non-confirmable action.
+    /// Resend a confirm only with the identical action: changed parameters burn it (`confirm_invalid`).
     public func perform(_ action: RouterAction, confirm: String? = nil) async throws -> ActionOutcome {
+        if let invalid = Validation.actionError(action) {
+            throw invalid
+        }
         if let c = confirm {
             guard action.isConfirmable, Validation.isValidConfirm(c) else {
                 throw APIError.client(code: "bad_param", message: nil)
@@ -326,65 +344,6 @@ public enum SummaryButton: String, CaseIterable, Sendable {
             return "power"
         case .led:
             return "lightbulb"
-        }
-    }
-}
-
-/// What to do after a 200 (contract §7.2).
-public struct ActionAftermath: Equatable, Sendable {
-    /// During it: `/status` errors are suppressed (no offline mode), `/net` is paused, the banner shows.
-    public var quietWindow: TimeInterval
-    /// Re-read `/status` after this many seconds (`nil` = no extra read).
-    public var rereadStatusAfter: TimeInterval?
-    /// Buttons disabled for `disabledFor` seconds.
-    public var disabledButtons: [SummaryButton]
-    public var disabledFor: TimeInterval
-    public var banner: String?
-    public var toast: String?
-
-    public init(quietWindow: TimeInterval, rereadStatusAfter: TimeInterval?, disabledButtons: [SummaryButton], disabledFor: TimeInterval, banner: String?, toast: String?) {
-        self.quietWindow = quietWindow
-        self.rereadStatusAfter = rereadStatusAfter
-        self.disabledButtons = disabledButtons
-        self.disabledFor = disabledFor
-        self.banner = banner
-        self.toast = toast
-    }
-
-    public static func after(_ action: RouterAction) -> ActionAftermath {
-        switch action {
-        case .restart:
-            return ActionAftermath(
-                quietWindow: 15, rereadStatusAfter: 15,
-                disabledButtons: [.check, .restartVPN, .updateSubs, .reboot], disabledFor: 15,
-                banner: "VPN перезапускается…", toast: "VPN перезапускается."
-            )
-        case .update:
-            return ActionAftermath(
-                quietWindow: 0, rereadStatusAfter: 60,
-                disabledButtons: [.restartVPN, .updateSubs], disabledFor: 15,
-                banner: nil,
-                toast: "Подписки обновляются — список серверов обновится через 1–2 минуты, потом VPN перезапустится на несколько секунд."
-            )
-        case .reboot:
-            return ActionAftermath(
-                quietWindow: 150, rereadStatusAfter: 150,
-                disabledButtons: [.check, .restartVPN, .updateSubs, .reboot, .led], disabledFor: 150,
-                banner: "Роутер перезагружается…",
-                toast: "Роутер перезагружается. Приложение само обновится, когда он вернётся."
-            )
-        case .ping:
-            return ActionAftermath(
-                quietWindow: 0, rereadStatusAfter: nil,
-                disabledButtons: [], disabledFor: 0,
-                banner: nil, toast: ActionTexts.pingDone
-            )
-        case .ledset(let on):
-            return ActionAftermath(
-                quietWindow: 0, rereadStatusAfter: nil,
-                disabledButtons: [], disabledFor: 0,
-                banner: nil, toast: on ? "Подсветка роутера включена." : "Подсветка роутера выключена."
-            )
         }
     }
 }

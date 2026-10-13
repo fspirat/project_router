@@ -16,6 +16,7 @@ struct ToastMessage: Identifiable, Equatable {
 }
 
 /// Bottom overlay that shows `store.toast` for a few seconds. Tap to hide.
+/// Placed by the topmost presentation host (tab root or app sheet), above the tab bar.
 struct ToastOverlay: View {
     @Environment(RouterStore.self) var store
 
@@ -30,7 +31,7 @@ struct ToastOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: store.toast)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Metrics.screenPadding)
         .padding(.bottom, 12)
         .task(id: store.toast?.id) { [store] in
             await store.autoDismissToast()
@@ -38,11 +39,13 @@ struct ToastOverlay: View {
     }
 }
 
+/// Floating glass capsule (Liquid Glass on iOS 26, material before), tinted with the level colour.
+/// Neutral text on tinted glass; the colour is in the symbol and the tint (guide §3.10).
 struct ToastView: View {
     let toast: ToastMessage
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: Theme.symbol(toast.tone))
                 .foregroundStyle(Theme.dot(toast.tone))
                 .accessibilityHidden(true)
@@ -52,18 +55,43 @@ struct ToastView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(14)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.raise, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.ring(toast.tone), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
+        .floatingGlass(tint: Theme.dot(toast.tone))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)
         .onAppear {
             UIAccessibility.post(notification: .announcement, argument: toast.text)
         }
+    }
+}
+
+/// A non-interactive status capsule (quiet window, offline, app disabled) — the «VPN перезапускается…» pill.
+struct StatusPill: View {
+    let tone: Tone
+    let text: String
+    var systemImage: String? = nil
+    var showsProgress: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Theme.dot(tone))
+            } else {
+                Image(systemName: systemImage ?? Theme.symbol(tone))
+                    .foregroundStyle(Theme.dot(tone))
+                    .accessibilityHidden(true)
+            }
+            Text(text)
+                .font(.footnote.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(Theme.text)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .floatingGlass(tint: Theme.dot(tone))
+        .accessibilityElement(children: .combine)
     }
 }

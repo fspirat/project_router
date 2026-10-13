@@ -4,6 +4,11 @@ import RouterCore
 
 /// Colour tokens from the contract §6 (web/app.css `:root`), light and dark.
 /// Every token is a dynamic colour, so `.preferredColorScheme` switches them.
+///
+/// Stage 4 (Liquid Glass, contract-stage4 §8.9): text sits on translucent material over the app gradient,
+/// so `dim` and `faint` are a little darker in light mode (and `faint` lighter in dark) than the web tokens:
+/// `dim` ≈ 5:1, `faint` ≈ 3.3:1 on the light card material. Use `dim` for captions that matter, `faint` only
+/// for hints. `card`/`surface`/`raise` are fallback surfaces (iOS 17–25, Reduce Transparency, sheets).
 enum Theme {
     // Surfaces
     static let bg = dynamic(light: 0xF6F8FB, dark: 0x090B0F)
@@ -17,8 +22,8 @@ enum Theme {
 
     // Text
     static let text = dynamic(light: 0x0F172A, dark: 0xF1F5F9)
-    static let dim = dynamic(light: 0x64748B, dark: 0x94A3B8)
-    static let faint = dynamic(light: 0x94A3B8, dark: 0x64748B)
+    static let dim = dynamic(light: 0x5B6B80, dark: 0x9AA8BC)
+    static let faint = dynamic(light: 0x7B8798, dark: 0x7A889C)
 
     // Accent (ok)
     static let acc = dynamic(light: 0x059669, dark: 0x34D399)
@@ -49,6 +54,11 @@ enum Theme {
     static let chartGrid = dynamic(light: 0x64748B, lightAlpha: 0.12, dark: 0x94A3B8, darkAlpha: 0.09)
     static let area = dynamic(light: 0x059669, lightAlpha: 0.10, dark: 0x34D399, darkAlpha: 0.10)
     static let offline = dynamic(light: 0x64748B, lightAlpha: 0.10, dark: 0x94A3B8, darkAlpha: 0.10)
+
+    // Glass rim (CardSurface draws its own gradient; this is the solid fallback / separators on material)
+    static let rim = dynamic(light: 0xFFFFFF, lightAlpha: 0.75, dark: 0xFFFFFF, darkAlpha: 0.12)
+    /// Quiet fill of a tile inside a card (`innerTile()` without a tone).
+    static let tileFill = dynamic(light: 0x0F172A, lightAlpha: 0.045, dark: 0xF1F5F9, darkAlpha: 0.06)
 
     // Logo gradient (fixed colours, 145°)
     static let logoTop = Color(red: 52.0 / 255.0, green: 211.0 / 255.0, blue: 153.0 / 255.0)

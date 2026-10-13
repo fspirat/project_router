@@ -12,6 +12,9 @@ enum AppSettings {
     static let lockDelayKey = "lockDelay"
     /// Face ID before `danger == critical` actions (reboot). Default on.
     static let biometricForDangerKey = "biometricForDanger"
+    /// Stage 4 (owner decision 13.10.2026, contract-stage4 §1.3): cover the app-switcher snapshot with the logo.
+    /// Default **off** — the switcher shows the real screen. Face ID on return works as configured either way.
+    static let hideInSwitcherKey = "hideInSwitcher"
     /// Non-secret `SessionInfo` (device id, expiry dates) next to the Keychain token.
     static let sessionInfoKey = "sessionInfo"
     /// Set on the first launch of an install. Missing → a fresh (re)install: a Keychain token left by
@@ -27,6 +30,10 @@ enum AppSettings {
     static var lockDelay: Int {
         let value = UserDefaults.standard.object(forKey: lockDelayKey) as? Int ?? 0
         return max(0, value)
+    }
+
+    static var hideInSwitcher: Bool {
+        return UserDefaults.standard.object(forKey: hideInSwitcherKey) as? Bool ?? false
     }
 
     static var biometricForDanger: Bool {

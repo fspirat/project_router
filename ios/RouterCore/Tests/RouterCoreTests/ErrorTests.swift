@@ -40,15 +40,15 @@ final class ErrorTests: XCTestCase {
     func testRateLimitedSuffixAndHeaderFallback() {
         let server = http(429, #"{"error":"rate_limited","message":"Слишком часто — подожди немного.","retry_after":15}"#, headers: ["retry-after": "15"])
         XCTAssertTrue(server.isRateLimited)
-        XCTAssertEqual(server.userMessage, "Слишком часто — подожди немного. Повтори через 15 с.")
+        XCTAssertEqual(server.userMessage, "Слишком часто — подожди немного. Повтори через 15\u{00A0}с.")
         XCTAssertEqual(server.baseMessage, "Слишком часто — подожди немного.")
 
         let nginx = http(429, #"{"error":"rate_limited","retry_after":2}"#, headers: ["retry-after": "2"])
-        XCTAssertEqual(nginx.userMessage, "Слишком часто — подожди немного. Повтори через 2 с.")
+        XCTAssertEqual(nginx.userMessage, "Слишком часто — подожди немного. Повтори через 2\u{00A0}с.")
 
         let headerOnly = http(429, #"{"error":"rate_limited"}"#, headers: ["retry-after": " 120 "])
         XCTAssertEqual(headerOnly.retryAfter, 120)
-        XCTAssertEqual(headerOnly.userMessage, "Слишком часто — подожди немного. Повтори через 2 мин.")
+        XCTAssertEqual(headerOnly.userMessage, "Слишком часто — подожди немного. Повтори через 2\u{00A0}мин.")
 
         let busy = http(429, #"{"error":"busy","message":"Роутер отвечает медленно: другие запросы к нему ещё ждут ответа. Повтори через несколько секунд.","retry_after":3}"#)
         XCTAssertTrue(busy.isBusy)

@@ -57,7 +57,7 @@ public struct SubscriptionPick: Equatable, Sendable {
     }
 }
 
-/// «Подписка до 31 октября · осталось 17 дн. · израсходовано 39.2 ГБ из 200.0 ГБ».
+/// «Подписка до 31 октября · осталось 17 дн. · израсходовано 39,2 ГБ из 200,0 ГБ» (NBSP before units).
 public struct SubscriptionLine: Equatable, Sendable {
     /// «Подписка до » or ««nosok» до ».
     public var prefix: String
@@ -81,10 +81,19 @@ public struct CurrentServer: Equatable, Sendable {
     public var isDirect: Bool
 }
 
-/// «Задержка» tile (the «через VPN 204» check).
+/// «Проверка через VPN» tile (the «через VPN 204» check). Stage 4 (contract-stage4 §9.4): the title is
+/// «Проверка через VPN» on one line, the value below it, then `caption`; VoiceOver uses `accessibilityLabel(value:)`.
 public struct LatencyTile: Equatable, Sendable {
+    /// The tile title (one line).
+    public static let title = "Проверка через VPN"
+    /// Kept for VoiceOver.
     public static let label = "Задержка"
-    public static let caption = "Как пинг: ответ сайта через VPN по уже открытому соединению. Раз в 5 минут."
+    public static let caption = "Задержка — как пинг: ответ сайта через VPN по уже открытому соединению. Раз в 5 минут."
+
+    /// «Проверка через VPN, задержка 48 мс».
+    public static func accessibilityLabel(value: String) -> String {
+        return title + ", задержка " + value
+    }
     /// «48 мс», «VPN не проходит» or «—».
     public var value: String
     public var tone: Tone
@@ -340,7 +349,7 @@ public enum Summary {
         if let ping = p {
             let alive = ping.nodes.filter { $0.ms > 0 }.count
             let level: Tone = alive >= 2 ? .ok : (alive == 1 ? .warn : .err)
-            items.append(VerdictItem(name: "Серверы", level: level, text: "\(alive) из \(ping.nodes.count)"))
+            items.append(VerdictItem(name: "Серверы", level: level, text: "\(alive)" + Fmt.nbsp + "из" + Fmt.nbsp + "\(ping.nodes.count)"))
         } else {
             items.append(VerdictItem(name: "Серверы", level: .warn, text: "ещё не проверены"))
         }
@@ -362,7 +371,7 @@ public enum Summary {
             if left < 1 {
                 items.append(VerdictItem(name: "Подписка", level: .err, text: "закончилась"))
             } else {
-                items.append(VerdictItem(name: "Подписка", level: .warn, text: "осталось \(left) дн."))
+                items.append(VerdictItem(name: "Подписка", level: .warn, text: "осталось \(left)" + Fmt.nbsp + "дн."))
             }
         }
 
@@ -447,7 +456,7 @@ public enum Summary {
             }
             usage = u
         }
-        let text = prefix + date + " · осталось \(left) дн." + (usage ?? "")
+        let text = prefix + date + " · осталось \(left)" + Fmt.nbsp + "дн." + (usage ?? "")
         return SubscriptionLine(prefix: prefix, date: date, daysLeft: left, daysLeftIsCritical: left <= 3, usage: usage, text: text)
     }
 
@@ -612,7 +621,7 @@ public enum Summary {
         let ramPct = clampPercent(y.memTotal > 0 ? Fmt.jsRound(Double(ramUsed) / Double(y.memTotal) * 100) : 0)
         let diskPct = clampPercent(y.diskTotal > 0 ? Fmt.jsRound(Double(y.diskUsed) / Double(y.diskTotal) * 100) : 0)
         return [
-            Meter(title: "Процессор", percent: cpu, caption: "Средняя нагрузка \(y.load), ядер: \(y.cores)", tone: meterTone(percent: cpu)),
+            Meter(title: "Процессор", percent: cpu, caption: "Средняя нагрузка \(Fmt.loadText(y.load)) · ядер: \(y.cores)", tone: meterTone(percent: cpu)),
             Meter(title: "Оперативная память", percent: ramPct, caption: "\(Fmt.mb(Double(ramUsed))) из \(Fmt.mb(Double(y.memTotal)))", tone: meterTone(percent: ramPct)),
             Meter(title: "Флеш-память", percent: diskPct, caption: "\(Fmt.mb(Double(y.diskUsed))) из \(Fmt.mb(Double(y.diskTotal))): пакеты и настройки", tone: meterTone(percent: diskPct))
         ]
@@ -644,9 +653,9 @@ public enum Summary {
         return s.devices.filter { $0.online }.count
     }
 
-    /// «3 в сети».
+    /// «3 в сети» (NBSP after the number).
     public static func onlineText(_ s: RouterStatus) -> String {
-        return "\(onlineCount(s)) в сети"
+        return "\(onlineCount(s))" + Fmt.nbsp + "в сети"
     }
 
     /// Top online devices by today's ↓ traffic. Name: own name, else DHCP name, else «Без имени».

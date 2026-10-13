@@ -5,33 +5,33 @@ import XCTest
 final class FormatTests: XCTestCase {
 
     func testSpeed() {
-        XCTAssertEqual(Fmt.speed(18734216), "18.7 Мбит/с")
-        XCTAssertEqual(Fmt.speed(123456789), "123 Мбит/с")
-        XCTAssertEqual(Fmt.speed(1203448), "1.2 Мбит/с")
-        XCTAssertEqual(Fmt.speed(640000), "640 кбит/с")
-        XCTAssertEqual(Fmt.speed(0), "0 кбит/с")
-        XCTAssertEqual(Fmt.speed(1000000), "1.0 Мбит/с")
-        XCTAssertEqual(Fmt.speed(1500), "2 кбит/с")
+        XCTAssertEqual(Fmt.speed(18734216), "18,7\u{00A0}Мбит/с")
+        XCTAssertEqual(Fmt.speed(123456789), "123\u{00A0}Мбит/с")
+        XCTAssertEqual(Fmt.speed(1203448), "1,2\u{00A0}Мбит/с")
+        XCTAssertEqual(Fmt.speed(640000), "640\u{00A0}кбит/с")
+        XCTAssertEqual(Fmt.speed(0), "0\u{00A0}кбит/с")
+        XCTAssertEqual(Fmt.speed(1000000), "1,0\u{00A0}Мбит/с")
+        XCTAssertEqual(Fmt.speed(1500), "2\u{00A0}кбит/с")
     }
 
     func testMBAndBytes() {
-        XCTAssertEqual(Fmt.mb(123792), "121 МБ")
-        XCTAssertEqual(Fmt.mb(245632), "240 МБ")
-        XCTAssertEqual(Fmt.mb(3460), "3.4 МБ")
-        XCTAssertEqual(Fmt.mb(2097152), "2.0 ГБ")
-        XCTAssertEqual(Fmt.mb(kib: 31544), "31 МБ")
-        XCTAssertEqual(Fmt.bytes(40802189312), "38.0 ГБ")
-        XCTAssertEqual(Fmt.bytes(1621098496), "1.5 ГБ")
-        XCTAssertEqual(Fmt.bytes(53477376), "51 МБ")
-        XCTAssertEqual(Fmt.bytes(5000000), "4.8 МБ")
-        XCTAssertEqual(Fmt.bytes(0), "0.0 МБ")
-        XCTAssertEqual(Fmt.bytes(96385412736), "89.8 ГБ")
-        XCTAssertEqual(Fmt.bytes(7346121904), "6.8 ГБ")
-        XCTAssertEqual(Fmt.bytes(214748364800), "200.0 ГБ")
+        XCTAssertEqual(Fmt.mb(123792), "121\u{00A0}МБ")
+        XCTAssertEqual(Fmt.mb(245632), "240\u{00A0}МБ")
+        XCTAssertEqual(Fmt.mb(3460), "3,4\u{00A0}МБ")
+        XCTAssertEqual(Fmt.mb(2097152), "2,0\u{00A0}ГБ")
+        XCTAssertEqual(Fmt.mb(kib: 31544), "31\u{00A0}МБ")
+        XCTAssertEqual(Fmt.bytes(40802189312), "38,0\u{00A0}ГБ")
+        XCTAssertEqual(Fmt.bytes(1621098496), "1,5\u{00A0}ГБ")
+        XCTAssertEqual(Fmt.bytes(53477376), "51\u{00A0}МБ")
+        XCTAssertEqual(Fmt.bytes(5000000), "4,8\u{00A0}МБ")
+        XCTAssertEqual(Fmt.bytes(0), "0,0\u{00A0}МБ")
+        XCTAssertEqual(Fmt.bytes(96385412736), "89,8\u{00A0}ГБ")
+        XCTAssertEqual(Fmt.bytes(7346121904), "6,8\u{00A0}ГБ")
+        XCTAssertEqual(Fmt.bytes(214748364800), "200,0\u{00A0}ГБ")
     }
 
     func testMsAndLevels() {
-        XCTAssertEqual(Fmt.ms(48), "48 мс")
+        XCTAssertEqual(Fmt.ms(48), "48\u{00A0}мс")
         XCTAssertEqual(Fmt.msTone(48), .ok)
         XCTAssertEqual(Fmt.msTone(119), .ok)
         XCTAssertEqual(Fmt.msTone(120), .warn)
@@ -51,41 +51,41 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(Fmt.pingLevel(400), 1)
         XCTAssertEqual(Fmt.percent(50), "50%")
         XCTAssertEqual(Fmt.temperature(nil), "нет датчика")
-        XCTAssertEqual(Fmt.temperature(51), "51 °C")
+        XCTAssertEqual(Fmt.temperature(51), "51\u{00A0}°C")
     }
 
     func testRounding() {
         XCTAssertEqual(Fmt.jsRound(2.5), 3)
         XCTAssertEqual(Fmt.jsRound(-2.5), -2)
         XCTAssertEqual(Fmt.jsRound(0.49), 0)
-        XCTAssertEqual(Fmt.fixed1(0.05), "0.1")
-        XCTAssertEqual(Fmt.fixed1(39.2005), "39.2")
-        XCTAssertEqual(Fmt.fixed1(-1.25), "-1.3")
+        XCTAssertEqual(Fmt.fixed1(0.05), "0,1")
+        XCTAssertEqual(Fmt.fixed1(39.2005), "39,2")
+        XCTAssertEqual(Fmt.fixed1(-1.25), "-1,3")
         XCTAssertEqual(Fmt.fixed0(122.5), "123")
     }
 
     func testAgoAndUpdated() {
-        XCTAssertEqual(Fmt.ago(1791886200, now: nowT), "6 мин назад")
+        XCTAssertEqual(Fmt.ago(1791886200, now: nowT), "6\u{00A0}мин назад")
         XCTAssertEqual(Fmt.ago(1791886530, now: nowT), "только что")
         XCTAssertEqual(Fmt.ago(1791886600, now: nowT), "только что")
-        XCTAssertEqual(Fmt.ago(1791886560 - 7200, now: nowT), "2 ч назад")
+        XCTAssertEqual(Fmt.ago(1791886560 - 7200, now: nowT), "2\u{00A0}ч назад")
         XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 0), "обновлено только что")
         XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 4), "обновлено только что")
-        XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 5), "обновлено 5 сек назад")
-        XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 59), "обновлено 59 сек назад")
-        XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 90), "обновлено 2 мин назад")
+        XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 5), "обновлено 5\u{00A0}сек назад")
+        XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 59), "обновлено 59\u{00A0}сек назад")
+        XCTAssertEqual(Fmt.updatedLabel(secondsAgo: 90), "обновлено 2\u{00A0}мин назад")
     }
 
     func testUptimeAndMinutes() {
-        XCTAssertEqual(Fmt.uptime(352812), "4 д 2 ч")
-        XCTAssertEqual(Fmt.uptime(3700), "1 ч 1 мин")
-        XCTAssertEqual(Fmt.uptime(95), "1 мин")
-        XCTAssertEqual(Fmt.uptime(0), "0 мин")
-        XCTAssertEqual(Fmt.minutes(12), "12 мин")
-        XCTAssertEqual(Fmt.minutes(75), "1 ч 15 мин")
-        XCTAssertEqual(Fmt.minutes(120), "2 ч")
-        XCTAssertEqual(Fmt.minutes(1500), "1 д 1 ч")
-        XCTAssertEqual(Fmt.minutes(0), "0 мин")
+        XCTAssertEqual(Fmt.uptime(352812), "4\u{00A0}д 2\u{00A0}ч")
+        XCTAssertEqual(Fmt.uptime(3700), "1\u{00A0}ч 1\u{00A0}мин")
+        XCTAssertEqual(Fmt.uptime(95), "1\u{00A0}мин")
+        XCTAssertEqual(Fmt.uptime(0), "0\u{00A0}мин")
+        XCTAssertEqual(Fmt.minutes(12), "12\u{00A0}мин")
+        XCTAssertEqual(Fmt.minutes(75), "1\u{00A0}ч 15\u{00A0}мин")
+        XCTAssertEqual(Fmt.minutes(120), "2\u{00A0}ч")
+        XCTAssertEqual(Fmt.minutes(1500), "1\u{00A0}д 1\u{00A0}ч")
+        XCTAssertEqual(Fmt.minutes(0), "0\u{00A0}мин")
     }
 
     func testSamaraDates() {
@@ -124,10 +124,10 @@ final class FormatTests: XCTestCase {
     }
 
     func testRetrySuffix() {
-        XCTAssertEqual(Fmt.retrySuffix(2), " Повтори через 2 с.")
-        XCTAssertEqual(Fmt.retrySuffix(90), " Повтори через 90 с.")
-        XCTAssertEqual(Fmt.retrySuffix(91), " Повтори через 2 мин.")
-        XCTAssertEqual(Fmt.retrySuffix(874), " Повтори через 15 мин.")
+        XCTAssertEqual(Fmt.retrySuffix(2), " Повтори через 2\u{00A0}с.")
+        XCTAssertEqual(Fmt.retrySuffix(90), " Повтори через 90\u{00A0}с.")
+        XCTAssertEqual(Fmt.retrySuffix(91), " Повтори через 2\u{00A0}мин.")
+        XCTAssertEqual(Fmt.retrySuffix(874), " Повтори через 15\u{00A0}мин.")
     }
 
     func testReplaceDirect() {

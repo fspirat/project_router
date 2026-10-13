@@ -39,7 +39,7 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background {
-            Theme.bg.ignoresSafeArea()
+            AppBackground()
         }
     }
 
@@ -124,17 +124,13 @@ struct LoginButton: View {
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
             let blocked = store.loginBlockedSeconds(now: context.date)
-            Button {
+            AppButton(
+                title: blocked > 0 ? LoginButton.waitText(blocked) : LoginTexts.loginButton,
+                kind: .primary,
+                isBusy: busy
+            ) {
                 action()
-            } label: {
-                HStack(spacing: 8) {
-                    if busy {
-                        ProgressView()
-                    }
-                    Text(blocked > 0 ? LoginButton.waitText(blocked) : LoginTexts.loginButton)
-                }
             }
-            .buttonStyle(ActionButtonStyle(kind: .primary))
             .disabled(!canSubmit || blocked > 0)
         }
     }

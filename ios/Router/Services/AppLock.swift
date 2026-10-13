@@ -6,9 +6,11 @@ import RouterCore
 ///
 /// - Locks on a cold start and when the app comes back after more than «Блокировать» seconds in the
 ///   background, if «Face ID при открытии» is on and the iPhone can ask (has a passcode).
-/// - With «Сразу» the lock is set already when the app goes to the background, so nothing flashes.
-///   With a delay it is decided on the way back while the scene is still `.inactive` (privacy cover up,
-///   polling off), so the Summary never shows or polls for a moment before the lock.
+/// - With «Сразу» and «Скрывать в переключателе приложений» ON the lock is set already when the app goes
+///   to the background, so nothing flashes and the switcher shows the lock screen (stage 3 behaviour).
+/// - With the toggle OFF (default, contract-stage4 §1.3) the switcher must keep showing the data, so the lock
+///   is never set at background: «Сразу» and the delays are decided on the way back while the scene is
+///   still `.inactive` (polling off), so the data never shows or polls for a moment before the lock.
 /// - Asks automatically once per lock; after «Отмена» the lock screen shows a button.
 ///   (Face ID itself makes the app inactive for a moment; that never locks or re-asks.)
 @Observable
@@ -33,7 +35,9 @@ final class AppLock {
 
     func didEnterBackground(loggedIn: Bool) {
         backgroundedAt = Date()
-        if !isLocked && AppSettings.lockDelay <= 0 && AppLock.shouldLock(loggedIn: loggedIn) {
+        // Only when the snapshot is hidden anyway; otherwise the lock screen would replace the data in the
+        // app switcher (the owner's complaint). `willEnterForeground` engages it on return (away >= 0).
+        if !isLocked && AppSettings.hideInSwitcher && AppSettings.lockDelay <= 0 && AppLock.shouldLock(loggedIn: loggedIn) {
             engage()
         }
     }

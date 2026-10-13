@@ -2,11 +2,13 @@ import SwiftUI
 import RouterCore
 
 /// «Итог» (contract §4.2): lamp, title, «обновлено …», reasons. The level is shown by colour AND word.
+/// The one hero element of «Сводка»: real Liquid Glass tinted with the level colour on iOS 26
+/// (`heroGlassCard`), a tinted material card before. Nothing inside it is glass (no glass on glass).
 struct VerdictCard: View {
     let verdict: Verdict
 
     var body: some View {
-        Card(accent: Theme.dot(verdict.level)) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 VerdictLamp(level: verdict.level)
                 VStack(alignment: .leading, spacing: 2) {
@@ -30,6 +32,7 @@ struct VerdictCard: View {
                 Banner(tone: .warn, text: warning)
             }
         }
+        .heroGlassCard(tint: Theme.dot(verdict.level))
     }
 }
 
@@ -147,7 +150,7 @@ struct OfflineCard: View {
     let now: TimeInterval
 
     var body: some View {
-        Card(accent: Theme.err) {
+        Card(accent: Theme.err, tint: Theme.err) {
             HStack(spacing: 10) {
                 Image(systemName: "wifi.slash")
                     .foregroundStyle(Theme.err)
@@ -158,8 +161,9 @@ struct OfflineCard: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
-            Text(OfflineBanner.line(data: store.dayData, now: now))
-                .font(.system(.subheadline, design: .monospaced))
+            Text(OfflineBanner.line(data: store.latestData, now: now))
+                .font(.subheadline)
+                .monospacedDigit()
                 .foregroundStyle(Theme.err)
                 .fixedSize(horizontal: false, vertical: true)
             BulletList(title: OfflineBanner.whyTitle, lines: OfflineBanner.why)
@@ -198,13 +202,13 @@ struct BulletList: View {
 /// `503 app_disabled`: the token is kept; pull down to check again.
 struct AppDisabledCard: View {
     var body: some View {
-        Card(accent: Theme.warn) {
+        Card(accent: Theme.warn, tint: Theme.warn) {
             HStack(spacing: 10) {
                 Image(systemName: "power.circle")
                     .font(.title2)
                     .foregroundStyle(Theme.warn)
                     .accessibilityHidden(true)
-                Text("Приложение выключено")
+                Text(AppTexts.appDisabledTitle)
                     .font(.headline)
                     .foregroundStyle(Theme.text)
             }
@@ -216,8 +220,11 @@ struct AppDisabledCard: View {
                 .foregroundStyle(Theme.dim)
             Link(destination: Links.webPanel) {
                 Label("Открыть веб-панель", systemImage: "globe")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(ActionButtonStyle.Kind.secondary.labelColor)
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(ActionButtonStyle(kind: .secondary))
+            .appButtonStyle(.secondary)
         }
     }
 }

@@ -7,8 +7,7 @@ struct LockView: View {
 
     var body: some View {
         ZStack {
-            Theme.bg
-                .ignoresSafeArea()
+            AppBackground()
             VStack(spacing: 18) {
                 LogoView(size: 88)
                 Text("Роутер")
@@ -23,19 +22,9 @@ struct LockView: View {
                         .foregroundStyle(Theme.warn)
                         .multilineTextAlignment(.center)
                 }
-                Button {
+                AppButton(title: "Разблокировать", systemImage: "faceid", kind: .primary, isBusy: lock.isAuthenticating) {
                     unlock()
-                } label: {
-                    HStack(spacing: 8) {
-                        if lock.isAuthenticating {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "faceid")
-                        }
-                        Text("Разблокировать")
-                    }
                 }
-                .buttonStyle(ActionButtonStyle(kind: .primary))
                 .frame(maxWidth: 320)
                 .disabled(lock.isAuthenticating)
             }
