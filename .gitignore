@@ -18,3 +18,4 @@ scripts/shots/out/
 ios/*.xcodeproj/
 DerivedData/
 ios/build/
+ios/Router/Info.plist

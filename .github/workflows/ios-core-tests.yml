@@ -1,0 +1,46 @@
+name: iOS core tests
+
+# Тесты общей части приложения iPhone (ios/RouterCore: модели, разбор ответов API, форматы) — `swift test` на Linux.
+# Минута Linux в ~10 раз дешевле минуты macOS, поэтому логику проверяем здесь, а на Mac только собираем (iOS TestFlight).
+# Запуск: сам при push с изменениями в ios/RouterCore/ (на любой ветке) или вручную: Actions → iOS core tests → Run workflow.
+# Секреты не нужны. pull_request нарочно не добавлен: на открытом PR тесты запускались бы дважды.
+on:
+  push:
+    paths:
+      - 'ios/RouterCore/**'
+      - '.github/workflows/ios-core-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-core-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # ubuntu-24.04, а не ubuntu-latest: в ноябре 2026 ubuntu-latest станет 26.04, а там Swift пока не обещан.
+    # На 24.04 Swift 6.4 предустановлен (/usr/share/swift/usr/bin, ссылки в /usr/local/bin).
+    # Если Swift с образа пропадёт — запасной путь: `container: swift:6.2-noble` (официальный образ Swift).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Swift есть?
+        run: |
+          if ! command -v swift >/dev/null 2>&1; then
+            echo "::error::На раннере нет Swift — тесты RouterCore запустить нечем. Поменяйте runs-on или добавьте container: swift:6.2-noble"
+            exit 1
+          fi
+          swift --version
+          [ -f ios/RouterCore/Package.swift ] || { echo "::error::Нет ios/RouterCore/Package.swift"; exit 1; }
+
+      - name: swift test
+        run: swift test --package-path ios/RouterCore
