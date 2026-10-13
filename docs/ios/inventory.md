@@ -936,7 +936,7 @@ location @fsr_app_5xx { default_type application/json; return 502 '{"error":"ser
   - отозвать все токены: `UPDATE app_devices SET revoked=…, revoked_by='ops' WHERE revoked IS NULL`.
 
 ### 8.4 fail2ban
-- **Jail `[fspirat-router-app]`:** `logpath = /var/log/fspirat-router-auth.log`, maxretry 10, findtime 10m, bantime 1h.
+- **Jail `[fspirat-router-app]`:** `logpath = /var/log/fspirat-router-auth.log`, maxretry 10, findtime 10m, bantime 15m (решение владельца 13.10.2026; в спецификации было 1h).
 - **Фильтр:** `failregex = ^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)?\s*APP_(?:BADTOKEN|DENIED|URLTOKEN) ip=<HOST>` — дата необязательная: fail2ban вырезает её из строки до сравнения, и `^\S+ \S+ …` не совпало бы ни с чем.
 - **Ошибки пароля** из приложения попадают в существующий jail `fspirat-router-auth`. **(исправлено при ревью 13.10.2026)** Его фильтр `^\S+ \S+ (FAIL|LOCKED)` по той же причине не совпадал ни с одной строкой — jail не банил никого, ни для веба, ни для приложения. Теперь `^(?:<дата>)?\s*(?:FAIL|LOCKED) ip=<HOST>`, и бан начинает работать по-настоящему (риск §5 п.32: maxretry/bantime — вопрос владельцу).
 - **Verify** шлёт только запросы без токена: `token_missing` в fail2ban не считается, `ignoreself` включён.

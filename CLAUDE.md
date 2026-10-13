@@ -114,7 +114,7 @@ nginx перед каждым запросом спрашивает `check.php` 
 - **Отозвать все телефоны** (через ops; sqlite3 на сервере нет — через PHP от www-data):
   `sudo -u www-data php -r '$d=new PDO("sqlite:/var/lib/fspirat-router-auth/auth.sqlite"); $s=$d->prepare("UPDATE app_devices SET revoked=?, revoked_by=? WHERE revoked IS NULL"); $s->execute([time(), "ops"]); echo $s->rowCount(), "\n";'`
   Обычно хватает веба («Выйти на всех устройствах» отзывает и телефоны) или бота (`/apps`).
-- fail2ban: jail **`fspirat-router-app`** (неверный токен, отказ во входе, токен в адресе — 10 за 10 мин → бан 1 ч);
+- fail2ban: jail **`fspirat-router-app`** (неверный токен, отказ во входе, токен в адресе — 10 за 10 мин → бан 15 мин, как и у входа в панель);
   неверный пароль из приложения — в `fspirat-router-auth`. Снять бан: `fail2ban-client set fspirat-router-app unbanip <IP>`.
 - iPhone-сборка — GitHub → TestFlight (`docs/ios/inventory.md` §9.5); ключи `*.p8`/`*.p12` только в секретах GitHub.
 
