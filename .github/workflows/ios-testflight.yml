@@ -8,8 +8,13 @@ name: iOS TestFlight
 #   — вручную: Actions → iOS TestFlight → Run workflow (ветка main). Галочка «Отправить сборку в TestFlight»:
 #     включена — сборка уходит в TestFlight, выключена — только проверка, что приложение собирается;
 #   — сам раз в 2 месяца (1-го числа, 03:17 UTC) — сборка в TestFlight живёт 90 дней, новая продлевает приложение;
-#   — push в ios/** — только если в сообщении коммита есть «[ios build]», и только проверка сборки (без отправки).
-#     Без этой метки задача пропускается и минут не тратит (минута macOS ≈ 10 минут квоты).
+#   — push в ios/** — только если в сообщении коммита есть «[ios build]», и только проверка сборки (без отправки),
+#     или «[ios ipa]» — файл .ipa без подписи (см. ниже). Без меток задача пропускается и минут не тратит
+#     (минута macOS ≈ 10 минут квоты).
+# .ipa без подписи (галочка «ipa» при запуске или «[ios ipa]» в коммите, с любой ветки, секреты не нужны):
+#   файл Router-N.ipa в разделе Artifacts страницы запуска, хранится 7 дней. Его подписывает владелец своим
+#   сертификатом в программе установки (решение владельца 13.10.2026; риски — docs/ios/stage3-report.md).
+#   Дата сборки в него не пишется: срок жизни задаёт сертификат, а не TestFlight.
 # Отправка — только из main и только когда заданы все 4 секрета; иначе — проверка сборки без подписи.
 # Номер сборки — «номер запуска.попытка» (42.1); Re-run того же запуска даёт 42.2, 42.3… — App Store Connect его примет.
 on:
@@ -24,6 +29,10 @@ on:
         type: choice
         options: [auto, development, adhoc]
         default: auto
+      ipa:
+        description: "Собрать файл .ipa без подписи (для своего сертификата) вместо отправки в TestFlight"
+        type: boolean
+        default: false
   schedule:
     - cron: '17 3 1 */2 *'
   push:
@@ -36,10 +45,11 @@ permissions:
 
 jobs:
   build:
-    # push без «[ios build]» в сообщении коммита — пропустить (0 минут). Для остальных событий head_commit нет — не проверяем.
+    # push без «[ios build]» / «[ios ipa]» в сообщении коммита — пропустить (0 минут). Для остальных событий head_commit нет — не проверяем.
     if: >-
       github.event_name != 'push' ||
-      contains(github.event.head_commit.message, '[ios build]')
+      contains(github.event.head_commit.message, '[ios build]') ||
+      contains(github.event.head_commit.message, '[ios ipa]')
     # macos-26 (arm64): Xcode 26 / iOS 26 SDK — с 28.04.2026 App Store Connect принимает только такие сборки.
     # Не macos-latest (переедет на macOS 27 сам) и не -large/-xlarge/-intel (платные всегда).
     runs-on: macos-26
@@ -126,6 +136,9 @@ jobs:
           REF: ${{ github.ref }}
           IN_UPLOAD: ${{ inputs.upload }}
           IN_SIGNING: ${{ inputs.signing }}
+          IN_IPA: ${{ inputs.ipa }}
+          # true/false; само сообщение коммита в скрипт не попадает
+          PUSH_IPA: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[ios ipa]') }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
@@ -133,6 +146,10 @@ jobs:
         run: |
           # секреты здесь только проверяются на «задан / не задан», значения не печатаются
           upload=0
+          ipa=0
+          if [ "$PUSH_IPA" = "true" ] || { [ "$EVENT" = "workflow_dispatch" ] && [ "$IN_IPA" = "true" ]; }; then
+            ipa=1
+          fi
           case "$EVENT" in
             workflow_dispatch)
               if [ "$IN_UPLOAD" = "true" ]; then upload=1
@@ -154,7 +171,10 @@ jobs:
               upload=0; why="секреты Apple не заданы (нет:$missing) — только проверка сборки"
             fi
           fi
-          if [ "$upload" = 1 ]; then
+          if [ "$ipa" = 1 ]; then
+            upload=0
+            text="файл .ipa без подписи (для своего сертификата)"
+          elif [ "$upload" = 1 ]; then
             text="отправка в TestFlight"
           else
             text="проверка сборки (без подписи и отправки): $why"
@@ -164,19 +184,23 @@ jobs:
           case "$signing" in auto|development|adhoc) ;; *) signing=auto ;; esac
           {
             echo "upload=$upload"
+            echo "ipa=$ipa"
             echo "signing=$signing"
           } >> "$GITHUB_OUTPUT"
+          # .ipa: дату сборки не пишем — в приложении не будет строки «Сборка действует до…» (это срок TestFlight)
+          bdate=$(date -u +%Y-%m-%d)
+          if [ "$ipa" = 1 ]; then bdate=""; fi
           {
             echo "FSR_MODE_TEXT=$text"
             # CFBundleVersion: до трёх чисел через точку; Re-run (попытка 2, 3…) даёт новый, больший номер
             echo "FSR_BUILD_NUMBER=${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-            echo "FSR_BUILD_DATE=$(date -u +%Y-%m-%d)"
+            echo "FSR_BUILD_DATE=$bdate"
           } >> "$GITHUB_ENV"
           echo "Режим: $text"
 
       # ---------- проверка сборки (UPLOAD=0): симулятор, без подписи, секреты не нужны ----------
       - name: Проверка сборки (без подписи)
-        if: steps.mode.outputs.upload == '0'
+        if: steps.mode.outputs.upload == '0' && steps.mode.outputs.ipa == '0'
         run: |
           # -quiet: в логе только предупреждения и ошибки
           xcodebuild -quiet \
@@ -188,6 +212,44 @@ jobs:
             CURRENT_PROJECT_VERSION="$FSR_BUILD_NUMBER" \
             build
           echo "✅ приложение собирается"
+
+      # ---------- .ipa без подписи (IPA=1): для своего сертификата владельца, секреты не нужны ----------
+      - name: Файл .ipa без подписи
+        if: steps.mode.outputs.ipa == '1'
+        run: |
+          rm -rf "$RUNNER_TEMP/Router.xcarchive" "$RUNNER_TEMP/ipa"
+          xcodebuild -quiet archive \
+            -project ios/Router.xcodeproj -scheme Router -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Router.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION="$FSR_BUILD_NUMBER" \
+            FSR_BUILD_DATE=""
+          app="$RUNNER_TEMP/Router.xcarchive/Products/Applications/Router.app"
+          [ -d "$app" ] || { echo "::error::в архиве нет Router.app"; exit 1; }
+          [ -f "$app/PrivacyInfo.xcprivacy" ] || { echo "::error::PrivacyInfo.xcprivacy не попал в приложение"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
+          name="Router-$FSR_BUILD_NUMBER.ipa"
+          ( cd "$RUNNER_TEMP/ipa" && zip -qry "$name" Payload )
+          ls -l "$RUNNER_TEMP/ipa/$name"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' "$app/Info.plist"
+          echo "FSR_IPA=$RUNNER_TEMP/ipa/$name" >> "$GITHUB_ENV"
+          echo "FSR_IPA_NAME=$name" >> "$GITHUB_ENV"
+          echo "✅ $name готов"
+
+      - name: Выложить .ipa в Artifacts
+        if: steps.mode.outputs.ipa == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Router-ipa-${{ github.run_number }}.${{ github.run_attempt }}
+          path: ${{ env.FSR_IPA }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
       # ---------- отправка (UPLOAD=1) ----------
       - name: Ключ App Store Connect и временная связка ключей
@@ -363,6 +425,9 @@ jobs:
             echo ""
             if [ "${FSR_UPLOADED:-0}" = 1 ]; then
               echo "✅ Сборка ${FSR_BUILD_NUMBER} отправлена в TestFlight; через 5–30 минут она появится в App Store Connect → TestFlight."
+            elif [ -n "${FSR_IPA_NAME:-}" ] && [ "$JOB_STATUS" = "success" ]; then
+              echo "📦 ${FSR_IPA_NAME} (без подписи) — внизу этой страницы, раздел **Artifacts**, хранится 7 дней."
+              echo "Скачанный zip распаковать, .ipa подписать своим сертификатом в программе установки."
             elif [ "$JOB_STATUS" != "success" ]; then
               echo "❌ Не получилось — причина в логе шага с ошибкой."
               echo "Частые: «No suitable application records» — нет приложения в App Store Connect (My Apps → «+»);"
