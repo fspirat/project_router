@@ -1,145 +1,50 @@
 <?php
 // Данные страницы роутера, которые хранит сервер (переживают перезагрузку роутера и работают без туннеля):
 //   GET  /router/data?range=day|week|month — история отклика, журнал, «роутер не на связи с …», имена устройств
+//   GET  /router/data?devices=1            — кто имеет доступ: телефоны с приложением, сессии веба, входы (раздел «Безопасность»)
 //   POST /router/data  mac=…&name=…       — своё имя устройства (пустое имя — вернуть как было)
-// Историю и журнал пишет fspirat-watch (cron раз в минуту) в /var/lib/fspirat/. Доступ — только после входа (auth_request).
+//   POST /router/data?op=apprevoke  id=…  — отозвать доступ приложения на телефоне
+// Историю и журнал пишет fspirat-watch (cron раз в минуту) в /var/lib/fspirat/. Доступ — только после входа (auth_request);
+// POST — ещё и с CSRF-токеном и нашим Origin (check.php). Сами данные — data-lib.php (общие с приложением).
 declare(strict_types=1);
 define('FSR', true);
 require __DIR__ . '/lib.php';
-
-const FSR_WATCH = '/var/lib/fspirat';
+require __DIR__ . '/app-lib.php';
+require __DIR__ . '/data-lib.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: private, no-store');
 header('X-Content-Type-Options: nosniff');
 
 function out(array $a, int $code = 200): never { http_response_code($code); echo json_encode($a, JSON_UNESCAPED_UNICODE); exit; }
-function watch(string $f): string { return (getenv('FSR_WATCH') ?: FSR_WATCH) . '/' . $f; }
-function names_file(): string { return fsr_dir() . '/names.json'; }
-function names(): array { $j = json_decode((string)@file_get_contents(names_file()), true); return is_array($j) ? $j : []; }
 
 // CSRF-токен этой сессии для страницы (check.php требует его в X-FSR у каждого действия)
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['csrf'])) out(['csrf' => fsr_csrf()]);
 
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['devices'])) {
+    $tok = fsr_session_token();
+    out(fsr_app_devices_list(null, $tok !== '' ? hash('sha256', $tok) : null));
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-    if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org')) out(['error' => 'origin'], 403);
+    if ($origin !== fsr_origin()) out(['error' => 'origin'], 403);
+    if (($_GET['op'] ?? '') === 'apprevoke') {
+        // check.php уже записал «ACTION apprevoke»; сообщение в Telegram — отсюда, с именем телефона
+        $d = fsr_app_revoke((string)($_POST['id'] ?? ''), 'web');
+        if (!$d) out(['error' => 'not_found'], 404);
+        fsr_log('APP_REVOKE');
+        fsr_audit('APP_REVOKE', 'id=' . $d['id']);
+        $text = FSR_ACTIONS['apprevoke'][0] . ': ' . fsr_app_label($d) . "\nИз панели, IP " . fsr_ip();
+        fsr_later(fn() => fsr_tg_send($text));
+        out(['ok' => true]);
+    }
     $mac = strtolower(trim((string)($_POST['mac'] ?? '')));
     if (!preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $mac)) out(['error' => 'bad mac'], 400);
     $name = trim(preg_replace('/[\x00-\x1f\x7f]/u', '', (string)($_POST['name'] ?? '')) ?? '');
     $name = mb_substr($name, 0, 40);
-    $fp = fopen(names_file(), 'c+');
-    flock($fp, LOCK_EX);
-    $all = json_decode(stream_get_contents($fp) ?: '', true) ?: [];
-    if ($name === '') unset($all[$mac]); else $all[$mac] = $name;
-    ftruncate($fp, 0); rewind($fp);
-    fwrite($fp, json_encode($all, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-    flock($fp, LOCK_UN); fclose($fp);
-    out(['ok' => true, 'names' => $all]);
+    out(['ok' => true, 'names' => fsr_names_set($mac, $name)]);
 }
 
-$ranges = ['day' => [86400, 0], 'week' => [7 * 86400, 1800], 'month' => [30 * 86400, 7200]];   // окно, шаг усреднения
 $range = $_GET['range'] ?? 'day';
-if (!isset($ranges[$range])) $range = 'day';
-[$span, $step] = $ranges[$range];
-$now = time();
-$from = $now - $span;
-
-// История: "время отклик узел"; 0 — VPN не прошёл, -1 — роутер не на связи (точка раз в минуту)
-$ok = []; $fails = 0; $off = 0; $buckets = []; $raw = [];
-$fh = @fopen(watch('history.tsv'), 'r');
-while ($fh && ($line = fgets($fh)) !== false) {
-    $p = explode(' ', trim($line));
-    $ts = (int)$p[0]; $ms = (int)($p[1] ?? 0);
-    if ($ts < $from) continue;
-    if ($ms > 0) $ok[] = $ms; elseif ($ms === 0) $fails++; else $off++;
-    if (!$step) { $raw[] = [$ts, $ms]; continue; }
-    $b = intdiv($ts, $step) * $step;
-    $buckets[$b] ??= ['sum' => 0, 'n' => 0, 'fail' => 0, 'off' => 0];
-    if ($ms > 0) { $buckets[$b]['sum'] += $ms; $buckets[$b]['n']++; }
-    elseif ($ms === 0) $buckets[$b]['fail']++; else $buckets[$b]['off']++;
-}
-if ($fh) fclose($fh);
-if (!$step) usort($raw, fn($a, $b) => $a[0] <=> $b[0]);
-else {
-    ksort($buckets);
-    foreach ($buckets as $b => $v)   // точка в середине интервала; без удачных замеров — сбой или «нет связи»
-        $raw[] = [$b + intdiv($step, 2), $v['n'] ? (int)round($v['sum'] / $v['n']) : ($v['off'] >= 3 ? -1 : 0), $v['fail'], $v['off']];
-}
-
-// Журнал: "время<TAB>вид<TAB>текст", новые сверху
-$events = [];
-foreach (array_slice(@file(watch('events.tsv'), FILE_IGNORE_NEW_LINES) ?: [], -300) as $line) {
-    $e = explode("\t", $line, 3);
-    if (count($e) === 3 && (int)$e[0] >= $from) $events[] = [(int)$e[0], $e[1], $e[2]];
-}
-usort($events, fn($a, $b) => $b[0] <=> $a[0]);
-
-// Задержка до сервисов (targets.tsv "время<TAB>имя<TAB>ms", 0 — не ответил): {имя: [[время, ms], …]}, усреднение — как у истории
-$tpoints = [];
-$fh = @fopen(watch('targets.tsv'), 'r');
-while ($fh && ($line = fgets($fh)) !== false) {
-    $p = explode("\t", rtrim($line, "\n"));
-    if (count($p) < 3 || (int)$p[0] < $from) continue;
-    $b = $step ? intdiv((int)$p[0], $step) * $step : (int)$p[0];
-    $tpoints[$p[1]][$b][] = (int)$p[2];
-}
-if ($fh) fclose($fh);
-foreach ($tpoints as $n => $bs) {
-    ksort($bs);
-    $out = [];
-    foreach ($bs as $b => $v) {
-        $good = array_filter($v, fn($x) => $x > 0);
-        $out[] = [$step ? $b + intdiv($step, 2) : $b, $good ? (int)round(array_sum($good) / count($good)) : 0];
-    }
-    $tpoints[$n] = $out;
-}
-
-// Трафик устройств (traffic.json от fspirat-watch): сегодня и с начала месяца, [отдано, скачано] в байтах
-$traffic = [];
-$tj = json_decode((string)@file_get_contents(watch('traffic.json')), true);
-if (is_array($tj['days'] ?? null)) {
-    $today = date('Y-m-d'); $month = date('Y-m');
-    foreach ($tj['days'] as $day => $macs) {
-        if (!str_starts_with((string)$day, $month) || !is_array($macs)) continue;
-        foreach ($macs as $m => $v) {
-            $t = &$traffic[$m];
-            $t ??= ['d' => [0, 0], 'm' => [0, 0]];
-            $t['m'][0] += (int)$v[0]; $t['m'][1] += (int)$v[1];
-            if ($day === $today) { $t['d'][0] += (int)$v[0]; $t['d'][1] += (int)$v[1]; }
-            unset($t);
-        }
-    }
-}
-
-// История теста скорости (speed.tsv "время вид загрузка отдача задержка") за 90 дней: [[время, "vpn"|"direct", загрузка, отдача, задержка], …]
-$speed = [];
-foreach (@file(watch('speed.tsv'), FILE_IGNORE_NEW_LINES) ?: [] as $line) {
-    $p = explode(' ', $line);
-    if (count($p) >= 5 && (int)$p[0] >= $now - 90 * 86400 && in_array($p[1], ['vpn', 'direct'], true))
-        $speed[] = [(int)$p[0], $p[1], (int)$p[2], (int)$p[3], (int)$p[4]];
-}
-
-$since = (int)trim((string)@file_get_contents(watch('offline_since')));
-out([
-    'now' => $now,
-    'range' => $range,
-    'step' => $step,
-    'points' => $raw,
-    'stats' => [
-        'avg' => $ok ? (int)round(array_sum($ok) / count($ok)) : null,
-        'min' => $ok ? min($ok) : null,
-        'max' => $ok ? max($ok) : null,
-        'fails' => $fails,
-        'offline_min' => $off,
-    ],
-    'events' => array_slice($events, 0, 100),
-    'offline_since' => $since ?: null,     // роутер не отвечает серверу (по данным fspirat-watch)
-    'last_ok' => (int)trim((string)@file_get_contents(watch('last_ok'))) ?: null,
-    'names' => (object)names(),
-    'tpoints' => (object)$tpoints,     // задержка до сервисов через текущий сервер
-    'traffic' => (object)$traffic,     // трафик устройств по MAC
-    'speed' => $speed,                 // история теста скорости
-    'mtg' => fsr_site()['mtg'] !== '' ? (json_decode((string)@file_get_contents(watch('mtg.json')), true) ?: null) : null,   // свой Telegram-прокси (fspirat-watch), если есть
-    'site' => fsr_site(),             // ссылка LuCI, имя бота, домен Telegram-прокси — из deploy.conf
-]);
+out(fsr_data_payload(is_string($range) ? $range : 'day'));

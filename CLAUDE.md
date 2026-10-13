@@ -1,7 +1,7 @@
 # CLAUDE.md — контекст проекта fspirat-router
 
 Ты работаешь с проектом домашнего VPN-роутера пользователя и веб-панели к нему
-на https://fspirat.online/router/. Общайся с пользователем **по-русски**, объясняй
+на https://fspirat.xyz/router/. Общайся с пользователем **по-русски**, объясняй
 простыми словами, давай команды по одной-две за раз. Пользователь на Windows (PowerShell),
 подключается к машинам по SSH.
 
@@ -19,18 +19,18 @@
 Сервер NL Aeza 203.0.113.10 (Ubuntu 24.04)
    127.0.0.1:8081 ─► LuCI роутера (через туннель)
    nginx:
-     router.fspirat.online  → весь LuCI (вход через страницу fspirat.online/router/login + пароль роутера)
-     fspirat.online/router/ → страница web/index.html (вход через свою страницу, см. ниже)
-     fspirat.online/router/api → CGI /cgi-bin/fspirat на роутере (nginx добавляет токен cookie)
+     router.fspirat.xyz  → весь LuCI (вход через страницу fspirat.xyz/router/login + пароль роутера)
+     fspirat.xyz/router/ → страница web/index.html (вход через свою страницу, см. ниже)
+     fspirat.xyz/router/api → CGI /cgi-bin/fspirat на роутере (nginx добавляет токен cookie)
    cron: fspirat-watch раз в минуту → уведомления в Telegram (@FSRouter_bot)
-   fail2ban: sshd, nginx-http-auth, 3x-ipl
+   fail2ban: sshd, nginx-http-auth, 3x-ipl, fspirat-router-auth, fspirat-router-app
 ```
 
 ## Файлы репозитория → где живут
 
 | В репозитории | Где на самом деле | Как выкладывать |
 |---|---|---|
-| `web/index.html` | сервер `/var/www/fspirat.online/router/index.html` | push в main → GitHub Actions (`deploy-web.yml`) |
+| `web/index.html` | сервер `/var/www/fspirat.xyz/router/index.html` | push в main → GitHub Actions (`deploy-web.yml`) |
 | `router/bin/fspirat-ping` | роутер `/usr/bin/fspirat-ping` (cron */5) | workflow `Deploy router` (или `bash scripts/deploy-router.sh` из дома) |
 | `router/www/cgi-bin/fspirat` | роутер `/www/cgi-bin/fspirat` | workflow `Deploy router` |
 | `router/etc/init.d/fstunnel` | роутер `/etc/init.d/fstunnel` | workflow `Deploy router` (перезапуск туннеля — только с разрешения) |
@@ -62,7 +62,16 @@
 - Cookie `fsr_session` не уходит на роутер (LuCI): map в `server/nginx/conf.d/fsr-luci-cookie.conf`.
 - Пользователь `tunnel` — оболочка `/usr/sbin/nologin` (только проброс портов).
 - Ключ `deploy` — только rrsync в /var/www/fspirat.online (workflow `Restrict deploy key`); пути в rsync — от этой папки.
-- Telegram-прокси mtg: `server/mtproxy/` (workflow `MTProxy setup`), 443 делит nginx stream по SNI.
+- Telegram-прокси mtg **выключен 12.10.2026** (владельцу не нужен): `server/mtproxy/remove.sh`, конфиг с секретом оставлен,
+  вернуть — `remove.sh --rollback <копии>`. 443 делит nginx stream по SNI (`nl.*` → xray, остальное → сайты).
+
+## Домен: fspirat.xyz (переезд 12.10.2026 завершён)
+
+Всё работает только на `fspirat.xyz`; `*.fspirat.online` выключены по решению владельца (главная страница fspirat.online —
+зона сессии homeserver). Панель `fspirat.xyz/router/`, LuCI `router.fspirat.xyz`, VPN-имена `nl.fspirat.xyz` / `de.fspirat.xyz`
+(узлы PassWall `fspiratNL` / `fspiratDE` — tls_serverName на .xyz). Скрипты и откаты — `server/domain/`:
+`panel-new-domain.sh`, `vpn-new-name.sh`, `old-domain-off.sh` (копии в `/root/fspirat-backups/` на NL и DE).
+Несколько доменов панели сразу — `PANEL_ALIASES` в `/etc/fspirat-router/deploy.conf` (`fsr_panel()` в `server/auth/lib.php`).
 
 ## Доступ к роутеру с сервера
 
@@ -81,9 +90,9 @@ fspirat-watch раз в минуту пишет в `/var/lib/fspirat/`: `history
 
 ## Вход в панель (server/auth)
 
-Вместо окна браузера (auth_basic) — своя страница `fspirat.online/router/login` (PHP в `/var/www/router-auth/`).
+Вместо окна браузера (auth_basic) — своя страница `fspirat.xyz/router/login` (PHP в `/var/www/router-auth/`).
 nginx перед каждым запросом спрашивает `check.php` (`auth_request /_fsr_auth`); cookie `fsr_session` на домен
-`fspirat.online` — один вход и для `/router/`, и для `router.fspirat.online`.
+`fspirat.xyz` — один вход и для `/router/`, и для `router.fspirat.xyz`.
 - Пароль: пока нет `/var/lib/fspirat-router-auth/password`, проверяется по `/etc/nginx/.htpasswd_router` (apr1),
   после первого входа сохраняется там же в bcrypt. Сменить пароль: удалить этот файл и обновить .htpasswd_router
   (`htpasswd /etc/nginx/.htpasswd_router bob`).
@@ -91,6 +100,42 @@ nginx перед каждым запросом спрашивает `check.php` 
 - Журнал: `/var/log/fspirat-router-auth.log` (OK / FAIL / LOCKED / LOGOUT). fspirat-watch шлёт «🔑 Вход в панель».
 - Выкладка: workflow `Deploy server` (deploy-server.yml); nginx правит `server/auth/nginx-apply.py`
   (копии `*.bak-auth-*`, `nginx -t`, откат при ошибке).
+
+## Приложение iOS (/router/app/v1)
+
+Спецификация — `docs/ios/inventory.md` (§7 API, §8 nginx и fail2ban, §10 тесты), план — `docs/ios/plan.md`.
+Инструкция владельцу (установка .ipa, отзыв доступа, потеря телефона) и раздел для разработчика — `ios/README.md`.
+- Сервер: `server/auth/app.php` (+ `app-lib.php`, `data-lib.php`) → `/var/www/router-auth/`; вход — пароль + число в боте,
+  дальше только `Authorization: Bearer fsr1_…` (cookie и check.php не участвуют). Токены — в `auth.sqlite` (только sha256),
+  таблицы `app_*`. Роутер приложение вызывает как бот — с ключом `/var/lib/fspirat-router-auth/router.token`
+  (его пишут `Deploy server` и `Rotate router token`). Тесты: `bash server/auth/tests/app-test.sh` (их запускает Deploy server).
+- nginx: блок между `# --- fsr-app v1 (begin)` и `(end)` в сниппете ставит этап 7 `nginx-apply.py`; лимиты — зоны
+  `fsr_app_ip` и `fsr_app_dev` в `conf.d/fsr-limits.conf`. Веб (`/router/api`, `/router/data`) не меняется.
+- **Рубильник** (через ops): `touch /var/lib/fspirat-router-auth/app_disabled` → всё API отвечает 503; вернуть — `rm` этого файла.
+- **Отозвать все телефоны** (через ops; sqlite3 на сервере нет — через PHP от www-data):
+  `sudo -u www-data php -r '$d=new PDO("sqlite:/var/lib/fspirat-router-auth/auth.sqlite"); $s=$d->prepare("UPDATE app_devices SET revoked=?, revoked_by=? WHERE revoked IS NULL"); $s->execute([time(), "ops"]); echo $s->rowCount(), "\n";'`
+  Обычно хватает веба («Выйти на всех устройствах» отзывает и телефоны) или бота (`/apps`).
+- fail2ban: jail **`fspirat-router-app`** (неверный токен, отказ во входе, токен в адресе — 10 за 10 мин → бан 15 мин, как и у входа в панель);
+  неверный пароль из приложения — в `fspirat-router-auth`. Снять бан: `fail2ban-client set fspirat-router-app unbanip <IP>`.
+- iPhone-сборка — GitHub → TestFlight (`docs/ios/inventory.md` §9.5); ключи `*.p8`/`*.p12` только в секретах GitHub.
+- **Код приложения** (этапы 3–4, отчёты — `docs/ios/stage3-report.md`, `stage4-report.md`):
+  - `ios/RouterCore/` — Swift-пакет без UI: модели API, клиент (только `Authorization: Bearer`, ephemeral-сессия),
+    вход/подтверждения/задачи, правила «Сводки» (порт `web/app.js`), форматирование. Тесты — `swift test --package-path ios/RouterCore`
+    (workflow `iOS core tests` на Linux при каждом push в `ios/RouterCore/**`).
+  - `ios/Router/` — SwiftUI (iOS 17+, Swift 5 mode): вход, Keychain (`ThisDeviceOnly`), Face ID; этап 4 (`docs/ios/stage4-report.md`) —
+    вкладки Сводка / VPN / Устройства / Обход / Журнал + Настройки, стиль Liquid Glass (iOS 26, на 17–25 — материал).
+    Данные в переключателе приложений по умолчанию видны (решение владельца 13.10.2026): переключатель `hideInSwitcher` в Настройках.
+    `ios/project.yml` — XcodeGen; `.xcodeproj` и `Router/Info.plist` генерируются и в git не идут.
+  - Тексты, поля API и правила клиента — контракты `docs/ios/contract-stage3.md` и `docs/ios/contract-stage4.md` (вывод из кода
+    сервера, CGI роутера и веба); при расхождении прав код сервера. Стиль — `docs/ios/liquid-glass.md`, сборка в Actions — `docs/ios/build-notes.md`.
+- **Сборка `iOS TestFlight`** (`.github/workflows/ios-testflight.yml`, macos-26, минута ≈ 10 минут квоты):
+  - push в `ios/**` — задача пропускается (0 минут), если в сообщении коммита нет `[ios build]`; с меткой — только проверка сборки без подписи;
+  - в TestFlight отправляет только запуск из `main` (кнопка Run workflow или раз в 2 месяца) и только если заданы 4 секрета
+    `ASC_ISSUER_ID`, `ASC_KEY_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`; иначе — проверка сборки;
+  - номер сборки `run_number.run_attempt`; подпись `auto` = Apple Development (нужен iPhone в developer.apple.com → Devices), при ошибке ad-hoc.
+  - **`.ipa` без подписи** — `[ios ipa]` в коммите (любая ветка) или галочка `ipa` при запуске: файл в Artifacts на 7 дней.
+    Своей подписки Apple у владельца нет (13.10.2026): `.ipa` подписывается купленным сертификатом владельца в ESign. Риски (отзыв сертификата,
+    чужой подписант, общая команда) владелец принял; файлы сертификата и пароль от него — не в чат и не в git.
 
 ## Важные константы
 
@@ -146,7 +191,7 @@ nginx перед каждым запросом спрашивает `check.php` 
 
 - **uhttpd не передаёт в CGI свои заголовки** (X-Fspirat-Token терялся) → токен идёт cookie.
 - **procd-служба без `HOME=/root`** → dbclient падал молча (known_hosts). Поэтому `env HOME=/root`.
-- **Домен fspirat.online обслуживает Cloudflare DNS**, а не Reg.ru. Записи DNS — в Cloudflare
+- **Домены fspirat.online и fspirat.xyz обслуживает Cloudflare DNS** (регистраторы Reg.ru и Sav.com). Записи DNS — в Cloudflare
   (для certbot — «DNS only», серое облако).
 - **Speedtest Cloudflare**: `/meta` отдаёт `{}` → IP/страну берём из `/cdn-cgi/trace`;
   файлы >~100 МБ не отдаются → качаем кусками по 25 МБ.

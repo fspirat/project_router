@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Переводит /router/ и luci.example.org с окна браузера (auth_basic) на свою страницу входа.
+"""Переводит /router/ и luci.example.org с окна браузера (auth_basic) на свою страницу входа;
+этап 7 — API приложения iPhone /router/app/v1/ (блок между метками «# --- fsr-app v1 (begin)» и «(end)»).
 
-Запускается на сервере от root (workflow «Deploy server»). Повторный запуск ничего не ломает.
+Запускается на сервере от root (workflow «Deploy server»). Повторный запуск ничего не ломает и пишет «уже настроен».
 Перед правкой делает копии *.bak-auth; если `nginx -t` не проходит — возвращает копии и выходит с ошибкой.
 Токен роутера в сниппете не читается в лог и не меняется.
 """
@@ -97,8 +98,47 @@ TGHOOK = ('\n# --- Telegram-бот: команды роутеру (server/auth/t
 def tghook(s):
     return s if 'location = /router/tg-hook' in s else s.rstrip('\n') + '\n' + TGHOOK
 
+# Этап 7 (приложение iPhone, 13.10.2026): /router/app/v1/ → server/auth/app.php (docs/ios/inventory.md §7, §8.2).
+#   — вход только по токену «Authorization: Bearer fsr1_…»: без cookie (HTTP_COOKIE пустой), без страницы входа и check.php —
+#     токен, отзыв, токен в адресе, лимиты действий и журнал проверяет сам app.php; веб (/router/api, /router/data) не меняется;
+#   — свои лимиты частоты: fsr_app_ip по IP и fsr_app_dev по токену (зоны — conf.d/fsr-limits.conf, ставится до этого скрипта);
+#   — ошибки самого nginx (429, 413, php-fpm не ответил) — тоже JSON, как у app.php;
+#   — блок целиком между метками «# --- fsr-app vN (begin)» и «(end)»: каждый запуск заменяет блок любой прежней версии vN
+#     текущим (на том же месте), нет блока — дописывает в конец. Повторный запуск ничего не меняет.
+APP_V = 1
+APP = (f'# --- fsr-app v{APP_V} (begin)\n'
+       '# Приложение iPhone (server/auth/app.php): только токен Bearer, без cookie. Блок пишет nginx-apply.py — руками не править.\n'
+       'location ^~ /router/app/ { default_type application/json; return 404 \'{"error":"not_found"}\'; }\n'
+       'location ^~ /router/app/v1/ {\n'
+       '    add_header Strict-Transport-Security "max-age=31536000" always;\n'
+       '    add_header X-Content-Type-Options "nosniff" always;\n'
+       '    add_header Referrer-Policy "no-referrer" always;\n'
+       '    add_header Cache-Control "no-store" always;\n'
+       '    default_type application/json;\n'
+       '    limit_req zone=fsr_app_ip burst=40 nodelay;\n'
+       '    limit_req zone=fsr_app_dev burst=20 nodelay;\n'
+       '    client_max_body_size 4k;\n'
+       '    error_page 429 = @fsr_app_429;\n'
+       '    error_page 413 = @fsr_app_413;\n'
+       '    error_page 502 504 = @fsr_app_5xx;\n'
+       + fcgi('app.php', '    fastcgi_param HTTP_COOKIE "";\n    fastcgi_read_timeout 30s;\n') + '}\n'
+       'location @fsr_app_429 { default_type application/json; add_header Retry-After 2 always; '
+       'return 429 \'{"error":"rate_limited","retry_after":2}\'; }\n'
+       'location @fsr_app_413 { default_type application/json; return 413 \'{"error":"too_large"}\'; }\n'
+       'location @fsr_app_5xx { default_type application/json; return 502 \'{"error":"server_unavailable"}\'; }\n'
+       f'# --- fsr-app v{APP_V} (end)\n')
+# блок любой версии вместе с пустыми строками перед ним (метки — целые строки-комментарии)
+APP_RE = re.compile(r'\n*# --- fsr-app v[0-9]+ \(begin\).*?# --- fsr-app v[0-9]+ \(end\)[^\n]*(?:\n|$)', re.S)
+
+def app_api(s):
+    m = APP_RE.search(s)
+    if not m:
+        return s.rstrip('\n') + '\n\n' + APP
+    rest = APP_RE.sub('\n', s[m.end():])   # вторая копия блока (если вдруг есть) — убрать
+    return s[:m.start()] + '\n\n' + APP + rest
+
 def snippet(s):
-    return tghook(snippet_auth(s))
+    return app_api(tghook(snippet_auth(s)))
 
 def snippet_auth(s):
     if 'auth_request /_fsr_auth' in s:

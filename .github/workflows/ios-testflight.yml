@@ -1,0 +1,436 @@
+name: iOS TestFlight
+
+# Сборка приложения iPhone «Роутер» на Mac в облаке GitHub и отправка в TestFlight (docs/ios/inventory.md §9.5).
+# Сертификат подписи выпускает и хранит Apple (облачная подпись по ключу App Store Connect API, роль Admin):
+# .p12 и профилей нет ни в репозитории, ни в Secrets. Секреты: ASC_ISSUER_ID, ASC_KEY_ID, ASC_KEY_P8 (весь текст .p8), APPLE_TEAM_ID.
+#
+# Запуск:
+#   — вручную: Actions → iOS TestFlight → Run workflow (ветка main). Галочка «Отправить сборку в TestFlight»:
+#     включена — сборка уходит в TestFlight, выключена — только проверка, что приложение собирается;
+#   — сам раз в 2 месяца (1-го числа, 03:17 UTC) — сборка в TestFlight живёт 90 дней, новая продлевает приложение;
+#   — push в ios/** — только если в сообщении коммита есть «[ios build]», и только проверка сборки (без отправки),
+#     или «[ios ipa]» — файл .ipa без подписи (см. ниже). Без меток задача пропускается и минут не тратит
+#     (минута macOS ≈ 10 минут квоты).
+# .ipa без подписи (галочка «ipa» при запуске или «[ios ipa]» в коммите, с любой ветки, секреты не нужны):
+#   файл Router-N.ipa в разделе Artifacts страницы запуска, хранится 7 дней. Его подписывает владелец своим
+#   сертификатом в программе установки (решение владельца 13.10.2026; риски — docs/ios/stage3-report.md).
+#   Дата сборки в него не пишется: срок жизни задаёт сертификат, а не TestFlight.
+# Отправка — только из main и только когда заданы все 4 секрета; иначе — проверка сборки без подписи.
+# Номер сборки — «номер запуска.попытка» (42.1); Re-run того же запуска даёт 42.2, 42.3… — App Store Connect его примет.
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Отправить сборку в TestFlight (иначе только проверка сборки)"
+        type: boolean
+        default: true
+      signing:
+        description: "Подпись архива: auto — Apple Development (нужен хотя бы один iPhone в developer.apple.com → Devices), при ошибке ad-hoc; остальные — только этот способ"
+        type: choice
+        options: [auto, development, adhoc]
+        default: auto
+      ipa:
+        description: "Собрать файл .ipa без подписи (для своего сертификата) вместо отправки в TestFlight"
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 3 1 */2 *'
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-testflight.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # push без «[ios build]» / «[ios ipa]» в сообщении коммита — пропустить (0 минут). Для остальных событий head_commit нет — не проверяем.
+    if: >-
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[ios build]') ||
+      contains(github.event.head_commit.message, '[ios ipa]')
+    # macos-26 (arm64): Xcode 26 / iOS 26 SDK — с 28.04.2026 App Store Connect принимает только такие сборки.
+    # Не macos-latest (переедет на macOS 27 сам) и не -large/-xlarge/-intel (платные всегда).
+    runs-on: macos-26
+    timeout-minutes: 40
+    # очередь на уровне задачи: пропущенные push-запуски (без «[ios build]») в неё не встают
+    # и не вытесняют ждущий ручной запуск
+    concurrency:
+      group: ios-testflight
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Выбрать Xcode 26 (самый новый)
+        run: |
+          # Xcode_26.X[.Y].app; ссылки (Xcode_26.6.0.app, Xcode.app) и бета-версии пропускаем.
+          # Сортировка по числам: 26.10 новее 26.9.
+          best=""
+          for f in /Applications/Xcode_26*.app; do
+            [ -d "$f" ] || continue
+            [ -L "$f" ] && continue
+            n=$(basename "$f" .app); v=${n#Xcode_}
+            printf '%s\n' "$v" | grep -Eq '^26(\.[0-9]+){0,2}$' || continue
+            maj=$(printf '%s' "$v" | cut -d. -f1); min=$(printf '%s' "$v" | cut -s -d. -f2); pat=$(printf '%s' "$v" | cut -s -d. -f3)
+            best="$best${maj} ${min:-0} ${pat:-0} $f"$'\n'
+          done
+          XC=$(printf '%s' "$best" | sort -n -k1,1 -k2,2 -k3,3 | tail -n 1 | cut -d' ' -f4-)
+          if [ -z "$XC" ]; then
+            echo "::error::На раннере нет Xcode 26 — собрать для App Store Connect нечем (нужен iOS 26 SDK). Что есть:"
+            ls -d /Applications/Xcode* || true
+            exit 1
+          fi
+          echo "Выбран: $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XC/Contents/Developer"
+          xcodebuild -version
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iOS SDK: $sdk"
+          swift --version
+          case "$sdk" in
+            2[6-9]*|[3-9][0-9]*) ;;
+            *) echo "::error::iOS SDK $sdk старше 26 — App Store Connect такую сборку не примет"; exit 1 ;;
+          esac
+          echo "FSR_XCODE=$(xcodebuild -version | tr '\n' ' ' | sed 's/ *$//'), iOS SDK $sdk" >> "$GITHUB_ENV"
+
+      - name: Установить XcodeGen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: |
+          # формула Homebrew из образа (бутылка проверяется по SHA-256 самим Homebrew); нужна 2.46 или новее
+          brew install xcodegen
+          xcodegen --version
+          v=$(xcodegen --version | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+          maj=$(printf '%s' "$v" | cut -d. -f1); min=$(printf '%s' "$v" | cut -d. -f2)
+          if [ -z "$v" ] || [ "$maj" -lt 2 ] || { [ "$maj" -eq 2 ] && [ "$min" -lt 46 ]; }; then
+            echo "::error::XcodeGen '$v' — нужна 2.46 или новее"
+            exit 1
+          fi
+          # новее 2.46.x не падаем (плановая сборка раз в 2 месяца не должна ломаться от обновления образа), но предупреждаем
+          case "$v" in
+            2.46|2.46.*) ;;
+            *) echo "::warning::XcodeGen $v — проверено с 2.46.x; если сборка ведёт себя иначе, смотрите CHANGELOG XcodeGen" ;;
+          esac
+
+      - name: Создать проект (xcodegen)
+        run: |
+          [ -f ios/project.yml ] || { echo "::error::Нет ios/project.yml"; exit 1; }
+          xcodegen generate --spec ios/project.yml
+          [ -d ios/Router.xcodeproj ] || { echo "::error::xcodegen не создал ios/Router.xcodeproj"; exit 1; }
+          xcodebuild -list -project ios/Router.xcodeproj
+
+      - name: Режим (отправка или проверка)
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          IN_UPLOAD: ${{ inputs.upload }}
+          IN_SIGNING: ${{ inputs.signing }}
+          IN_IPA: ${{ inputs.ipa }}
+          # true/false; само сообщение коммита в скрипт не попадает
+          PUSH_IPA: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[ios ipa]') }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # секреты здесь только проверяются на «задан / не задан», значения не печатаются
+          upload=0
+          ipa=0
+          if [ "$PUSH_IPA" = "true" ] || { [ "$EVENT" = "workflow_dispatch" ] && [ "$IN_IPA" = "true" ]; }; then
+            ipa=1
+          fi
+          case "$EVENT" in
+            workflow_dispatch)
+              if [ "$IN_UPLOAD" = "true" ]; then upload=1
+              else why="при запуске снята галочка «Отправить сборку в TestFlight» — только проверка сборки"; fi ;;
+            schedule) upload=1 ;;
+            push) why="запуск от push с [ios build] — только проверка сборки (отправка — Actions → iOS TestFlight → Run workflow)" ;;
+            *) why="событие $EVENT — только проверка сборки" ;;
+          esac
+          if [ "$upload" = 1 ] && [ "$REF" != "refs/heads/main" ]; then
+            upload=0; why="не main ($REF) — только проверка сборки"
+          fi
+          if [ "$upload" = 1 ]; then
+            missing=""
+            [ -n "$ASC_ISSUER_ID" ] || missing="$missing ASC_ISSUER_ID"
+            [ -n "$ASC_KEY_ID" ]    || missing="$missing ASC_KEY_ID"
+            [ -n "$ASC_KEY_P8" ]    || missing="$missing ASC_KEY_P8"
+            [ -n "$APPLE_TEAM_ID" ] || missing="$missing APPLE_TEAM_ID"
+            if [ -n "$missing" ]; then
+              upload=0; why="секреты Apple не заданы (нет:$missing) — только проверка сборки"
+            fi
+          fi
+          if [ "$ipa" = 1 ]; then
+            upload=0
+            text="файл .ipa без подписи (для своего сертификата)"
+          elif [ "$upload" = 1 ]; then
+            text="отправка в TestFlight"
+          else
+            text="проверка сборки (без подписи и отправки): $why"
+            echo "::notice title=Только проверка сборки::$why"
+          fi
+          signing=${IN_SIGNING:-auto}
+          case "$signing" in auto|development|adhoc) ;; *) signing=auto ;; esac
+          {
+            echo "upload=$upload"
+            echo "ipa=$ipa"
+            echo "signing=$signing"
+          } >> "$GITHUB_OUTPUT"
+          # .ipa: дату сборки не пишем — в приложении не будет строки «Сборка действует до…» (это срок TestFlight)
+          bdate=$(date -u +%Y-%m-%d)
+          if [ "$ipa" = 1 ]; then bdate=""; fi
+          {
+            echo "FSR_MODE_TEXT=$text"
+            # CFBundleVersion: до трёх чисел через точку; Re-run (попытка 2, 3…) даёт новый, больший номер
+            echo "FSR_BUILD_NUMBER=${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+            echo "FSR_BUILD_DATE=$bdate"
+          } >> "$GITHUB_ENV"
+          echo "Режим: $text"
+
+      # ---------- проверка сборки (UPLOAD=0): симулятор, без подписи, секреты не нужны ----------
+      - name: Проверка сборки (без подписи)
+        if: steps.mode.outputs.upload == '0' && steps.mode.outputs.ipa == '0'
+        run: |
+          # -quiet: в логе только предупреждения и ошибки
+          xcodebuild -quiet \
+            -project ios/Router.xcodeproj -scheme Router -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            FSR_BUILD_DATE="$FSR_BUILD_DATE" \
+            CURRENT_PROJECT_VERSION="$FSR_BUILD_NUMBER" \
+            build
+          echo "✅ приложение собирается"
+
+      # ---------- .ipa без подписи (IPA=1): для своего сертификата владельца, секреты не нужны ----------
+      - name: Файл .ipa без подписи
+        if: steps.mode.outputs.ipa == '1'
+        run: |
+          rm -rf "$RUNNER_TEMP/Router.xcarchive" "$RUNNER_TEMP/ipa"
+          xcodebuild -quiet archive \
+            -project ios/Router.xcodeproj -scheme Router -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Router.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION="$FSR_BUILD_NUMBER" \
+            FSR_BUILD_DATE=""
+          app="$RUNNER_TEMP/Router.xcarchive/Products/Applications/Router.app"
+          [ -d "$app" ] || { echo "::error::в архиве нет Router.app"; exit 1; }
+          [ -f "$app/PrivacyInfo.xcprivacy" ] || { echo "::error::PrivacyInfo.xcprivacy не попал в приложение"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
+          name="Router-$FSR_BUILD_NUMBER.ipa"
+          ( cd "$RUNNER_TEMP/ipa" && zip -qry "$name" Payload )
+          ls -l "$RUNNER_TEMP/ipa/$name"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' "$app/Info.plist"
+          echo "FSR_IPA=$RUNNER_TEMP/ipa/$name" >> "$GITHUB_ENV"
+          echo "FSR_IPA_NAME=$name" >> "$GITHUB_ENV"
+          echo "✅ $name готов"
+
+      - name: Выложить .ipa в Artifacts
+        if: steps.mode.outputs.ipa == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Router-ipa-${{ github.run_number }}.${{ github.run_attempt }}
+          path: ${{ env.FSR_IPA }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      # ---------- отправка (UPLOAD=1) ----------
+      - name: Ключ App Store Connect и временная связка ключей
+        if: steps.mode.outputs.upload == '1'
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # значения секретов не печатаются; проверяется только их вид
+          kid=$(printf '%s' "$ASC_KEY_ID" | tr -d ' \r\n\t')
+          iss=$(printf '%s' "$ASC_ISSUER_ID" | tr -d ' \r\n\t')
+          team=$(printf '%s' "$APPLE_TEAM_ID" | tr -d ' \r\n\t')
+          printf '%s' "$kid"  | grep -Eq '^[A-Z0-9]{8,12}$' || { echo "::error::ASC_KEY_ID не похож на Key ID (10 латинских букв и цифр)"; exit 1; }
+          printf '%s' "$iss"  | grep -Eq '^[0-9a-fA-F-]{36}$' || { echo "::error::ASC_ISSUER_ID не похож на Issuer ID (вида 12345678-abcd-…)"; exit 1; }
+          printf '%s' "$team" | grep -Eq '^[A-Z0-9]{10}$' || { echo "::error::APPLE_TEAM_ID не похож на Team ID (10 латинских букв и цифр)"; exit 1; }
+          case "$ASC_KEY_P8" in
+            *"BEGIN PRIVATE KEY"*) ;;
+            *) echo "::error::ASC_KEY_P8 — нужен весь текст файла .p8, от -----BEGIN PRIVATE KEY----- до -----END PRIVATE KEY-----"; exit 1 ;;
+          esac
+
+          touch "$RUNNER_TEMP/fsr-start"     # метка: профили новее неё создала эта сборка — их удалит последний шаг
+          mkdir -p "$RUNNER_TEMP/asc"
+          chmod 700 "$RUNNER_TEMP/asc"
+          key="$RUNNER_TEMP/asc/AuthKey_$kid.p8"
+          ( umask 077; printf '%s\n' "$ASC_KEY_P8" | tr -d '\r' > "$key" )
+          chmod 600 "$key"
+          {
+            echo "ASC_KEY_PATH=$key"
+            echo "ASC_KID=$kid"
+            echo "ASC_ISS=$iss"
+            echo "FSR_TEAM=$team"
+          } >> "$GITHUB_ENV"
+          # ID ключа, издателя и команды — не тайна, как .p8, но в логе их лучше скрыть
+          echo "::add-mask::$kid"
+          echo "::add-mask::$iss"
+          echo "::add-mask::$team"
+
+          # ExportOptions.plist — в RUNNER_TEMP, Team ID подставляется здесь (в репозитории его нет)
+          cat > "$RUNNER_TEMP/asc/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$team</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>testFlightInternalTestingOnly</key><true/>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$RUNNER_TEMP/asc/ExportOptions.plist"
+
+          # временная связка ключей (как fastlane setup_ci): открыта, без автоблокировки, по умолчанию —
+          # сюда Xcode положит ключ сертификата Apple Development; иначе codesign может упасть с errSecInternalComponent
+          kc="$RUNNER_TEMP/fsr-build.keychain-db"
+          pw=$(openssl rand -hex 24)
+          orig=$(security default-keychain -d user | tr -d '"' | sed 's/^ *//; s/ *$//')
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s "$kc"
+          {
+            echo "FSR_KEYCHAIN=$kc"
+            echo "FSR_ORIG_KEYCHAIN=$orig"
+          } >> "$GITHUB_ENV"
+          echo "ключ и ExportOptions готовы, временная связка ключей создана"
+
+      - name: Архив (xcodebuild archive)
+        if: steps.mode.outputs.upload == '1'
+        env:
+          SIGNING: ${{ steps.mode.outputs.signing }}
+        run: |
+          # основной способ (inventory §9.5): автоматическая подпись Apple Development, Xcode сам создаёт
+          # сертификат/профиль по ключу API. Каждая сборка на чистом Mac создаёт новый сертификат «Created via API» —
+          # старые можно изредка отзывать в developer.apple.com → Certificates (на сборки в TestFlight не влияет).
+          # Запасной (ad-hoc): архив без сертификата, настоящая подпись — облачным сертификатом при экспорте.
+          # Apple Development требует хотя бы одно устройство в команде (Devices); без него этот шаг сразу падает
+          # с «no devices» и сборка идёт запасным ad-hoc.
+          archive() {
+            rm -rf "$RUNNER_TEMP/Router.xcarchive"
+            xcodebuild archive \
+              -project ios/Router.xcodeproj -scheme Router -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath "$RUNNER_TEMP/Router.xcarchive" \
+              -derivedDataPath "$RUNNER_TEMP/dd" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$ASC_KEY_PATH" \
+              -authenticationKeyID "$ASC_KID" \
+              -authenticationKeyIssuerID "$ASC_ISS" \
+              CODE_SIGN_STYLE=Automatic \
+              DEVELOPMENT_TEAM="$FSR_TEAM" \
+              CURRENT_PROJECT_VERSION="$FSR_BUILD_NUMBER" \
+              FSR_BUILD_DATE="$FSR_BUILD_DATE" \
+              "$@"
+          }
+          used=""
+          if [ "$SIGNING" != "adhoc" ]; then
+            echo "::group::Архив: подпись Apple Development"
+            if archive; then used="Apple Development (автоматическая)"; fi
+            echo "::endgroup::"
+            if [ -z "$used" ] && [ "$SIGNING" = "development" ]; then
+              echo "::error::Архив с подписью Apple Development не собрался — см. лог выше. Можно запустить ещё раз с signing=adhoc"
+              exit 1
+            fi
+            [ -n "$used" ] || echo "::warning::Архив с подписью Apple Development не собрался — пробую запасной способ (ad-hoc + облачная подпись при экспорте; частая причина — в команде нет зарегистрированных устройств)"
+          fi
+          if [ -z "$used" ]; then
+            echo "::group::Архив: ad-hoc"
+            if archive CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES; then used="ad-hoc (запасной способ)"; fi
+            echo "::endgroup::"
+            [ -n "$used" ] || { echo "::error::Архив не собрался — см. лог выше"; exit 1; }
+          fi
+          [ -d "$RUNNER_TEMP/Router.xcarchive" ] || { echo "::error::xcodebuild не создал архив"; exit 1; }
+          # без манифеста приватности (UserDefaults — API с обязательной причиной) App Store Connect отклонит сборку (ITMS-91053)
+          [ -f "$RUNNER_TEMP/Router.xcarchive/Products/Applications/Router.app/PrivacyInfo.xcprivacy" ] || { echo "::error::PrivacyInfo.xcprivacy не попал в приложение"; exit 1; }
+          echo "FSR_SIGNING_USED=$used" >> "$GITHUB_ENV"
+          echo "✅ архив готов: $used"
+
+      - name: Экспорт и отправка в App Store Connect
+        if: steps.mode.outputs.upload == '1'
+        run: |
+          # destination=upload: экспорт сам подписывает облачным сертификатом распространения и отправляет сборку
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Router.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/asc/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KID" \
+            -authenticationKeyIssuerID "$ASC_ISS"
+          echo "FSR_UPLOADED=1" >> "$GITHUB_ENV"
+          echo "✅ сборка $FSR_BUILD_NUMBER отправлена в App Store Connect"
+
+      - name: Убрать ключ, связку ключей и профили
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/export"
+          if [ -n "${FSR_KEYCHAIN:-}" ]; then
+            if [ -n "${FSR_ORIG_KEYCHAIN:-}" ]; then security default-keychain -d user -s "$FSR_ORIG_KEYCHAIN" || true; fi
+            security delete-keychain "$FSR_KEYCHAIN" || true
+          fi
+          if [ -f "$RUNNER_TEMP/fsr-start" ]; then
+            for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+              [ -d "$d" ] && find "$d" -type f -newer "$RUNNER_TEMP/fsr-start" -delete || true
+            done
+            rm -f "$RUNNER_TEMP/fsr-start"
+          fi
+          echo "убрано"
+
+      - name: Итог
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Сборка iOS «Роутер»"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Режим | ${FSR_MODE_TEXT:-не определён (задача упала раньше)} |"
+            echo "| Xcode | ${FSR_XCODE:-—} |"
+            echo "| Номер сборки | ${FSR_BUILD_NUMBER:-$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT} |"
+            echo "| Дата сборки (UTC) | ${FSR_BUILD_DATE:-—} |"
+            [ -n "${FSR_SIGNING_USED:-}" ] && echo "| Подпись архива | $FSR_SIGNING_USED |"
+            echo "| Итог | $JOB_STATUS |"
+            echo ""
+            if [ "${FSR_UPLOADED:-0}" = 1 ]; then
+              echo "✅ Сборка ${FSR_BUILD_NUMBER} отправлена в TestFlight; через 5–30 минут она появится в App Store Connect → TestFlight."
+            elif [ -n "${FSR_IPA_NAME:-}" ] && [ "$JOB_STATUS" = "success" ]; then
+              echo "📦 ${FSR_IPA_NAME} (без подписи) — внизу этой страницы, раздел **Artifacts**, хранится 7 дней."
+              echo "Скачанный zip распаковать, .ipa подписать своим сертификатом в программе установки."
+            elif [ "$JOB_STATUS" != "success" ]; then
+              echo "❌ Не получилось — причина в логе шага с ошибкой."
+              echo "Частые: «No suitable application records» — нет приложения в App Store Connect (My Apps → «+»);"
+              echo "«Cloud signing permission error» / «No profiles» — у ключа API не роль Admin."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

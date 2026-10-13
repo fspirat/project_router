@@ -7,15 +7,8 @@ declare(strict_types=1);
 define('FSR', true);
 require __DIR__ . '/lib.php';
 
-// Как называть действие в Telegram; true — сообщать. Ключ — action в /router/api, «rename» — POST /router/data.
-const FSR_ACTIONS = [
-    'reboot' => ['🔄 Перезагрузка роутера', true], 'restart' => ['🔁 Перезапуск VPN', true],
-    'update' => ['📥 Обновление подписки', true], 'switch' => ['🌍 Смена сервера', false],
-    'block' => ['⛔ Интернет выключен устройству', true], 'unblock' => ['✅ Интернет включён устройству', true],
-    'settargets' => ['📝 Изменён список сервисов', true], 
-    'subadd' => ['➕ Добавлена подписка VPN', true], 'subdel' => ['🗑 Удалена подписка VPN', true], 'subupdate' => ['📥 Обновление подписки', false],
-    'rename' => ['✏️ Переименовано устройство', false],
-];
+// Как называть действие в Telegram и о каких сообщать — FSR_ACTIONS в lib.php (общая с приложением).
+// apprevoke/apprevokeall здесь не сообщаются: о них пишет сам data.php (с именем телефона и только если отзыв удался).
 
 $notify = '';
 try {
@@ -24,10 +17,10 @@ try {
     $method = strtoupper((string)($_SERVER['FSR_ORIG_METHOD'] ?? 'GET'));
     if (preg_match('~^/router/(api|data)(\?|$)~', $uri, $m) && $method !== 'GET' && $method !== 'HEAD') {
         parse_str((string)parse_url($uri, PHP_URL_QUERY), $q);
-        $action = $m[1] === 'data' ? 'rename' : preg_replace('/[^a-z]/', '', (string)($q['action'] ?? ''));
+        $action = $m[1] === 'data' ? (($q['op'] ?? '') === 'apprevoke' ? 'apprevoke' : 'rename') : preg_replace('/[^a-z]/', '', (string)($q['action'] ?? ''));
         $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
         $csrf = fsr_csrf();
-        if ($origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org') || $csrf === ''
+        if ($origin !== fsr_origin() || $csrf === ''
             || !hash_equals($csrf, (string)($_SERVER['HTTP_X_FSR'] ?? ''))) {
             fsr_audit('DENY', "$action csrf/origin");
             http_response_code(403); exit;
@@ -37,7 +30,7 @@ try {
         foreach (['id', 'sid', 'mac', 'via'] as $k) if (preg_match('/^[A-Za-z0-9:_]{1,40}$/', (string)($q[$k] ?? ''))) $detail .= " $k=" . $q[$k];
         fsr_audit('ACTION', $detail);
         [$title, $tg] = FSR_ACTIONS[$action] ?? ['', false];
-        if ($tg) $notify = $title . (preg_match('/^[0-9a-fA-F:]{17}$/', (string)($q['mac'] ?? '')) ? "\nMAC " . $q['mac'] : '') . "\nИз панели, IP " . fsr_ip();
+        if ($tg && !str_starts_with($action, 'app')) $notify = $title . (preg_match('/^[0-9a-fA-F:]{17}$/', (string)($q['mac'] ?? '')) ? "\nMAC " . $q['mac'] : '') . "\nИз панели, IP " . fsr_ip();
     }
     http_response_code(204);
 } catch (Throwable $e) {

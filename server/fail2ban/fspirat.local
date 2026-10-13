@@ -14,7 +14,10 @@ maxretry = 5
 findtime = 10m
 bantime = 1h
 
-# Страница входа в панель роутера (server/auth): 5 неверных паролей за 10 минут — бан на час.
+# Страница входа в панель роутера (server/auth) и пароль из приложения iPhone: 5 строк FAIL/LOCKED за 10 минут — бан на час.
+# До 13.10.2026 фильтр после вырезания даты не совпадал ни с чем, и этот jail не банил никого. Теперь банит по-настоящему:
+# бан закрывает весь 443 (общий с Xray своего NL) — 5 неверных паролей с домашнего IP оставят дом на 15 минут без своего VPN.
+# bantime 15m — решение владельца 13.10.2026 (короткий бан: подбор всё равно бесполезен, случайная ошибка дома не отрезает NL надолго). Снять бан: fail2ban-client set fspirat-router-auth unbanip <IP>
 [fspirat-router-auth]
 enabled = true
 port = http,https
@@ -22,4 +25,20 @@ filter = fspirat-router-auth
 logpath = /var/log/fspirat-router-auth.log
 maxretry = 5
 findtime = 10m
-bantime = 1h
+bantime = 15m
+
+# Приложение iPhone (/router/app/v1, server/auth/app.php): неверный токен (APP_BADTOKEN), отказ во входе — неверное число
+# или «Это не я» (APP_DENIED), токен в адресе (APP_URLTOKEN): 10 за 10 минут — бан на 15 минут.
+# Не считаются: запрос без токена, отозванный и истёкший токен (старый телефон не должен банить домашний IP).
+# Неверный пароль из приложения — строка FAIL, её считает jail fspirat-router-auth выше.
+# Осторожно: бан закрывает весь 443, а его nginx stream делит по SNI с Xray своего NL — дом на 15 минут без своего VPN.
+# Снять бан: fail2ban-client set fspirat-router-app unbanip <IP>
+[fspirat-router-app]
+enabled = true
+port = http,https
+filter = fspirat-router-app
+logpath = /var/log/fspirat-router-auth.log
+maxretry = 10
+findtime = 10m
+bantime = 15m
+ignoreself = true

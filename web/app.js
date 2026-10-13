@@ -73,6 +73,15 @@ async function csrfToken(fresh){
   csrf = (await r.json()).csrf || '';
   return csrf;
 }
+// POST в /router/data (своё имя устройства, отзыв приложения на телефоне): те же правила, что у api() — токен сессии в X-FSR,
+// свой Origin (запрос с этой же страницы); 403 — токен устарел: взять свежий и повторить один раз. Ответ — Response, разбирает вызвавший
+async function dataPost(query, body){
+  const send = async fresh => fetch('/router/data' + query, {method: 'POST', cache: 'no-store', headers: {'X-FSR': await csrfToken(fresh)}, body: new URLSearchParams(body)});
+  let r = await send(false);
+  if(r.status === 403) r = await send(true);
+  if(r.status === 401){ toLogin(); throw new Error('Вход истёк — открываю страницу входа.'); }
+  return r;
+}
 // Понятные слова вместо кодов; код и ответ роутера — в консоли (F12) для разбора
 const ERR = {
   'bad mac': 'неверный адрес устройства (MAC)', 'bad node': 'такого сервера нет — обнови список', 'bad via': 'неизвестный вид теста',
@@ -501,9 +510,7 @@ function rename(mac){
     editing = null;
     if(save){
       try {
-        const post = async fresh => fetch('/router/data', {method: 'POST', headers: {'X-FSR': await csrfToken(fresh)}, body: new URLSearchParams({mac, name: inp.value})});
-        let r = await post(false);
-        if(r.status === 403) r = await post(true);
+        const r = await dataPost('', {mac, name: inp.value});
         if(!r.ok) throw new Error();
         names = (await r.json()).names || {};
         toast('Имя сохранено.');
@@ -827,7 +834,7 @@ function showTab(){
   document.querySelectorAll('.tab').forEach(a => a.setAttribute('aria-selected', a.dataset.tab === t));
   document.querySelectorAll('.mtabs a').forEach(a => a.toggleAttribute('aria-current', a.dataset.tab === t));
   closeMenu();
-  if(t === 'net'){ loadNet(); if(!md) loadMd(); }
+  if(t === 'net'){ loadNet(); if(!md) loadMd(); loadApps(); }
 }
 window.addEventListener('hashchange', () => { showTab(); scrollTo(0, 0); });
 
@@ -1071,6 +1078,66 @@ $('#led-btn').addEventListener('click', async () => {
   finally { b.disabled = false; b.removeAttribute('aria-busy'); }
 });
 
+/* ---------- Безопасность: приложения на телефонах ----------
+   GET /router/data?devices=1 → {apps:[{id, name, model, os, app, created, seen, last_ip, expires, hard_expires}], web, logins, auth_log}.
+   Грузится, только когда открыта вкладка «Сеть» (там раздел), и вместе с обычным обновлением данных раз в минуту — не чаще раза в 30 с.
+   Отзыв — POST /router/data?op=apprevoke id=… через dataPost(): CSRF и Origin проверяет check.php, как у переименования. */
+let appDevs = null, appsAt = 0, appsBusy = false;
+const dayTxt = ts => { const d = new Date(ts * 1000);
+  return d.toLocaleDateString('ru-RU', {day: 'numeric', month: 'long', ...(d.getFullYear() !== new Date().getFullYear() ? {year: 'numeric'} : {})}); };
+const seenTxt = ts => ts && Date.now() / 1000 - ts < 3600 ? ago(ts) : ts ? when(ts) : '—';
+const osTxt = os => /^\d/.test(os || '') ? 'iOS ' + os : os || '';     // приложение может прислать только номер версии
+async function loadApps(force){
+  if(appsBusy || (!force && Date.now() - appsAt < 30000)) return;
+  appsBusy = true;
+  try {
+    const r = await fetch('/router/data?devices=1', {cache: 'no-store', headers: {'X-FSR': csrf || '1'}});
+    if(r.status === 401){ toLogin(); return; }
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!Array.isArray(j.apps)) return;              // сервер ещё без списка устройств (старый data.php) — блок не показываем
+    appDevs = j; appsAt = Date.now(); renderApps();
+  } catch {} finally { appsBusy = false; }
+}
+function renderApps(){
+  const list = (appDevs && appDevs.apps) || [], now = Date.now() / 1000;
+  $('#apps-box').hidden = !appDevs;
+  if(!appDevs) return;
+  const c = $('#apps-count'); c.hidden = !list.length; c.textContent = list.length;
+  $('#apps-list').innerHTML = list.map(x => {
+    const dev = [x.model, osTxt(x.os), x.app ? 'приложение ' + x.app : ''].filter(Boolean).join(' · '), soon = x.expires - now < 7 * 86400;
+    const meta = [`<span>был в сети <b>${esc(seenTxt(x.seen))}</b></span>`, x.last_ip ? `<span>IP <b class="mono">${esc(x.last_ip)}</b></span>` : '',
+      `<span title="${esc(`Вход с ${dayTxt(x.created)}. Срок продлевается, пока приложением пользуются, но не дольше чем до ${dayTxt(x.hard_expires)}`)}">вход до <b class="${soon ? 'slow' : ''}">${esc(dayTxt(x.expires))}</b></span>`].join('');
+    return `<li class="sub"><span class="sub-ic">${ic('monitor-smartphone')}</span>
+      <div class="sub-main"><b>${esc(x.name || 'Телефон')}</b>${dev ? `<small>${esc(dev)}</small>` : ''}<div class="sub-meta">${meta}</div></div>
+      <div class="sub-acts"><button class="btn small danger-outline" type="button" data-apprevoke="${esc(x.id)}" aria-label="Отозвать доступ: ${esc(x.name || 'телефон')}">${ic('ban')}Отозвать</button></div></li>`;
+  }).join('') || '<li class="empty">Приложение ещё ни на одном телефоне не входило.</li>';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-apprevoke]'); if(!b) return;
+  const id = b.dataset.apprevoke, x = ((appDevs && appDevs.apps) || []).find(v => v.id === id) || {}, nm = x.name || 'телефон';
+  if(!await ask({title: `Отозвать доступ «${nm}»?`, danger: true, ok: 'Отозвать',
+    text: 'Приложение на этом телефоне сразу выйдет и больше не сможет управлять роутером. Вернуть доступ — войти в приложении заново: пароль и подтверждение в Telegram. Бот пришлёт сообщение об отзыве.'})) return;
+  const done = busy(b, 'Отзываю…');
+  try {
+    const r = await dataPost('?op=apprevoke', {id});
+    if(r.status === 404) toast(`«${nm}» уже не имеет доступа — список обновлён.`);
+    else if(!r.ok) throw new Error('Не удалось отозвать доступ. Попробуй ещё раз.');
+    else toast(`Доступ «${nm}» отозван: приложение на телефоне вышло.`);
+  } catch(err){ toast(err.message.startsWith('Вход') || err.message.startsWith('Не удалось') ? err.message : 'Нет связи с сайтом. Проверь интернет и попробуй ещё раз.', true); }
+  finally { done(); loadApps(true); }
+});
+/* «Выйти на всех устройствах»: обычная форма POST /router/logout all=1, но сначала — окно подтверждения */
+$('#logout-all').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.currentTarget, n = ((appDevs && appDevs.apps) || []).length;
+  if(!await ask({title: 'Выйти на всех устройствах?', danger: true, ok: 'Выйти везде',
+    text: 'Панель закроется на всех компьютерах и телефонах, и на этом тоже. '
+      + (n ? `Приложение на телефонах (${n}) тоже выйдет — войти в нём заново: пароль и подтверждение в Telegram. ` : 'Если приложение где-то вошло, оно тоже выйдет. ')
+      + 'Запомненные браузеры забудутся: каждый, даже этот, снова попросит код из Telegram.'})) return;
+  f.submit();                                      // submit() не вызывает это событие повторно
+});
+
 /* Опрос: один запрос каждого вида за раз (медленный ответ не копит очередь), во вкладке в фоне — пауза,
    при возврате на вкладку — сразу свежие данные. Таймеры заводятся один раз, слушатели — делегированные. */
 function every(ms, fn){
@@ -1079,7 +1146,7 @@ function every(ms, fn){
   setInterval(tick, ms);
   return tick;
 }
-const tLoad = every(30000, load), tData = every(60000, loadData), tZap = every(30000, loadZap), tTg = every(60000, loadTgws), tLed = every(300000, loadLed);
+const tLoad = every(30000, load), tData = every(60000, async () => { await loadData(); if(currentTab() === 'net') await loadApps(); }), tZap = every(30000, loadZap), tTg = every(60000, loadTgws), tLed = every(300000, loadLed);
 every(3000, loadNet);
 setInterval(tickUpdated, 5000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden){ tLoad(); tData(); tZap(); tTg(); tLed(); } });

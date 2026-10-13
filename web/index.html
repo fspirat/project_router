@@ -269,7 +269,13 @@
       <section class="panel">
         <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#lock-keyhole"/></svg>Безопасность</h2>
         <p class="note">Вход — пароль и код из Telegram на новом устройстве. Входы и действия записываются, о важных бот пишет в Telegram. Каждое утро в 9:00 бот присылает отчёт за сутки.</p>
-        <form method="post" action="/router/logout" class="sec-row">
+        <!-- Телефоны с приложением (GET /router/data?devices=1), «Отозвать» — POST /router/data?op=apprevoke. Блок скрыт, пока сервер не ответил списком -->
+        <div class="apps-box" id="apps-box" hidden>
+          <h3 class="sub-h apps-h">Приложения на телефонах<small id="apps-count" hidden></small></h3>
+          <ul class="subs apps" id="apps-list"></ul>
+          <p class="note">Вход в приложение — пароль и нажатие числа с экрана телефона в Telegram-боте. Пока приложением пользуются, вход продлевается на 90 дней, но не дольше года с первого входа. Отозвать доступ можно здесь или в боте командой /apps.</p>
+        </div>
+        <form method="post" action="/router/logout" class="sec-row" id="logout-all">
           <input type="hidden" name="all" value="1">
           <button class="btn small danger-outline" type="submit"><svg class="ic" aria-hidden="true"><use href="icons.svg#log-out"/></svg>Выйти на всех устройствах</button>
         </form>

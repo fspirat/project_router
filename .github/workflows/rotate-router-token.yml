@@ -1,8 +1,10 @@
 name: Rotate router token
 
-# Новый токен CGI страницы роутера (старый засветился в чате): /etc/fspirat.token на роутере
-# и cookie в /etc/nginx/snippets/fspirat-router.conf на сервере. Токен в лог не печатается.
-# Если что-то пошло не так — вернёт старый. Запуск вручную: Actions → Rotate router token → Run workflow.
+# Новый токен CGI страницы роутера (старый засветился в чате): /etc/fspirat.token на роутере,
+# cookie в /etc/nginx/snippets/fspirat-router.conf на сервере и его копия для бота и приложения iPhone
+# /var/lib/fspirat-router-auth/router.token (её читают tgbot.php и app.php). Токен в лог не печатается.
+# Если что-то пошло не так — вернёт старый везде; если роутер не ответил на откат (на нём уже новый) — оставит новый и на сервере.
+# Запуск вручную: Actions → Rotate router token → Run workflow.
 on:
   workflow_dispatch:
 
@@ -27,20 +29,37 @@ jobs:
       - name: Rotate
         run: |
           ssh vps 'set -e
-            S=/etc/nginx/snippets/fspirat-router.conf
+            S=${FSR_SNIPPET:-/etc/nginx/snippets/fspirat-router.conf}
+            A=${FSR_DIR:-/var/lib/fspirat-router-auth}; T=$A/router.token   # копия для tgbot.php и app.php (www-data, 600)
             R="ssh -p 8022 -i /root/.ssh/router_key -o BatchMode=yes -o ConnectTimeout=10 root@127.0.0.1"
             chk() { curl -s -o /dev/null -m 20 -w %{http_code} -b "fspirat_token=$1" "http://127.0.0.1:8081/cgi-bin/fspirat?action=net"; }
+            # router.token: атомарно (tmp + mv), владелец www-data, права 600; нет папки входа (сервер без server/auth) — пропустить
+            put() { [ -d $A ] || return 0; ( umask 077; printf "%s\n" "$1" > $T.new ) && chown www-data:www-data $T.new && chmod 600 $T.new && mv -f $T.new $T; }
             old=$(grep -o "fspirat_token=[A-Za-z0-9]*" $S | head -1 | cut -d= -f2)
             [ -n "$old" ] || { echo "❌ не нашёл старый токен в $S"; exit 1; }
             [ "$(chk "$old")" = 200 ] || { echo "❌ роутер не отвечает со старым токеном — ничего не меняю"; exit 1; }
             new=$(openssl rand -hex 24)
             cp -p $S $S.bak-token
+            rm -f $T.bak-token; if [ -f $T ]; then cp -p $T $T.bak-token; fi
             $R "umask 077; cp -p /etc/fspirat.token /etc/fspirat.token.bak; echo $new > /etc/fspirat.token"
+            # роутер уже на новом — копия для бота и приложения и nginx сразу за ним, проверки потом: иначе их вызовы, пока идут
+            # проверки (секунды), получали бы 403 — ложная тревога «Роутер отклонил ключ сервера» и час тишины после неё
             sed -i "s/fspirat_token=$old/fspirat_token=$new/g" $S
-            if nginx -t -q && systemctl reload nginx && [ "$(chk "$new")" = 200 ] && [ "$(chk "$old")" = 403 ]; then
-              $R "rm -f /etc/fspirat.token.bak"; rm -f $S.bak-token
-              echo "✅ токен сменён: новый работает, старый роутер больше не принимает"
+            if put "$new" && nginx -t -q && systemctl reload nginx && [ "$(chk "$new")" = 200 ] && [ "$(chk "$old")" = 403 ]; then
+              $R "rm -f /etc/fspirat.token.bak"; rm -f $S.bak-token $T.bak-token $A/router_token_alert   # тревога, если успела, — не глушит следующую
+              echo "✅ токен сменён: новый работает, старый роутер больше не принимает; копия для бота и приложения обновлена"
             else
               echo "❌ проверка не прошла — возвращаю старый токен"
-              $R "mv /etc/fspirat.token.bak /etc/fspirat.token"; mv $S.bak-token $S; nginx -t -q && systemctl reload nginx; exit 1
+              rm -f $T.new
+              # сервер возвращаем на старый, только если и роутер на старом: иначе панель, бот и приложение получат 403
+              if $R "mv /etc/fspirat.token.bak /etc/fspirat.token" || [ "$(chk "$old")" = 200 ]; then
+                mv $S.bak-token $S
+                if [ -f $T.bak-token ]; then mv -f $T.bak-token $T; else rm -f $T; fi   # копии не было — не было и файла
+              else
+                echo "⚠️ роутер не ответил — на нём остался НОВЫЙ токен (копия старого: /etc/fspirat.token.bak)."
+                echo "   Оставляю новый и на сервере: панель, бот и приложение заработают, когда роутер вернётся."
+                put "$new" || echo "⚠️ router.token не обновлён — после возврата роутера запусти Deploy server"
+                rm -f $S.bak-token $T.bak-token
+              fi
+              nginx -t -q && systemctl reload nginx; exit 1
             fi'

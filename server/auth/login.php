@@ -21,8 +21,10 @@ $go = function (string $to): never { header('Location: ' . fsr_next($to)); http_
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-        if ($origin !== '' && $origin !== (getenv('FSR_ORIGIN') ?: 'https://example.org')) { http_response_code(403); exit; }
-        if ($wait = fsr_locked()) {
+        if ($origin !== '' && $origin !== fsr_origin()) { http_response_code(403); exit; }
+        // пароль: блокировка и запись попытки — одним шагом до проверки (fsr_attempt), иначе параллельные запросы обходят «5 попыток»
+        $try = null;
+        if ($wait = isset($_POST['code']) ? fsr_locked() : fsr_attempt($try)) {
             fsr_log('LOCKED');
             $error = 'Слишком много неверных попыток. Вход с этого адреса закрыт ещё на ' . (int)ceil($wait / 60) . ' мин.';
         } elseif (isset($_POST['code'])) {
@@ -43,6 +45,7 @@ try {
                 $error = 'Код истёк или попытки закончились — введи пароль ещё раз, придёт новый код.';
             }
         } elseif (fsr_password_ok((string)($_POST['password'] ?? ''))) {
+            fsr_attempt_ok($try);
             $remember = !empty($_POST['remember']);
             if (!fsr_tg() || fsr_device_ok()) {          // знакомое устройство (или бот не настроен) — сразу внутрь
                 fsr_session_start($remember);
@@ -59,7 +62,7 @@ try {
             }
         } else {
             usleep(random_int(300000, 700000));   // замедляем подбор
-            $left = fsr_fail();
+            $left = fsr_fails_left();                // попытка уже записана (fsr_attempt)
             fsr_log('FAIL');
             $error = $left > 0 ? "Неверный пароль. Осталось попыток: $left."
                                : 'Слишком много неверных попыток. Вход с этого адреса закрыт на ' . (FSR_LOCK_SEC / 60) . ' мин.';

@@ -146,16 +146,17 @@ else
       | map(select(. != "")) | join(" · ")' <<<"$J")
     send "📱 Новое устройство в сети: $info
 MAC $m
-Если оно чужое — выключи ему интернет на странице роутера: https://$PANEL_DOMAIN/router/#net"
+Если оно чужое — выключи ему интернет на странице роутера: https://$PANEL_DOMAIN/router/#dev"
     event "$NOW" newdev "Новое устройство: $info ($m)"
   done
 fi
 
 # Трафик устройств: роутер отдаёт байты с момента создания своей таблицы (fspirat-fw), сюда — прирост по дням.
 #   traffic.json: {"last": {mac: [up, dn]}, "days": {"ГГГГ-ММ-ДД": {mac: [up, dn]}}} — 62 дня
+#   Сутки — по Самаре (время роутера), как читают панель, приложение и бот (server/auth/data-lib.php): сервер в UTC.
 if jq -e '[.devices[]? | select(.up != null)] | length > 0' >/dev/null 2>&1 <<<"$J"; then
   [ -s $S/traffic.json ] || echo '{"last":{},"days":{}}' > $S/traffic.json
-  jq --argjson j "$J" --arg day "$(date +%F)" --arg cut "$(date -d '-62 days' +%F)" '
+  jq --argjson j "$J" --arg day "$(TZ=Europe/Samara date +%F)" --arg cut "$(TZ=Europe/Samara date -d '-62 days' +%F)" '
     reduce ($j.devices[] | select(.up != null) | {m: (.mac | ascii_downcase), c: [.up, .dn]}) as $d (.;
       (.last[$d.m] // [0, 0]) as $l
       | [range(2) | if $d.c[.] >= $l[.] then $d.c[.] - $l[.] else $d.c[.] end] as $inc   # счётчик сбросился — считаем с нуля
@@ -277,7 +278,7 @@ if { [ "$(date -u +%H%M)" = 0500 ] && [ "$(get report_day)" != "$(date +%F)" ]; 
   read -r okn avg fails offm <<<"$(awk -v t=$from '$1 >= t { if ($2 > 0) { n++; s += $2 } else if ($2 == 0) f++; else o++ } END { printf "%d %d %d %d", n, (n ? s / n : 0), f, o }' $S/history.tsv 2>/dev/null)"
   sw=$(awk -F'\t' -v t=$from '$1 >= t && ($2 == "auto" || $2 == "manual")' $S/events.tsv 2>/dev/null | wc -l)
   nd=$(awk -F'\t' -v t=$from '$1 >= t && $2 == "newdev"' $S/events.tsv 2>/dev/null | wc -l)
-  yday=$(date -u -d yesterday +%F)
+  yday=$(TZ=Europe/Samara date -d yesterday +%F)        # день трафика — по Самаре
   NAMES=/var/lib/fspirat-router-auth/names.json
   top=$(jq -r --arg d "$yday" --argjson j "$J" --slurpfile n <(cat $NAMES 2>/dev/null || echo '{}') '
     (.days[$d] // {}) | to_entries | sort_by(-.value[1]) | .[:3][]

@@ -495,6 +495,14 @@ details[open]>summary::before{transform:rotate(45deg) translate(-1px,-1px)}
 .mtg.up b{color:var(--acc-tx)} .mtg.down b{color:var(--err)}
 .mtg.down .dot{background:var(--err);opacity:1;box-shadow:0 0 0 3px var(--err-soft)}
 .sec-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px}
+/* Безопасность: приложения на телефонах — строки как у подписок (значок, имя и данные, кнопка «Отозвать») */
+.apps-h{display:flex;align-items:center;gap:8px}
+.apps-h small{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--faint);letter-spacing:0;padding:0 7px;border-radius:999px;background:var(--surface);border:1px solid var(--border)}
+.apps .sub{padding:12px 0}
+.apps .sub-meta b{font-family:var(--font);font-weight:500}
+.apps .sub-meta b.mono{font-family:var(--mono);font-size:12px}
+.apps .empty{padding:12px 0}
+.apps-box .note{margin-top:10px}
 
 /* ---------- роутер не на связи ---------- */
 .panel.down{border-color:var(--err-bd);background:linear-gradient(180deg,var(--err-soft),transparent 70%),var(--card)}
