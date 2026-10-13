@@ -239,8 +239,10 @@ extension RouterStore {
             if e.isCancelled {
                 return
             }
-            // 409/429 busy do not burn the confirm: keep the dialog and offer «Повторить».
-            if e.isBusy && pendingConfirm?.id == pending.id && pending.prompt.canResend(now: Date().timeIntervalSince1970) {
+            // A server 409/429 busy comes before the confirm check and does not burn the confirm: keep the
+            // dialog and offer «Повторить». A busy from the router CGI (`source == "router"`) comes after the
+            // check, the confirm is spent (contract §9 #5): close the dialog, the next tap gets a fresh 428.
+            if e.isBusy && e.source != "router" && pendingConfirm?.id == pending.id && pending.prompt.canResend(now: Date().timeIntervalSince1970) {
                 confirmError = e.userMessage
                 errorTick += 1
                 return

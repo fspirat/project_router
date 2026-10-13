@@ -155,8 +155,10 @@ struct SettingsView: View {
             Link(destination: Links.webPanel) {
                 Label("Веб-панель", systemImage: "globe")
             }
-            Link(destination: luciURL) {
-                Label("LuCI роутера", systemImage: "wifi.router")
+            if let luci = luciURL {
+                Link(destination: luci) {
+                    Label("LuCI роутера", systemImage: "wifi.router")
+                }
             }
             if let bot = botURL {
                 Link(destination: bot) {
@@ -176,7 +178,7 @@ struct SettingsView: View {
             LabeledContent("Версия", value: AppConfig.appString)
             if let built = AppConfig.buildDate {
                 LabeledContent("Дата сборки", value: AppFormat.dateDMY(built))
-                Text("Сборка TestFlight работает до \(AppFormat.dateDMY(built + Int(ExpiryNotice.buildLifetime)))")
+                Text(ExpiryNotice.buildValidUntil(buildDate: built))
                     .foregroundStyle(buildWarning == nil ? Theme.text : Theme.warn)
                 if let warning = buildWarning {
                     Label(warning, systemImage: "hourglass")
@@ -200,11 +202,12 @@ struct SettingsView: View {
         return "—"
     }
 
-    private var luciURL: URL {
-        if let site = store.dayData?.site, let url = Links.luci(site) {
-            return url
+    /// Only a `data.site.luci` that passes validation (contract §7.9), like the web panel.
+    private var luciURL: URL? {
+        guard let site = store.dayData?.site else {
+            return nil
         }
-        return AppConfig.fallbackLuciURL
+        return Links.luci(site)
     }
 
     private var botURL: URL? {

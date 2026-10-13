@@ -1033,8 +1033,8 @@ location @fsr_app_5xx { default_type application/json; return 502 '{"error":"ser
 - **Раннер:** `macos-26` (дату выхода в GA и путь к Xcode проверить по документации GitHub на момент этапа 3), Xcode закреплён через `xcode-select`.
 - **Шаги:**
   1. `.p8` → `$RUNNER_TEMP` (600), удаляется в шаге `always()`.
-  2. XcodeGen закреплённой версии с проверкой SHA-256.
-  3. `xcodebuild archive -scheme Router -destination 'generic/platform=iOS' -allowProvisioningUpdates -authenticationKeyPath … -authenticationKeyID … -authenticationKeyIssuerID … DEVELOPMENT_TEAM=$APPLE_TEAM_ID CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER`.
+  2. XcodeGen из Homebrew (бутылка проверяется по SHA-256 самим Homebrew), версия ≥ 2.46, при другой версии, чем 2.46.x, — предупреждение.
+  3. `xcodebuild archive -scheme Router -destination 'generic/platform=iOS' -allowProvisioningUpdates -authenticationKeyPath … -authenticationKeyID … -authenticationKeyIssuerID … DEVELOPMENT_TEAM=$APPLE_TEAM_ID CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT` (Re-run даёт N.2, N.3… — App Store Connect примет). В архиве проверяется `PrivacyInfo.xcprivacy` (UserDefaults, причина CA92.1).
   4. `xcodebuild -exportArchive` с `ExportOptions.plist`: `method=app-store-connect`, `destination=upload`, `signingStyle=automatic`, `teamID`.
 - **Сертификат.** Облачный сертификат распространения выпускает и хранит Apple. `.p12` и профилей в репозитории и в Secrets нет.
 - **Info.plist:** `ITSAppUsesNonExemptEncryption=NO`, `CFBundleDisplayName=Роутер`, `APP_BASE_URL`, дата сборки (для напоминания о 90 днях).

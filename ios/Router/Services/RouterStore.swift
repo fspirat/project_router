@@ -128,6 +128,16 @@ final class RouterStore {
         self.tokenBox = box
         self.client = apiClient
         self.loginFlow = LoginFlow(client: apiClient)
+        // First launch of this install: Keychain outlives a delete + reinstall, UserDefaults (and the
+        // Face ID setting) do not. A token left from the old install is deleted here and revoked on the
+        // server below, so a reinstall never opens the app logged in without the lock.
+        var leftover: String? = nil
+        if !UserDefaults.standard.bool(forKey: AppSettings.installMarkerKey) {
+            UserDefaults.standard.set(true, forKey: AppSettings.installMarkerKey)
+            leftover = keychain.readToken()
+            keychain.deleteToken()
+            RouterStore.clearSessionInfo()
+        }
         if let token = keychain.readToken() {
             box.set(token)
             session = .loggedIn
@@ -136,6 +146,9 @@ final class RouterStore {
             session = .loggedOut
             sessionInfo = nil
             RouterStore.clearSessionInfo()
+        }
+        if let old = leftover {
+            RouterStore.revokeDetached(old, like: apiClient)
         }
     }
 
@@ -233,12 +246,15 @@ final class RouterStore {
                 await self.loginTick(left, loginID: loginID)
             })
             guard self.challenge?.loginID == loginID else {
+                // «Отмена» was pressed while the approving poll was in flight: the server has already
+                // issued a device. Revoke the token nobody will use (it would hold a slot for 90 days).
+                RouterStore.revokeDetached(approved.token, like: client)
                 return
             }
             finishLogin(approved)
         } catch {
             guard self.challenge?.loginID == loginID else {
-                // The user pressed «Отменить вход».
+                // The user pressed «Отмена».
                 return
             }
             self.challenge = nil
@@ -259,7 +275,7 @@ final class RouterStore {
         loginDeadline = Date().addingTimeInterval(TimeInterval(max(0, secondsLeft)))
     }
 
-    /// «Отменить вход»: back to the form, `POST /auth/cancel` (result ignored).
+    /// «Отмена» on the number screen: back to the form, `POST /auth/cancel` (result ignored).
     func cancelLogin() {
         guard let current = challenge else {
             return
@@ -282,6 +298,10 @@ final class RouterStore {
         }
         if e.status == 429, let seconds = e.retryAfter, seconds > 0 {
             loginBlockedUntil = Date().addingTimeInterval(TimeInterval(seconds))
+        } else if e.status == 401, e.code == "bad_password", e.left == 0 {
+            // The last attempt: the server has closed login from this address for 15 min (no retry_after).
+            // Another tap would only earn `429 locked` and one more fail2ban hit.
+            loginBlockedUntil = Date().addingTimeInterval(15 * 60)
         }
         loginMessage = e.userMessage
     }
@@ -340,16 +360,17 @@ final class RouterStore {
         loginMessage = message
     }
 
-    /// Settings «Выйти на этом iPhone»: `POST /auth/logout`, then LOGOUT whatever happened.
+    /// Settings «Выйти на этом iPhone»: the local LOGOUT happens first (Keychain, TokenBox, timers,
+    /// data), so a kill or crash during the request can never leave the token behind (contract §2.4).
+    /// Then `POST /auth/logout` with a one-shot client holding the old token; its result is ignored.
     func logoutFromSettings() async {
-        if tokenBox.token != nil {
-            do {
-                try await client.logout()
-            } catch {
-                // Network failure or 401: the token is deleted anyway.
-            }
-        }
+        let token = tokenBox.token
         endSession(message: nil)
+        guard let t = token, Validation.isValidToken(t) else {
+            return
+        }
+        let oneShot = RouterStore.oneShotClient(token: t, like: client)
+        _ = try? await oneShot.logout()
     }
 
     /// Close sheets and dialogs (lock screen, logout).
@@ -396,6 +417,16 @@ final class RouterStore {
         defer {
             pollingCount -= 1
         }
+        // `/me` first and alone (contract §2.5, §7.1): it validates the token before the parallel reads,
+        // so a stale token costs one `401 token_*` instead of 4–5 (`token_invalid` counts toward fail2ban),
+        // and it re-reads `/me` on launch and unlock. Not again within a minute: Control Center or the
+        // Face ID sheet also flip the scene inactive → active.
+        if lastReadAt[.me].map({ Date().timeIntervalSince($0) > RouterStore.meRecheckAfter }) ?? true {
+            await read(.me)
+            guard isLoggedIn, !Task.isCancelled else {
+                return
+            }
+        }
         await withTaskGroup(of: Void.self) { group in
             for kind in ReadKind.allCases {
                 group.addTask {
@@ -407,7 +438,8 @@ final class RouterStore {
 
     func pollLoop(_ kind: ReadKind) async {
         if kind == .me, let last = lastReadAt[.me] {
-            // `/me` is read on launch, unlock, login and when Settings opens; otherwise every 30 min.
+            // `/me` is read first by `runPolling()` (launch, unlock), on login and when Settings opens;
+            // this loop only adds a read every 30 min.
             let wait = kind.interval - Date().timeIntervalSince(last)
             if wait > 0 {
                 do {
@@ -435,7 +467,8 @@ final class RouterStore {
         }
         switch kind {
         case .net:
-            return netCardVisible && !offline && !isQuiet
+            // A sheet (Settings, confirm) does not fire the card's onDisappear: stop /net under it too.
+            return netCardVisible && !offline && !isQuiet && !isSettingsPresented && pendingConfirm == nil
         case .led:
             return !offline
         case .status, .data, .me:
@@ -443,13 +476,17 @@ final class RouterStore {
         }
     }
 
-    /// Pull-to-refresh: re-reads status, data, LED and `/me` once. Never runs actions.
+    /// Pull-to-refresh: re-reads `/me` (token check first), then status, data and LED once. Never runs actions.
     func refreshAll() async {
         guard isLoggedIn else {
             return
         }
         appDisabled = false
-        let kinds: [ReadKind] = [.status, .data, .led, .me]
+        await read(.me)
+        guard isLoggedIn else {
+            return
+        }
+        let kinds: [ReadKind] = [.status, .data, .led]
         await withTaskGroup(of: Void.self) { group in
             for kind in kinds {
                 group.addTask {
@@ -624,6 +661,26 @@ final class RouterStore {
     }
 
     // MARK: - Helpers
+
+    /// `runPolling()` re-reads `/me` first unless it was read this recently.
+    nonisolated static let meRecheckAfter: TimeInterval = 60
+
+    /// A client that sends only `token` (same base URL and transport as `client`).
+    nonisolated static func oneShotClient(token: String, like client: APIClient) -> APIClient {
+        return APIClient(baseURL: client.baseURL, transport: client.transport, clock: client.clock, tokenProvider: { token })
+    }
+
+    /// `POST /auth/logout` for a token the app no longer keeps (leftover after a reinstall, a login
+    /// cancelled after approval). Fire and forget; the result is ignored.
+    nonisolated static func revokeDetached(_ token: String, like client: APIClient) {
+        guard Validation.isValidToken(token) else {
+            return
+        }
+        let oneShot = oneShotClient(token: token, like: client)
+        Task.detached {
+            _ = try? await oneShot.logout()
+        }
+    }
 
     nonisolated static func nanoseconds(_ seconds: TimeInterval) -> UInt64 {
         guard seconds.isFinite, seconds > 0 else {

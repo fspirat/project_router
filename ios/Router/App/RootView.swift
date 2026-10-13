@@ -14,6 +14,8 @@ struct RootView: View {
             Theme.bg
                 .ignoresSafeArea()
             content
+                // VoiceOver must not reach (or activate) the Summary under the lock screen.
+                .accessibilityHidden(lock.isLocked && store.isLoggedIn)
         }
         .overlay {
             if lock.isLocked && store.isLoggedIn {
@@ -57,9 +59,17 @@ struct RootView: View {
     }
 
     private func handle(_ phase: ScenePhase) {
+        if phase != .active {
+            // System dialogs are drawn above the in-view privacy cover: close the «Проверить?» dialog
+            // (it tells the VPN state) before the app-switcher snapshot.
+            store.showPingPreDialog = false
+        }
         switch phase {
         case .background:
             lock.didEnterBackground(loggedIn: store.isLoggedIn)
+        case .inactive:
+            // On the way back from the background: lock before the scene becomes active.
+            lock.willEnterForeground(loggedIn: store.isLoggedIn)
         case .active:
             lock.didBecomeActive(loggedIn: store.isLoggedIn)
         default:

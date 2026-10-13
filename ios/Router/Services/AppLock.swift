@@ -7,6 +7,8 @@ import RouterCore
 /// - Locks on a cold start and when the app comes back after more than «Блокировать» seconds in the
 ///   background, if «Face ID при открытии» is on and the iPhone can ask (has a passcode).
 /// - With «Сразу» the lock is set already when the app goes to the background, so nothing flashes.
+///   With a delay it is decided on the way back while the scene is still `.inactive` (privacy cover up,
+///   polling off), so the Summary never shows or polls for a moment before the lock.
 /// - Asks automatically once per lock; after «Отмена» the lock screen shows a button.
 ///   (Face ID itself makes the app inactive for a moment; that never locks or re-asks.)
 @Observable
@@ -36,18 +38,29 @@ final class AppLock {
         }
     }
 
+    /// Back from the background, still `.inactive`: decide the delayed lock before the scene is active.
+    /// No-op on the way to the background and for Face ID / Control Center (never backgrounded). Idempotent.
+    func willEnterForeground(loggedIn: Bool) {
+        guard let since = backgroundedAt else {
+            return
+        }
+        backgroundedAt = nil
+        guard loggedIn else {
+            return
+        }
+        let away = Date().timeIntervalSince(since)
+        if !isLocked && away >= Double(AppSettings.lockDelay) && AppLock.shouldLock(loggedIn: loggedIn) {
+            engage()
+        }
+    }
+
     func didBecomeActive(loggedIn: Bool) {
         guard loggedIn else {
             reset()
             return
         }
-        if let since = backgroundedAt {
-            backgroundedAt = nil
-            let away = Date().timeIntervalSince(since)
-            if !isLocked && away >= Double(AppSettings.lockDelay) && AppLock.shouldLock(loggedIn: loggedIn) {
-                engage()
-            }
-        }
+        // In case SwiftUI coalesced the `.inactive` step away.
+        willEnterForeground(loggedIn: loggedIn)
         if isLocked && promptPending && !isAuthenticating {
             promptPending = false
             Task {

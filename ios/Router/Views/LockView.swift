@@ -41,6 +41,7 @@ struct LockView: View {
             }
             .padding(24)
         }
+        .accessibilityAddTraits(.isModal)
     }
 
     private func unlock() {

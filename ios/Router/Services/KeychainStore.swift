@@ -7,8 +7,9 @@ import RouterCore
 /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (not synchronizable: not in iCloud or backups).
 ///
 /// Only a token that passes `Validation.isValidToken` is stored or returned, so a damaged item is
-/// never sent (`token_invalid` counts toward fail2ban). After a reinstall Keychain may still hold an
-/// old token: that is fine, the server answers 401 `token_*` and the app logs out.
+/// never sent (`token_invalid` counts toward fail2ban). Keychain outlives a delete + reinstall while
+/// UserDefaults does not: on the first launch of an install `RouterStore.init` deletes a leftover token
+/// and revokes it on the server (`AppSettings.installMarkerKey`).
 struct KeychainStore {
     let service: String
     let account: String

@@ -28,7 +28,7 @@ struct LoginCodeView: View {
                 Button {
                     store.cancelLogin()
                 } label: {
-                    Text("Отменить вход")
+                    Text(LoginTexts.cancelButton)
                 }
                 .buttonStyle(ActionButtonStyle(kind: .secondary))
             }

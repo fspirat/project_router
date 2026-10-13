@@ -8,9 +8,6 @@ enum AppConfig {
         return resolveBaseURL(infoString("FSRBaseURL"))
     }
 
-    /// LuCI when `/data` has not given a valid `site.luci` yet.
-    static let fallbackLuciURL: URL = URL(string: "https://router.fspirat.xyz/") ?? Links.webPanel
-
     static func resolveBaseURL(_ raw: String?) -> URL {
         guard let raw = raw else {
             return APIClient.defaultBaseURL

@@ -11,7 +11,7 @@ name: iOS TestFlight
 #   — push в ios/** — только если в сообщении коммита есть «[ios build]», и только проверка сборки (без отправки).
 #     Без этой метки задача пропускается и минут не тратит (минута macOS ≈ 10 минут квоты).
 # Отправка — только из main и только когда заданы все 4 секрета; иначе — проверка сборки без подписи.
-# «Re-run» того же запуска даст тот же номер сборки, и App Store Connect его отклонит — запускайте заново (Run workflow).
+# Номер сборки — «номер запуска.попытка» (42.1); Re-run того же запуска даёт 42.2, 42.3… — App Store Connect его примет.
 on:
   workflow_dispatch:
     inputs:
@@ -20,7 +20,7 @@ on:
         type: boolean
         default: true
       signing:
-        description: "Подпись архива: auto — Apple Development, при ошибке ad-hoc; остальные — только этот способ"
+        description: "Подпись архива: auto — Apple Development (нужен хотя бы один iPhone в developer.apple.com → Devices), при ошибке ad-hoc; остальные — только этот способ"
         type: choice
         options: [auto, development, adhoc]
         default: auto
@@ -106,6 +106,11 @@ jobs:
             echo "::error::XcodeGen '$v' — нужна 2.46 или новее"
             exit 1
           fi
+          # новее 2.46.x не падаем (плановая сборка раз в 2 месяца не должна ломаться от обновления образа), но предупреждаем
+          case "$v" in
+            2.46|2.46.*) ;;
+            *) echo "::warning::XcodeGen $v — проверено с 2.46.x; если сборка ведёт себя иначе, смотрите CHANGELOG XcodeGen" ;;
+          esac
 
       - name: Создать проект (xcodegen)
         run: |
@@ -163,7 +168,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           {
             echo "FSR_MODE_TEXT=$text"
-            echo "FSR_BUILD_NUMBER=$GITHUB_RUN_NUMBER"
+            # CFBundleVersion: до трёх чисел через точку; Re-run (попытка 2, 3…) даёт новый, больший номер
+            echo "FSR_BUILD_NUMBER=${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
             echo "FSR_BUILD_DATE=$(date -u +%Y-%m-%d)"
           } >> "$GITHUB_ENV"
           echo "Режим: $text"
@@ -265,6 +271,8 @@ jobs:
           # сертификат/профиль по ключу API. Каждая сборка на чистом Mac создаёт новый сертификат «Created via API» —
           # старые можно изредка отзывать в developer.apple.com → Certificates (на сборки в TestFlight не влияет).
           # Запасной (ad-hoc): архив без сертификата, настоящая подпись — облачным сертификатом при экспорте.
+          # Apple Development требует хотя бы одно устройство в команде (Devices); без него этот шаг сразу падает
+          # с «no devices» и сборка идёт запасным ad-hoc.
           archive() {
             rm -rf "$RUNNER_TEMP/Router.xcarchive"
             xcodebuild archive \
@@ -291,7 +299,7 @@ jobs:
               echo "::error::Архив с подписью Apple Development не собрался — см. лог выше. Можно запустить ещё раз с signing=adhoc"
               exit 1
             fi
-            [ -n "$used" ] || echo "::warning::Архив с подписью Apple Development не собрался — пробую запасной способ (ad-hoc + облачная подпись при экспорте)"
+            [ -n "$used" ] || echo "::warning::Архив с подписью Apple Development не собрался — пробую запасной способ (ad-hoc + облачная подпись при экспорте; частая причина — в команде нет зарегистрированных устройств)"
           fi
           if [ -z "$used" ]; then
             echo "::group::Архив: ad-hoc"
@@ -300,6 +308,8 @@ jobs:
             [ -n "$used" ] || { echo "::error::Архив не собрался — см. лог выше"; exit 1; }
           fi
           [ -d "$RUNNER_TEMP/Router.xcarchive" ] || { echo "::error::xcodebuild не создал архив"; exit 1; }
+          # без манифеста приватности (UserDefaults — API с обязательной причиной) App Store Connect отклонит сборку (ITMS-91053)
+          [ -f "$RUNNER_TEMP/Router.xcarchive/Products/Applications/Router.app/PrivacyInfo.xcprivacy" ] || { echo "::error::PrivacyInfo.xcprivacy не попал в приложение"; exit 1; }
           echo "FSR_SIGNING_USED=$used" >> "$GITHUB_ENV"
           echo "✅ архив готов: $used"
 
@@ -346,7 +356,7 @@ jobs:
             echo "|---|---|"
             echo "| Режим | ${FSR_MODE_TEXT:-не определён (задача упала раньше)} |"
             echo "| Xcode | ${FSR_XCODE:-—} |"
-            echo "| Номер сборки | ${FSR_BUILD_NUMBER:-$GITHUB_RUN_NUMBER} |"
+            echo "| Номер сборки | ${FSR_BUILD_NUMBER:-$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT} |"
             echo "| Дата сборки (UTC) | ${FSR_BUILD_DATE:-—} |"
             [ -n "${FSR_SIGNING_USED:-}" ] && echo "| Подпись архива | $FSR_SIGNING_USED |"
             echo "| Итог | $JOB_STATUS |"
@@ -356,7 +366,6 @@ jobs:
             elif [ "$JOB_STATUS" != "success" ]; then
               echo "❌ Не получилось — причина в логе шага с ошибкой."
               echo "Частые: «No suitable application records» — нет приложения в App Store Connect (My Apps → «+»);"
-              echo "«Cloud signing permission error» / «No profiles» — у ключа API не роль Admin;"
-              echo "«bundle version already used» — это был Re-run: запустите заново через Run workflow."
+              echo "«Cloud signing permission error» / «No profiles» — у ключа API не роль Admin."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

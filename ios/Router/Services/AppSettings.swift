@@ -14,6 +14,9 @@ enum AppSettings {
     static let biometricForDangerKey = "biometricForDanger"
     /// Non-secret `SessionInfo` (device id, expiry dates) next to the Keychain token.
     static let sessionInfoKey = "sessionInfo"
+    /// Set on the first launch of an install. Missing → a fresh (re)install: a Keychain token left by
+    /// the previous install is deleted and revoked (`RouterStore.init`).
+    static let installMarkerKey = "installMarker"
 
     static let lockDelayOptions: [Int] = [0, 60, 300]
 
