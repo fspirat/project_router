@@ -10,3 +10,11 @@ __pycache__/
 
 # скриншоты стенда
 scripts/shots/out/
+
+# iOS-приложение: ключи подписи и App Store Connect (только в секретах GitHub), проект Xcode генерируется, сборка
+*.p8
+*.p12
+*.mobileprovision
+ios/*.xcodeproj/
+DerivedData/
+ios/build/

@@ -65,6 +65,10 @@
    "description": "Отчёт за сутки сейчас"
   },
   {
+   "command": "apps",
+   "description": "Телефоны с приложением, отзыв доступа"
+  },
+  {
    "command": "help",
    "description": "Список команд"
   }

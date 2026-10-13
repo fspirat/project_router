@@ -2,13 +2,15 @@
 // Команды роутеру из Telegram (@YourRouterBot). Telegram присылает сюда каждое сообщение (webhook):
 //   POST /router/tg-hook — без входа в панель, но только с IP Telegram (nginx) и с секретом в заголовке
 //   X-Telegram-Bot-Api-Secret-Token (tgbot.json, создаётся при выкладке). Слушается только чат владельца (telegram.json).
-// Действия идут в тот же CGI роутера, что и у панели (туннель 127.0.0.1:8081), опасные — с кнопкой подтверждения.
+// Действия идут в тот же CGI роутера, что и у панели (туннель 127.0.0.1:8081, fsr_router_call), опасные — с кнопкой подтверждения.
 // Каждая команда пишется в журнал действий. Токены не логируются.
+// Ещё здесь — подтверждение входа в приложение для iPhone (кнопки с числами и «Это не я») и /apps — список телефонов и отзыв.
 declare(strict_types=1);
 define('FSR', true);
 require __DIR__ . '/lib.php';
+require __DIR__ . '/app-lib.php';
+require __DIR__ . '/data-lib.php';
 
-define('ROUTER', getenv('FSR_ROUTER') ?: 'http://127.0.0.1:8081/cgi-bin/fspirat');
 define('WATCH', getenv('FSR_WATCH') ?: '/var/lib/fspirat');
 
 $cfg = json_decode((string)@file_get_contents(fsr_dir() . '/tgbot.json'), true) ?: [];
@@ -23,13 +25,7 @@ if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
 set_time_limit(120);
 
 /* ---------- Telegram ---------- */
-function tg(string $method, array $p): ?array {
-    global $tg;
-    $raw = @file_get_contents((getenv('FSR_TG_API') ?: 'https://api.telegram.org') . '/bot' . $tg['token'] . '/' . $method, false, stream_context_create(['http' => [
-        'method' => 'POST', 'header' => 'Content-Type: application/json', 'timeout' => 10, 'ignore_errors' => true,
-        'content' => json_encode($p, JSON_UNESCAPED_UNICODE)]]));
-    return json_decode((string)$raw, true);
-}
+function tg(string $method, array $p): ?array { return fsr_tg_call($method, $p); }
 function say(string $text, ?array $kb = null): void {
     global $tg;
     $p = ['chat_id' => $tg['chat'], 'text' => $text, 'parse_mode' => 'HTML', 'disable_web_page_preview' => true];
@@ -40,16 +36,20 @@ function edit(int $mid, string $text): void {
     global $tg;
     tg('editMessageText', ['chat_id' => $tg['chat'], 'message_id' => $mid, 'text' => $text, 'parse_mode' => 'HTML']);
 }
+// без разметки: в тексте имя телефона, его задаёт пользователь
+function edit_plain(int $mid, string $text): void {
+    global $tg;
+    tg('editMessageText', ['chat_id' => $tg['chat'], 'message_id' => $mid, 'text' => $text]);
+}
 $h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES);
 
 /* ---------- роутер ---------- */
+// ответ роутера (в том числе его {"error":…}) или null — роутер не ответил или ответил не JSON.
+// Ошибки, которые fsr_router_call пишет сам (router_offline, router_timeout, server_config, router_token), приходят
+// с пустым текстом ответа — для бота это тоже null: «Роутер не отвечает», а не пустой статус с нулями
 function router(string $action, array $q = [], bool $post = false, int $timeout = 30): ?array {
-    $tok = trim((string)@file_get_contents(fsr_dir() . '/router.token'));
-    $url = ROUTER . '?' . http_build_query(['action' => $action] + $q);
-    $raw = @file_get_contents($url, false, stream_context_create(['http' => [
-        'method' => $post ? 'POST' : 'GET', 'header' => "Cookie: fspirat_token=$tok\r\nContent-Length: 0", 'timeout' => $timeout, 'ignore_errors' => true]]));
-    $j = json_decode((string)$raw, true);
-    return is_array($j) ? $j : null;
+    [, $j, $raw] = fsr_router_call($action, $q, $post ? 'POST' : 'GET', $timeout);
+    return $raw !== '' && is_array($j) ? $j : null;
 }
 function names(): array { $j = json_decode((string)@file_get_contents(fsr_dir() . '/names.json'), true); return is_array($j) ? $j : []; }
 function dev_name(array $d): string { $n = names()[strtolower($d['mac'] ?? '')] ?? ''; return $n !== '' ? $n : (($d['name'] ?? '') !== '' ? $d['name'] : ($d['ip'] ?? $d['mac'])); }
@@ -122,7 +122,7 @@ function cmd_devices(): void {
     global $h;
     $s = router('status');
     if (!$s) { say(down_msg()); return; }
-    $tr = json_decode((string)@file_get_contents(WATCH . '/traffic.json'), true)['days'][gmdate('Y-m-d')] ?? [];
+    $tr = json_decode((string)@file_get_contents(WATCH . '/traffic.json'), true)['days'][fsr_traffic_day()] ?? [];   // сутки — по Самаре, как в панели
     $on = array_filter($s['devices'] ?? [], fn($d) => $d['online'] ?? false);
     usort($on, fn($a, $b) => ($tr[strtolower($b['mac'])][1] ?? 0) <=> ($tr[strtolower($a['mac'])][1] ?? 0));
     $band = ['5g' => '5 ГГц', '6g' => '6 ГГц', '2g' => '2,4 ГГц', 'wired' => 'кабель'];
@@ -238,19 +238,49 @@ function cmd_vds(): void {
     $parts = array_map(fn($x) => $one(htmlspecialchars((string)($x['name'] ?? 'Сервер')), $x['stat'] ?? null, !empty($x['local']) ? 'Здесь же панель' : ''), $v['servers'] ?? []);
     say(implode("\n\n", $parts) . "\n\n" . 'Данные ' . ($age < 90 ? 'свежие' : floor($age / 60) . ' мин назад') . '.');
 }
+function cmd_apps(): void {
+    global $h, $cb;
+    $list = fsr_app_active();
+    if (!$list) { say('Приложение для iPhone сейчас не вошло ни на одном телефоне.'); return; }
+    $d8 = fn($t) => (new DateTime('@' . (int)$t))->setTimezone(new DateTimeZone('Europe/Samara'))->format('d.m H:i');   // как /log — время роутера
+    $lines = []; $kb = [];
+    foreach ($list as $d) {
+        $lines[] = '• <b>' . $h($d['name']) . '</b>' . (($d['model'] ?? '') !== '' ? ' · ' . $h($d['model']) : '') . (($d['os'] ?? '') !== '' ? ' · ' . $h($d['os']) : '')
+            . "\n   вход " . $d8($d['created']) . ' · был ' . $d8($d['seen']) . ' · IP ' . $h($d['last_ip'] ?? '');
+        $kb[] = [['text' => '🔒 Отозвать «' . mb_substr((string)$d['name'], 0, 24) . '»', 'callback_data' => $cb('ar:' . $d['id'])]];
+    }
+    say('<b>Приложение на телефонах (' . count($list) . ")</b>\n" . implode("\n", $lines) . "\n\nКнопка отзывает доступ сразу: приложение на этом телефоне выйдет.", $kb);
+}
 function cmd_help(): void {
     say("<b>Команды роутера</b>\n/status — состояние VPN, сервера, сервисов\n/servers — серверы с пингом, подключение кнопкой\n/vpn <i>название</i> — подключить сервер, например /vpn германия\n"
         . "/devices — кто в сети и сколько скачал\n/block <i>имя</i> — выключить интернет устройству\n/unblock <i>имя</i> — включить обратно\n/speed — тест скорости без VPN\n"
-        . "/ping — перемерить все серверы и сервисы\n/log — журнал событий\n/router — нагрузка, память, температура\n/update — обновить подписки VPN\n" . (fsr_site()['mtg'] !== '' ? "/tgproxy — Telegram-прокси\n" : '') . "/vds — сервер панели и свои VPN-серверы\n/restart — перезапустить VPN\n/reboot — перезагрузить роутер\n/report — отчёт за сутки сейчас\n\nОпасные команды — с кнопкой подтверждения.");
+        . "/ping — перемерить все серверы и сервисы\n/log — журнал событий\n/router — нагрузка, память, температура\n/update — обновить подписки VPN\n" . (fsr_site()['mtg'] !== '' ? "/tgproxy — Telegram-прокси\n" : '') . "/vds — сервер панели и свои VPN-серверы\n/restart — перезапустить VPN\n/reboot — перезагрузить роутер\n/report — отчёт за сутки сейчас\n/apps — телефоны с приложением, отзыв доступа\n\nОпасные команды — с кнопкой подтверждения.");
 }
 
 /* ---------- кнопки ---------- */
+// Вход в приложение: «al:<ref>:<число>|время» и «an:<ref>|время» (кнопки живут 120 с, не 600).
+// Жмёт только владелец (from.id = чат владельца) и только в том сообщении, которое отправили для этого входа.
+function on_login_button(array $q, string $kind, string $ref, string $num, int $mid): void {
+    global $tg;
+    if ((string)($q['from']['id'] ?? '') !== (string)$tg['chat']) return;
+    $r = fsr_app_login_by_ref($ref);
+    if (!$r || (int)$r['tg_msg'] !== $mid) return;
+    fsr_audit('TG', "$kind $ref");
+    $res = fsr_app_login_decide($r, $kind === 'al' ? (int)$num : null);
+    if ($res['text'] !== null) edit_plain($mid, $res['text']);
+    if ($res['alarm'] !== '') fsr_tg_send($res['alarm']);
+}
 function on_button(array $q): void {
-    global $h;
+    global $h, $tg;
     $mid = (int)($q['message']['message_id'] ?? 0);
     tg('answerCallbackQuery', ['callback_query_id' => $q['id']]);
     $data = (string)($q['data'] ?? '');
     if ($data === 'no') { edit($mid, 'Отменено.'); return; }
+    // кнопки входа — до общего правила «600 с»
+    if (preg_match('/^(al|an):([a-f0-9]{12})(?::(\d{2}))?\|\d{1,12}$/', $data, $m)) {
+        if (($m[1] === 'al') === (($m[3] ?? '') !== '')) on_login_button($q, $m[1], $m[2], $m[3] ?? '', $mid);
+        return;
+    }
     [$what, $ts] = array_pad(explode('|', $data, 2), 2, '0');
     if (time() - (int)$ts > 600) { edit($mid, 'Кнопка устарела — отправь команду ещё раз.'); return; }
     [$act, $arg] = array_pad(explode(':', $what, 2), 2, '');
@@ -273,7 +303,14 @@ function on_button(array $q): void {
             break;
         case 'upd':
             $r = router('update', [], true);
-            edit($mid, $r && ($r['ok'] ?? false) ? '📥 Обновляю подписки VPN — список серверов обновится примерно через минуту.' : '⚠️ Не получилось: ' . $h($r['error'] ?? 'роутер не отвечает'));
+            edit($mid, $r && ($r['ok'] ?? false) ? '📥 Обновляю подписки VPN — список серверов обновится примерно через минуту, потом VPN перезапустится на несколько секунд.' : '⚠️ Не получилось: ' . $h($r['error'] ?? 'роутер не отвечает'));
+            break;
+        case 'ar':          // отзыв приложения из /apps — только владелец
+            if ((string)($q['from']['id'] ?? '') !== (string)$tg['chat']) break;
+            $d = fsr_app_revoke($arg, 'tg');
+            if ($d) fsr_log('APP_REVOKE');
+            edit_plain($mid, $d ? '🔒 Доступ приложения отозван: ' . fsr_app_label($d) . '. На этом телефоне оно выйдет и попросит войти заново.'
+                : 'Этот телефон уже без доступа. Список — /apps');
             break;
         case 'tgl':
             @touch(fsr_dir() . '/tglink_now');
@@ -311,8 +348,9 @@ match ($c) {
     '/ping' => cmd_ping(),
     '/log' => cmd_log(),
     '/router' => cmd_router(),
-    '/update' => cmd_confirm('upd', 'Обновить подписки VPN?', 'Список серверов скачается заново, это займёт до минуты. VPN не перезапускается.', 'Да, обновить'),
+    '/update' => cmd_confirm('upd', 'Обновить подписки VPN?', 'Список серверов скачается заново, это займёт до минуты. Потом VPN перезапустится — связь через VPN пропадёт на несколько секунд.', 'Да, обновить'),
     '/tgproxy' => cmd_tgproxy(),
     '/vds' => cmd_vds(),
+    '/apps' => cmd_apps(),
     default => cmd_help(),
 };

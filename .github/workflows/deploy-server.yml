@@ -5,6 +5,8 @@ name: Deploy server
 #   — страница входа server/auth → /var/www/router-auth/, данные /var/lib/fspirat-router-auth/
 #   — fspirat-watch + cron, fail2ban (jail + фильтр), logrotate
 #   — nginx: /router/ и router.fspirat.online — со своей страницей входа (nginx-apply.py: копии, nginx -t, откат)
+#   — API приложения iPhone /router/app/v1 (server/auth/app.php): тесты до выкладки, блок nginx (этап 7 nginx-apply.py),
+#     jail fail2ban fspirat-router-app; рубильник — touch /var/lib/fspirat-router-auth/app_disabled (через Server ops)
 on:
   workflow_dispatch:
     inputs:
@@ -39,6 +41,9 @@ jobs:
           for f in server/auth/*.php; do php -l "$f"; done
           bash -n server/bin/fspirat-watch && bash -n server/bin/fspirat-vdsstat
           python3 -m py_compile server/auth/nginx-apply.py
+          # тесты API приложения (T1–T29 из docs/ios/inventory.md §10.1): заглушки роутера и Telegram, без сети и секретов
+          php -m | grep -qix pdo_sqlite || { sudo apt-get update -qq && sudo apt-get install -y -qq php-sqlite3; }
+          bash server/auth/tests/app-test.sh
 
       - name: Upload files
         run: |
@@ -47,7 +52,7 @@ jobs:
           ssh vps 'cat /etc/fspirat-router/deploy.conf 2>/dev/null' > /tmp/deploy.local || true
           rm -rf /tmp/srv && cp -r server /tmp/srv && DEPLOY_LOCAL=/tmp/deploy.local sh scripts/apply-config.sh /tmp/srv/auth /tmp/srv/nginx/conf.d
           cat deploy.conf /tmp/deploy.local > /tmp/srv/deploy.conf
-          tar -C /tmp/srv -czf - deploy.conf auth bin/fspirat-watch bin/fspirat-vdsstat cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
+          tar -C /tmp/srv --exclude=auth/tests -czf - deploy.conf auth bin/fspirat-watch bin/fspirat-vdsstat cron.d fail2ban logrotate nginx/conf.d | ssh vps 'rm -rf /tmp/fsr-deploy && mkdir -p /tmp/fsr-deploy && tar -xzf - -C /tmp/fsr-deploy'
 
       - name: Install
         run: |
@@ -58,7 +63,9 @@ jobs:
             . $D/deploy.conf
             # открытые настройки для панели и бота; без своего Telegram-прокси — без команды /tgproxy
             install -d -m 700 -o www-data -g www-data /var/lib/fspirat-router-auth
-            jq -n --arg l "https://$LUCI_DOMAIN/" --arg b "$TG_BOT" --arg m "${MTG_DOMAIN:-}" --arg p "$PANEL_DOMAIN ${PANEL_ALIASES:-}" "{luci: \$l, bot: \$b, mtg: \$m, panels: (\$p | split(\" \") | map(select(length > 0)))}" > /var/lib/fspirat-router-auth/site.json.tmp
+            # вход в приложение iPhone: пароль + число в боте (app_password: true); APP_LOGIN_PASSWORD=0 в deploy.conf — без пароля
+            AP=true; [ "${APP_LOGIN_PASSWORD:-1}" != 0 ] || AP=false
+            jq -n --arg l "https://$LUCI_DOMAIN/" --arg b "$TG_BOT" --arg m "${MTG_DOMAIN:-}" --arg p "$PANEL_DOMAIN ${PANEL_ALIASES:-}" --argjson ap $AP "{luci: \$l, bot: \$b, mtg: \$m, panels: (\$p | split(\" \") | map(select(length > 0))), app_password: \$ap}" > /var/lib/fspirat-router-auth/site.json.tmp
             install -m 644 -o www-data -g www-data /var/lib/fspirat-router-auth/site.json.tmp /var/lib/fspirat-router-auth/site.json && rm -f /var/lib/fspirat-router-auth/site.json.tmp
             if [ -n "${MTG_DOMAIN:-}" ]; then install -m 644 $D/auth/tgbot-commands.json /var/www/router-auth/
             else jq "{commands: [.commands[] | select(.command != \"tgproxy\")]}" $D/auth/tgbot-commands.json > /var/www/router-auth/tgbot-commands.json; chmod 644 /var/www/router-auth/tgbot-commands.json; fi
@@ -76,7 +83,8 @@ jobs:
             # fail2ban (без лога jail 3x-ipl он не стартует целиком)
             mkdir -p /var/log/x-ui && touch /var/log/x-ui/3xipl.log
             install -m 644 $D/fail2ban/fspirat.local /etc/fail2ban/jail.d/fspirat.local
-            install -m 644 $D/fail2ban/filter.d/fspirat-router-auth.conf /etc/fail2ban/filter.d/fspirat-router-auth.conf
+            # фильтры: fspirat-router-auth (пароль) и fspirat-router-app (приложение) — до перезапуска, иначе jail без фильтра не стартует
+            install -m 644 $D/fail2ban/filter.d/*.conf /etc/fail2ban/filter.d/
             systemctl restart fail2ban && sleep 2 && fail2ban-client status | tail -n 1
             # секреты nginx — не для всех пользователей (deploy их видеть не должен)
             chown root:root /etc/nginx/snippets/fspirat-router.conf && chmod 640 /etc/nginx/snippets/fspirat-router.conf
@@ -88,7 +96,7 @@ jobs:
         run: |
           ssh vps 'set -e
             install -m 644 /tmp/fsr-deploy/nginx/conf.d/fsr-luci-cookie.conf /etc/nginx/conf.d/fsr-luci-cookie.conf
-            install -m 644 /tmp/fsr-deploy/nginx/conf.d/fsr-limits.conf /etc/nginx/conf.d/fsr-limits.conf   # зона limit_req для API (до nginx-apply)
+            install -m 644 /tmp/fsr-deploy/nginx/conf.d/fsr-limits.conf /etc/nginx/conf.d/fsr-limits.conf   # зоны limit_req для API и приложения (до nginx-apply: блок fsr-app на них ссылается)
             python3 /tmp/fsr-deploy/auth/nginx-apply.py
             # HSTS и без версии nginx в ответах
             install -m 644 /tmp/fsr-deploy/nginx/conf.d/security-headers.conf /etc/nginx/conf.d/security-headers.conf
@@ -120,4 +128,43 @@ jobs:
             echo "api без X-FSR (как ссылка с чужого сайта): $(curl -s -w " %{http_code}" "https://$PANEL_DOMAIN/router/api?action=reboot")"
             echo "иконка PWA без входа: $(curl -s -o /dev/null -w %{http_code} https://$PANEL_DOMAIN/router/manifest.webmanifest)"
             echo "заголовки: $(curl -sI https://$PANEL_DOMAIN/ | grep -iE "^(server|strict-transport-security):" | tr -d "\r" | tr "\n" " ")"
-            rm -rf /tmp/fsr-deploy'
+            # воркеры php-fpm общие у входа, check.php веба и LuCI, бота и приложения; приложение держит до 2 на ответ роутера
+            # и 1 на долгую задачу (app.php, §11 п.3) — при pm.max_children 5 остаётся 2
+            echo "php-fpm: $(grep -hE "^[[:space:]]*pm(\.max_children)?[[:space:]]*=" /etc/php/*/fpm/pool.d/www.conf 2>/dev/null | tr -d " " | tr "\n" " ")"
+            # приложение iPhone /router/app/v1 (docs/ios/inventory.md §10.2) — только запросы без настоящего токена:
+            # отсутствие токена fail2ban не считает, а запросы самого сервера jail пропускает (ignoreself)
+            A=https://$PANEL_DOMAIN/router/app/v1; J=/tmp/fsr-verify.json; bad=0
+            av() {   # av «что» код error [аргументы curl]: ждём JSON с этим кодом ответа и полем error
+              w=$1 c=$2 e=$3; shift 3; rm -f $J
+              got=$(curl -s -m 15 -o $J -w %{http_code} "$@" || true); err=$(jq -r ".error // empty" $J 2>/dev/null || true)
+              if [ "$got" = "$c" ] && [ "$err" = "$e" ]; then echo "✅ $w: $got $err"; else echo "❌ $w: $got ${err:-не JSON} (ждали $c $e)"; bad=1; fi
+            }
+            if [ -e /var/lib/fspirat-router-auth/app_disabled ]; then echo "⚠️ приложение выключено рубильником (app_disabled) — проверки app пропущены"
+            else
+              av "app без токена" 401 token_missing "$A/me"
+              # своя проверка — без тревоги в Telegram: на время запроса «о ключе в адресе уже сообщали»
+              # (app.php шлёт её не чаще раза в час по времени файла), потом время файла — как было
+              F=/var/lib/fspirat-router-auth/app_urltoken_alert; m=$(stat -c %Y $F 2>/dev/null || true)
+              touch $F && chown www-data:www-data $F
+              av "app: токен в адресе" 400 token_in_url "$A/me?access_token=x"
+              if [ -n "$m" ]; then touch -d @$m $F; else rm -f $F; fi
+              av "app: запрос из браузера (Origin)" 403 browser_request -H "Origin: https://evil.example" "$A/me"
+            fi
+            av "веб-API с Bearer вместо входа" 401 auth -H "X-FSR: 1" -H "Authorization: Bearer fsr1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" "https://$PANEL_DOMAIN/router/api?action=net"
+            # 60 быстрых запросов без токена: часть — 429 от nginx (зона fsr_app_ip), тоже JSON
+            r=$(seq 60 | xargs -P 10 -I{} curl -s -m 10 -o /dev/null -w "%{http_code} %{content_type}\n" "$A/me" | sort | uniq -c | tr -s " " | tr "\n" ",")
+            if echo "$r" | grep -q " 429 application/json"; then echo "✅ app, 60 запросов подряд:$r"; else echo "❌ app, 60 запросов подряд — нет 429 в JSON:$r"; bad=1; fi
+            if fail2ban-client status fspirat-router-app >/dev/null 2>&1; then echo "✅ fail2ban: jail fspirat-router-app работает"; else echo "❌ fail2ban: нет jail fspirat-router-app"; bad=1; fi
+            # фильтры — настоящим fail2ban-regex на строке в формате журнала (fail2ban вырезает дату до сравнения)
+            for x in "fspirat-router-auth FAIL" "fspirat-router-auth LOCKED" "fspirat-router-app APP_BADTOKEN"; do
+              set -- $x
+              n=$(fail2ban-regex "$(date "+%F %T") $2 ip=203.0.113.7 ua=\"verify\"" /etc/fail2ban/filter.d/$1.conf 2>/dev/null | grep -c "^Lines: 1 lines, 0 ignored, 1 matched" || true)
+              if [ "$n" = 1 ]; then echo "✅ fail2ban $1: строка $2 считается"; else echo "❌ fail2ban $1: строка $2 не совпала с фильтром"; bad=1; fi
+            done
+            # повторный nginx-apply.py ничего не меняет (только если nginx в этом запуске настраивали)
+            if [ "${{ inputs.nginx }}" = true ]; then
+              n=$(python3 /tmp/fsr-deploy/auth/nginx-apply.py 2>&1 | grep -c "уже настроен" || true)
+              if [ "$n" = 2 ]; then echo "✅ nginx-apply.py повторно: уже настроен"; else echo "❌ nginx-apply.py повторно изменил настройки (уже настроен: $n из 2)"; bad=1; fi
+            fi
+            rm -rf /tmp/fsr-deploy $J
+            [ $bad = 0 ] || { echo "❌ проверки приложения не прошли (веб-панель работает как раньше)"; exit 1; }'

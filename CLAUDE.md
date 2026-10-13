@@ -23,7 +23,7 @@
      fspirat.xyz/router/ → страница web/index.html (вход через свою страницу, см. ниже)
      fspirat.xyz/router/api → CGI /cgi-bin/fspirat на роутере (nginx добавляет токен cookie)
    cron: fspirat-watch раз в минуту → уведомления в Telegram (@FSRouter_bot)
-   fail2ban: sshd, nginx-http-auth, 3x-ipl
+   fail2ban: sshd, nginx-http-auth, 3x-ipl, fspirat-router-auth, fspirat-router-app
 ```
 
 ## Файлы репозитория → где живут
@@ -100,6 +100,23 @@ nginx перед каждым запросом спрашивает `check.php` 
 - Журнал: `/var/log/fspirat-router-auth.log` (OK / FAIL / LOCKED / LOGOUT). fspirat-watch шлёт «🔑 Вход в панель».
 - Выкладка: workflow `Deploy server` (deploy-server.yml); nginx правит `server/auth/nginx-apply.py`
   (копии `*.bak-auth-*`, `nginx -t`, откат при ошибке).
+
+## Приложение iOS (/router/app/v1)
+
+Спецификация — `docs/ios/inventory.md` (§7 API, §8 nginx и fail2ban, §10 тесты), план — `docs/ios/plan.md`.
+- Сервер: `server/auth/app.php` (+ `app-lib.php`, `data-lib.php`) → `/var/www/router-auth/`; вход — пароль + число в боте,
+  дальше только `Authorization: Bearer fsr1_…` (cookie и check.php не участвуют). Токены — в `auth.sqlite` (только sha256),
+  таблицы `app_*`. Роутер приложение вызывает как бот — с ключом `/var/lib/fspirat-router-auth/router.token`
+  (его пишут `Deploy server` и `Rotate router token`). Тесты: `bash server/auth/tests/app-test.sh` (их запускает Deploy server).
+- nginx: блок между `# --- fsr-app v1 (begin)` и `(end)` в сниппете ставит этап 7 `nginx-apply.py`; лимиты — зоны
+  `fsr_app_ip` и `fsr_app_dev` в `conf.d/fsr-limits.conf`. Веб (`/router/api`, `/router/data`) не меняется.
+- **Рубильник** (через ops): `touch /var/lib/fspirat-router-auth/app_disabled` → всё API отвечает 503; вернуть — `rm` этого файла.
+- **Отозвать все телефоны** (через ops; sqlite3 на сервере нет — через PHP от www-data):
+  `sudo -u www-data php -r '$d=new PDO("sqlite:/var/lib/fspirat-router-auth/auth.sqlite"); $s=$d->prepare("UPDATE app_devices SET revoked=?, revoked_by=? WHERE revoked IS NULL"); $s->execute([time(), "ops"]); echo $s->rowCount(), "\n";'`
+  Обычно хватает веба («Выйти на всех устройствах» отзывает и телефоны) или бота (`/apps`).
+- fail2ban: jail **`fspirat-router-app`** (неверный токен, отказ во входе, токен в адресе — 10 за 10 мин → бан 1 ч);
+  неверный пароль из приложения — в `fspirat-router-auth`. Снять бан: `fail2ban-client set fspirat-router-app unbanip <IP>`.
+- iPhone-сборка — GitHub → TestFlight (`docs/ios/inventory.md` §9.5); ключи `*.p8`/`*.p12` только в секретах GitHub.
 
 ## Важные константы
 

@@ -1,6 +1,6 @@
 # Копия: /etc/nginx/snippets/fspirat-router.conf (на сервере лежит с настоящим токеном).
 # Подключается строкой `include snippets/fspirat-router.conf;` в блоке listen 443
-# файла /etc/nginx/sites-available/fspirat.online.
+# сайта панели (PANEL_DOMAIN из deploy.conf, /etc/nginx/sites-available/<домен>).
 # Токен передаётся cookie: uhttpd на роутере не пропускает в CGI нестандартные заголовки.
 location /router/ {
     auth_basic "FSPIRAT Router";
@@ -14,3 +14,32 @@ location = /router/api {
     proxy_set_header Authorization "";
     proxy_read_timeout 60s;
 }
+
+# --- fsr-app v1 (begin)
+# Приложение iPhone: /router/app/v1/ → /var/www/router-auth/app.php (server/auth/app.php), вход только по токену Bearer.
+# Этот блок ставит и обновляет сам server/auth/nginx-apply.py (этап 7, workflow «Deploy server») — между этими метками,
+# уже без «# » в начале строк. Здесь — копия для справки. Зоны fsr_app_ip и fsr_app_dev — в conf.d/fsr-limits.conf
+# (без него nginx -t не пройдёт). Ниже — то, что получится:
+# location ^~ /router/app/ { default_type application/json; return 404 '{"error":"not_found"}'; }
+# location ^~ /router/app/v1/ {
+#     add_header Strict-Transport-Security "max-age=31536000" always;
+#     add_header X-Content-Type-Options "nosniff" always;
+#     add_header Referrer-Policy "no-referrer" always;
+#     add_header Cache-Control "no-store" always;
+#     default_type application/json;
+#     limit_req zone=fsr_app_ip burst=40 nodelay;
+#     limit_req zone=fsr_app_dev burst=20 nodelay;
+#     client_max_body_size 4k;
+#     error_page 429 = @fsr_app_429;
+#     error_page 413 = @fsr_app_413;
+#     error_page 502 504 = @fsr_app_5xx;
+#     include fastcgi_params;
+#     fastcgi_param SCRIPT_FILENAME /var/www/router-auth/app.php;
+#     fastcgi_param HTTP_COOKIE "";          # cookie входа в панель в приложение не идёт
+#     fastcgi_read_timeout 30s;
+#     fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+# }
+# location @fsr_app_429 { default_type application/json; add_header Retry-After 2 always; return 429 '{"error":"rate_limited","retry_after":2}'; }
+# location @fsr_app_413 { default_type application/json; return 413 '{"error":"too_large"}'; }
+# location @fsr_app_5xx { default_type application/json; return 502 '{"error":"server_unavailable"}'; }
+# --- fsr-app v1 (end)

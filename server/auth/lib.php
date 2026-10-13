@@ -8,6 +8,8 @@
  *   password     — хэш пароля (bcrypt). Пока его нет, пароль проверяется по /etc/nginx/.htpasswd_router
  *                  (старый формат apr1), а после первого входа сохраняется здесь в bcrypt.
  * Журнал входов для fail2ban и уведомлений: /var/log/fspirat-router-auth.log
+ * Приложение для iPhone (/router/app/v1, app.php) пользуется этим же файлом: пароль, блокировка подбора, журналы,
+ * Telegram (fsr_tg_call) и вызов CGI роутера (fsr_router_call — как у бота). Свои таблицы — app-lib.php.
  */
 
 declare(strict_types=1);
@@ -25,6 +27,19 @@ const FSR_TTL_SHORT = 12 * 3600;               // без «Запомнить»:
 const FSR_TTL_LONG = 30 * 86400;               // с «Запомнить»: 30 дней (продлевается при работе)
 const FSR_MAX_FAILS = 5;
 const FSR_LOCK_SEC = 900;
+const FSR_ROUTER_URL = 'http://127.0.0.1:8081/cgi-bin/fspirat';   // CGI роутера через туннель (для тестов — FSR_ROUTER)
+
+// Как называть действие в Telegram; true — сообщать. Ключ — action в /router/api, «rename» и «apprevoke» — POST /router/data.
+// Общая карта для веба (check.php) и приложения (app.php): одни и те же действия приходят в Telegram из обоих мест.
+const FSR_ACTIONS = [
+    'reboot' => ['🔄 Перезагрузка роутера', true], 'restart' => ['🔁 Перезапуск VPN', true],
+    'update' => ['📥 Обновление подписки', true], 'switch' => ['🌍 Смена сервера', false],
+    'block' => ['⛔ Интернет выключен устройству', true], 'unblock' => ['✅ Интернет включён устройству', true],
+    'settargets' => ['📝 Изменён список сервисов', true],
+    'subadd' => ['➕ Добавлена подписка VPN', true], 'subdel' => ['🗑 Удалена подписка VPN', true], 'subupdate' => ['📥 Обновление подписки', false],
+    'rename' => ['✏️ Переименовано устройство', false],
+    'apprevoke' => ['🔒 Доступ приложения отозван', true], 'apprevokeall' => ['📵 Выход на всех устройствах', true],
+];
 
 date_default_timezone_set('Europe/Moscow');
 
@@ -74,10 +89,12 @@ function fsr_origin(): string { return getenv('FSR_ORIGIN') ?: 'https://' . fsr_
 
 function fsr_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? ''; }
 
-function fsr_log(string $what): void
+/** Строка журнала входов «ДАТА ВРЕМЯ ЧТО ip=… ua="…"». $ip/$ua — когда пишет не сам клиент (бот о входе приложения). */
+function fsr_log(string $what, ?string $ip = null, ?string $ua = null): void
 {
-    $ua = preg_replace('/[^\x20-\x7e]/', '', substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 120));
-    @file_put_contents(getenv('FSR_LOG') ?: FSR_LOG, date('Y-m-d H:i:s') . " $what ip=" . fsr_ip() . " ua=\"$ua\"\n", FILE_APPEND | LOCK_EX);
+    $ua = preg_replace('/[^\x20-\x7e]/', '', substr($ua ?? ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 120));
+    $ip = preg_replace('/[^0-9A-Fa-f.:]/', '', $ip ?? fsr_ip());
+    @file_put_contents(getenv('FSR_LOG') ?: FSR_LOG, date('Y-m-d H:i:s') . " $what ip=" . $ip . " ua=\"$ua\"\n", FILE_APPEND | LOCK_EX);
 }
 
 // ---------- пароль ----------
@@ -140,14 +157,55 @@ function fsr_locked(): int
     return (int)$r['n'] >= FSR_MAX_FAILS ? max(1, (int)$r['last'] + FSR_LOCK_SEC - time()) : 0;
 }
 
-function fsr_fail(): int
+/** Неудачная попытка (пароль, код, неверное число в боте). $ip — чья: по умолчанию этого запроса. Возвращает, сколько осталось. */
+function fsr_fail(?string $ip = null): int
+{
+    $ip ??= fsr_ip();
+    fsr_db()->prepare('INSERT INTO fails(ip, ts) VALUES(?, ?)')->execute([$ip, time()]);
+    return fsr_fails_left($ip);
+}
+
+/** Сколько попыток ещё осталось адресу (заодно чистка записей старше суток). */
+function fsr_fails_left(?string $ip = null): int
 {
     $db = fsr_db();
-    $db->prepare('INSERT INTO fails(ip, ts) VALUES(?, ?)')->execute([fsr_ip(), time()]);
     $db->prepare('DELETE FROM fails WHERE ts < ?')->execute([time() - 86400]);
     $st = $db->prepare('SELECT COUNT(*) FROM fails WHERE ip = ? AND ts > ?');
-    $st->execute([fsr_ip(), time() - FSR_LOCK_SEC]);
+    $st->execute([$ip ?? fsr_ip(), time() - FSR_LOCK_SEC]);
     return FSR_MAX_FAILS - (int)$st->fetchColumn();
+}
+
+/**
+ * Попытка входа по паролю (веб и приложение) — до проверки пароля: блокировка проверяется, и попытка сразу записывается
+ * в fails как неудачная, одной транзакцией (BEGIN IMMEDIATE — запись в базу по одному). Иначе пачка параллельных запросов
+ * с одного адреса, пока каждый ждёт bcrypt и паузу, видит «0 ошибок» и проверяет пароль вся: больше 5 попыток за раз,
+ * а ошибки пачки ещё и закрывают вход приложения всем (подбор с разных адресов, fsr_app_spray_check).
+ * → секунд до конца блокировки (0 — можно проверять пароль). $id — запись попытки: пароль верный — её убирает
+ * fsr_attempt_ok($id), неверный — она и есть ошибка (fsr_fails_left() — сколько осталось).
+ */
+function fsr_attempt(?int &$id): int
+{
+    $id = null;
+    $db = fsr_db();
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        $wait = fsr_locked();
+        if (!$wait) {
+            $db->prepare('INSERT INTO fails(ip, ts) VALUES(?, ?)')->execute([fsr_ip(), time()]);
+            $id = (int)$db->lastInsertId();
+        }
+        $db->exec('COMMIT');
+    } catch (Throwable $e) {
+        try { $db->exec('ROLLBACK'); } catch (Throwable) {}
+        throw $e;
+    }
+    return $wait;
+}
+
+/** Пароль верный: убрать запись попытки (fsr_attempt). Сверка с ip — rowid удалённой строки SQLite может отдать новой. */
+function fsr_attempt_ok(?int $id): void
+{
+    if ($id) fsr_db()->prepare('DELETE FROM fails WHERE rowid = ? AND ip = ?')->execute([$id, fsr_ip()]);
 }
 
 // ---------- сессии ----------
@@ -191,13 +249,21 @@ function fsr_session_valid(): bool
     return true;
 }
 
-/** Выход. $all — закрыть все сессии (на всех устройствах), иначе только эту. */
-function fsr_session_end(bool $all = false): void
+/** Выход. $all — закрыть все сессии (на всех устройствах), иначе только эту.
+ *  «На всех устройствах» (решение владельца 13.10.2026) — ещё и ключи приложения (revoked_by=all) и запомненные браузеры
+ *  (таблица devices: на любом браузере снова спросят код из Telegram). Возвращает, сколько ключей приложения отозвано. */
+function fsr_session_end(bool $all = false): int
 {
     $tok = $_COOKIE[FSR_COOKIE] ?? '';
-    if ($all) fsr_db()->exec('DELETE FROM sessions');
-    elseif (preg_match('/^[a-f0-9]{64}$/', $tok)) fsr_db()->prepare('DELETE FROM sessions WHERE hash = ?')->execute([hash('sha256', $tok)]);
+    $n = 0;
+    if ($all) {
+        fsr_db()->exec('DELETE FROM sessions');
+        require_once __DIR__ . '/app-lib.php';
+        $n = fsr_app_revoke_all('all');
+        fsr_db2()->exec('DELETE FROM devices');
+    } elseif (preg_match('/^[a-f0-9]{64}$/', $tok)) fsr_db()->prepare('DELETE FROM sessions WHERE hash = ?')->execute([hash('sha256', $tok)]);
     fsr_cookie('', 1);
+    return $n;
 }
 
 // ---------- защита действий: CSRF-токен и журнал ----------
@@ -224,13 +290,14 @@ function fsr_session_ref(): string
     return $tok === '' ? '-' : substr(hash('sha256', $tok), 0, 8);
 }
 
-/** Журнал действий: «время ДЕЙСТВИЕ детали ip=… s=… ua="…"». Токены, пароли и коды сюда не попадают. */
-function fsr_audit(string $action, string $detail = ''): void
+/** Журнал действий: «время ДЕЙСТВИЕ детали ip=… s=… ua="…"». Токены, пароли и коды сюда не попадают.
+ *  $ref — кто: по умолчанию сессия веба (8 hex), у приложения — «a:<id устройства>». */
+function fsr_audit(string $action, string $detail = '', ?string $ref = null): void
 {
-    $clean = fn(string $v, int $n) => preg_replace('/[^\x20-\x7e\x{0400}-\x{04ff}]/u', '', mb_substr($v, 0, $n));
+    $clean = fn(string $v, int $n) => preg_replace('/[^\x20-\x7e\x{0400}-\x{04ff}\x{2192}]/u', '', mb_substr($v, 0, $n));
     $ua = $clean($_SERVER['HTTP_USER_AGENT'] ?? '', 120);
     @file_put_contents(getenv('FSR_AUDIT') ?: FSR_AUDIT, date('Y-m-d H:i:s') . ' ' . $clean($action, 20) . ($detail !== '' ? ' ' . $clean($detail, 120) : '')
-        . ' ip=' . fsr_ip() . ' s=' . fsr_session_ref() . " ua=\"$ua\"\n", FILE_APPEND | LOCK_EX);
+        . ' ip=' . fsr_ip() . ' s=' . $clean($ref ?? fsr_session_ref(), 20) . " ua=\"$ua\"\n", FILE_APPEND | LOCK_EX);
 }
 
 /** Куда вернуться после входа: только наши адреса. */
@@ -269,14 +336,46 @@ function fsr_tg(): ?array
     return is_array($c) && !empty($c['token']) && !empty($c['chat']) ? $c : null;
 }
 
+/** Адрес Bot API (для тестов — заглушка в FSR_TG_API). */
+function fsr_tg_api(): string { return rtrim(getenv('FSR_TG_API') ?: 'https://api.telegram.org', '/'); }
+
 function fsr_tg_send(string $text): bool
 {
     $c = fsr_tg();
     if (!$c) return false;
-    $raw = @file_get_contents((getenv('FSR_TG_API') ?: 'https://api.telegram.org') . '/bot' . $c['token'] . '/sendMessage', false, stream_context_create(['http' => [
+    $raw = @file_get_contents(fsr_tg_api() . '/bot' . $c['token'] . '/sendMessage', false, stream_context_create(['http' => [
         'method' => 'POST', 'header' => 'Content-Type: application/x-www-form-urlencoded', 'timeout' => 8, 'ignore_errors' => true,
         'content' => http_build_query(['chat_id' => $c['chat'], 'text' => $text, 'disable_web_page_preview' => 'true'])]]));
     return (bool)(json_decode((string)$raw, true)['ok'] ?? false);
+}
+
+/** Любой метод Bot API (JSON). Ответ Telegram или null (бот не настроен, нет связи). Токен бота в журналы не попадает. */
+function fsr_tg_call(string $method, array $p, int $timeout = 10): ?array
+{
+    $c = fsr_tg();
+    if (!$c) return null;
+    $raw = @file_get_contents(fsr_tg_api() . '/bot' . $c['token'] . '/' . $method, false, stream_context_create(['http' => [
+        'method' => 'POST', 'header' => 'Content-Type: application/json', 'timeout' => $timeout, 'ignore_errors' => true,
+        'content' => json_encode($p, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)]]));
+    $j = json_decode((string)$raw, true);
+    return is_array($j) ? $j : null;
+}
+
+/** Отложить работу (сообщения в Telegram) на после ответа: клиент не ждёт Telegram. */
+function fsr_later(callable $fn): void
+{
+    static $q = null;
+    if ($q === null) {
+        $q = [];
+        register_shutdown_function(static function () use (&$q): void {
+            if (!$q) return;
+            if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+            foreach ($q as $f) {
+                try { $f(); } catch (Throwable $e) { error_log('fspirat-router-auth later: ' . $e->getMessage()); }
+            }
+        });
+    }
+    $q[] = $fn;
 }
 
 function fsr_aux_cookie(string $name, string $value, int $expires): void
@@ -358,4 +457,83 @@ function fsr_code_check(string $code): ?array
     $db->prepare('DELETE FROM codes WHERE hash = ?')->execute([$h]);
     fsr_aux_cookie(FSR_CODE_COOKIE, '', 1);
     return ['remember' => (bool)$r['remember'], 'next' => (string)$r['next']];
+}
+
+// ---------- CGI роутера напрямую (бот, приложение) ----------
+// nginx (/router/api) подставляет токен сам; бот и приложение ходят в туннель мимо nginx, поэтому токен берут из
+// fsr_dir()/router.token (пишет Deploy server из сниппета nginx). Токен — только в cookie запроса, в журналы не попадает.
+
+/**
+ * Разобрать JSON роутера. Если не разбирается — одна попытка починить: управляющие символы внутри строк
+ * (имя узла или устройства с таким символом ломает status, §5 п.22) экранируются, битый UTF-8 заменяется.
+ * Возвращает [массив|null, текст JSON]: текст — как прислал роутер или исправленный (объекты {} не превращаются в []).
+ */
+function fsr_json_fix(string $raw): array
+{
+    $t = trim($raw);
+    if ($t === '') return [null, ''];
+    $j = json_decode($t, true);
+    if (is_array($j)) return [$j, $t];
+    $out = ''; $in = false; $esc = false; $n = strlen($t);
+    for ($i = 0; $i < $n; $i++) {
+        $c = $t[$i]; $o = ord($c);
+        if ($in) {
+            if ($esc) $esc = false;
+            elseif ($c === '\\') $esc = true;
+            elseif ($c === '"') $in = false;
+            elseif ($o < 0x20) { $out .= sprintf('\\u%04x', $o); continue; }
+        } elseif ($c === '"') $in = true;
+        elseif ($o < 0x20 && $c !== "\t" && $c !== "\n" && $c !== "\r") continue;
+        $out .= $c;
+    }
+    $o = json_decode($out, false, 512, JSON_INVALID_UTF8_SUBSTITUTE);
+    if (!is_array($o) && !is_object($o)) return [null, $t];
+    $fixed = (string)json_encode($o, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+    return [json_decode($fixed, true), $fixed];
+}
+
+/**
+ * Вызов CGI роутера. → [HTTP-код, ответ (массив) или null, текст ответа].
+ * Ошибки без ответа роутера: [500 server_config] — нет router.token; [502 router_offline] — туннель оборван;
+ * [504 router_timeout] — роутер не ответил за $timeout; [500 router_token] — роутер ответил 403 forbidden
+ * (ключ не совпадает: Telegram не чаще раза в час). Тело ответа не JSON — массив null, разбирает вызывающий.
+ * 'sent' => false в ответе — запрос до роутера точно не дошёл (нет router.token, порт туннеля закрыт): действие не выполнено.
+ */
+function fsr_router_call(string $action, array $q = [], string $method = 'GET', int $timeout = 20, string $body = ''): array
+{
+    $tok = trim((string)@file_get_contents(fsr_dir() . '/router.token'));
+    if (!preg_match('/^[A-Za-z0-9]{16,128}$/', $tok)) return [500, ['error' => 'server_config', 'sent' => false], ''];
+    $url = (getenv('FSR_ROUTER') ?: FSR_ROUTER_URL) . '?' . http_build_query(['action' => $action] + $q, '', '&', PHP_QUERY_RFC3986);
+    $opt = ['method' => $method, 'timeout' => $timeout, 'ignore_errors' => true, 'follow_location' => 0,
+            'header' => "Cookie: fspirat_token=$tok\r\n" . ($body !== '' ? "Content-Type: application/x-www-form-urlencoded\r\n" : ($method === 'POST' ? "Content-Length: 0\r\n" : ''))];
+    if ($body !== '') $opt['content'] = $body;
+    $t0 = microtime(true);
+    error_clear_last();
+    $fp = @fopen($url, 'r', false, stream_context_create(['http' => $opt]));
+    if (!$fp) {
+        if (microtime(true) - $t0 >= $timeout - 0.5) return [504, ['error' => 'router_timeout'], ''];
+        // «Connection refused» — порт туннеля никто не слушает, запрос не ушёл; иначе (соединение было) мог и дойти
+        $refused = str_contains((string)(error_get_last()['message'] ?? ''), 'Connection refused');
+        return [502, ['error' => 'router_offline'] + ($refused ? ['sent' => false] : []), ''];
+    }
+    $code = 0;
+    foreach ((array)(stream_get_meta_data($fp)['wrapper_data'] ?? []) as $h) {
+        if (is_string($h) && preg_match('~^HTTP/\S+\s+(\d{3})~', $h, $m)) $code = (int)$m[1];
+    }
+    $raw = (string)stream_get_contents($fp);
+    $timedOut = (bool)(stream_get_meta_data($fp)['timed_out'] ?? false);
+    fclose($fp);
+    if ($timedOut) return [504, ['error' => 'router_timeout'], ''];
+    if ($code === 0) return [502, ['error' => 'router_offline'], ''];
+    [$j, $raw] = fsr_json_fix($raw);
+    if ($code === 403 && ($j['error'] ?? '') === 'forbidden') {
+        $f = fsr_dir() . '/router_token_alert';
+        if (time() - (int)@filemtime($f) > 3600) {
+            @touch($f);
+            fsr_later(fn() => fsr_tg_send("⚠️ Роутер отклонил ключ сервера (403 forbidden): router.token не совпадает с ключом на роутере.\n"
+                . 'Бот и приложение не могут управлять роутером. Помогает workflow «Deploy server» — он перепишет router.token из сниппета nginx.'));
+        }
+        return [500, ['error' => 'router_token'], ''];
+    }
+    return [$code, $j, $raw];
 }

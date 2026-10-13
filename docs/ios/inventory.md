@@ -623,6 +623,7 @@ site: {luci, bot, mtg, panels}
 **Ход входа:**
 1. `POST /auth/login {password, device:{name, model, os, app}}`.
 2. Сервер проверяет: рубильник → лимиты → общий замок «Это не я» → `fsr_locked()` → `fsr_password_ok()`.
+   - **(ревью 13.10.2026)** `fsr_locked()` и запись попытки в `fails` — одной транзакцией (`BEGIN IMMEDIATE`) **до** bcrypt: `fsr_attempt()` в `lib.php`, верный пароль убирает запись (`fsr_attempt_ok()`). Иначе пачка параллельных запросов с одного IP, пока каждый ждёт bcrypt и паузу, видела «0 ошибок» и проверяла пароль вся (≈ число воркеров + 5 попыток), а её ошибки закрывали вход приложения всем (подбор «с разных адресов»). Так же в `login.php`.
    - Неверный пароль → `fsr_fail()`, запись `FAIL`, пауза 300–700 мс, ответ `401 bad_password {left}`.
    - Верный пароль → `login_id = random_bytes(32)`, `number = random_int(10,99)` и 2 других числа 10..99 в случайном порядке (CSPRNG).
 3. Запись в `app_logins` хранит `hash = sha256(login_id)`, `tg_ref` (12 hex), number, state = pending.
@@ -639,6 +640,7 @@ site: {luci, bot, mtg, panels}
    - **«Это не я»** → `410 login_denied`, `APP_DENIED`, `fsr_fail()`, общий замок входа приложения по паролю на 1 ч (файл `fsr_dir()/app_login_lock` с временем). Тревога в Telegram с советом сменить пароль. Веб-вход не затрагивается: он защищён кодом.
    - Прошло 120 с → `410 login_expired`.
    - `POST /auth/cancel` → `cancelled`.
+   - **(ревью 13.10.2026)** Замок («Это не я», подбор) и «Выйти на всех устройствах» (веб и `/devices/revoke-all`) закрывают и входы, которые ждут нажатия или одобрены, но ключ ещё не забран (`expired`, сообщение в боте поправляется). Пока стоит замок, ключ по одобренному входу не выдаётся → `410 login_denied`.
 8. **Защита от перебора и спама.**
    - Блокировка общая с вебом: 5 ошибок за 15 мин.
    - Больше 30 записей в `fails` за час со всех IP → вход приложения по паролю закрыт на час, одно сообщение в Telegram.
@@ -681,6 +683,7 @@ site: {luci, bot, mtg, panels}
 5. Проверка `HTTP_AUTHORIZATION`:
    - заголовка нет → `401 token_missing`, в fail2ban не считается;
    - не подходит под шаблон или хэша нет в базе → `401 token_invalid` + `APP_BADTOKEN`, это считается в fail2ban;
+   - **(ревью 13.10.2026)** шаблон — `^Bearer fsr1_…$` **с учётом регистра**, как map ключа `fsr_app_dev` (§8.1): «bearer …» с настоящим ключом проходил бы мимо лимита на устройство, поэтому не принимается (`token_invalid`);
    - отозван → `401 token_revoked`; истёк → `401 token_expired`. Оба случая fail2ban **не** считает: старый телефон не должен банить домашний IP;
    - ко всем 401 добавляется `WWW-Authenticate: Bearer error="invalid_token"`.
 6. Скользящее продление срока (§7.3).
@@ -699,7 +702,7 @@ site: {luci, bot, mtg, panels}
 | 410 | `login_denied`, `login_expired` |
 | 413 / 415 | `too_large` / не JSON |
 | 428 | `confirm_required` |
-| 429 | `rate_limited`, `locked` (+ `retry_after`, `Retry-After`) |
+| 429 | `rate_limited`, `locked`, `busy` (вход: уже ждут два; роутер: заняты места, §7.11) (+ `retry_after`, `Retry-After`) |
 | 500 | `server_error`, `server_config` (нет router.token), `router_token` (роутер ответил `forbidden`; сообщение в Telegram не чаще раза в час) |
 | 502 | `router_offline`, `router_bad_reply`, `server_unavailable` |
 | 503 | `app_disabled`, `tg_unavailable`, `not installed` |
@@ -786,6 +789,8 @@ site: {luci, bot, mtg, panels}
 
 **Класс PW** — действия с перезапуском PassWall: `switch, restart, update, subupdate, direct, diradd, dirdel, svcdirect, zapretset` (+ `subadd, subdel`). Между ними **общая для всех устройств пауза 15 с**, плюс не больше 30 в час на устройство.
 
+**(ревью 13.10.2026) Что идёт в лимиты.** Действие записывается в `app_actions` до вызова CGI (параллельный запрос уже видит паузу), но запись убирается, если роутер его **точно не выполнил**: запрос до роутера не дошёл (нет `router.token`, порт туннеля закрыт — «Connection refused», «роутер молчит» ниже), CGI отказал своей ошибкой (400/409/500/503 — до изменений, §2.1) или не принял ключ (`router_token`). Иначе switch на устаревший id (`bad node` после обновления подписки) закрывал бы смену сервера всем телефонам на 15 с, а оборванный туннель — reboot на 5 минут. `504 router_timeout` и обрыв после отправки считаются: роутер мог выполнить. Так же у задач ping/speedtest.
+
 **Подтверждения:** не больше 20 `confirm` в минуту на устройство.
 
 ### 7.9 Подтверждение: 428 → `confirm`
@@ -818,7 +823,8 @@ site: {luci, bot, mtg, panels}
 | Уровень | Правило |
 |---|---|
 | nginx, IP: `fsr_app_ip` | 5 r/s, `burst=40 nodelay` — отдельно от веба |
-| nginx, устройство: `fsr_app_dev` | 2 r/s, `burst=20`. Ключ — первые 12 символов токена после `fsr1_` (72 бита), пустой ключ не считается |
+| nginx, устройство: `fsr_app_dev` | 2 r/s, `burst=20`. Ключ — первые 12 символов токена после `fsr1_` (72 бита), пустой ключ не считается; «Bearer» — с учётом регистра, как в app.php (§7.4) |
+| PHP, вызовы роутера | **(ревью 13.10.2026)** роутер одновременно ждут не больше 2 запросов приложения (места — flock), остальные ждут место до 4 с, потом `429 busy`; роутер промолчал (504 или обрыв дольше 2 с) — 30 с без вызовов, сразу `502 router_offline` (и действия — без окна подтверждения); все вызовы роутера в одном запросе — в общий срок 25 с (nginx ждёт php-fpm 30 с; dirdel — это mydirect и dirdel подряд). Долгая задача — мимо мест (одна на всех). См. §11 п.3 |
 | PHP | вход (§7.2), класс PW, лимиты по действиям (§7.8) |
 | Ответ | `429 {error:"rate_limited", retry_after}` + `Retry-After`; от nginx — через `@fsr_app_429` |
 
@@ -858,7 +864,7 @@ site: {luci, bot, mtg, panels}
 | `server/nginx/conf.d/fsr-limits.conf` | зоны и map |
 | `server/fail2ban/fspirat.local`, `server/fail2ban/filter.d/fspirat-router-app.conf` | новый jail |
 | `.github/workflows/deploy-server.yml` | тесты, фильтр, `app_password` в site.json, Verify |
-| `.github/workflows/rotate-router-token.yml` | после проверки (строки 40-41) переписать `router.token`, при откате вернуть прежний |
+| `.github/workflows/rotate-router-token.yml` | переписать `router.token` **сразу за роутером** (вместе со сниппетом, до проверок — иначе бот и приложение несколько секунд получали бы 403 и ложную тревогу с часом тишины), после успеха убрать `router_token_alert`; при откате вернуть прежний (не было — удалить) |
 | `server/auth/tests/app-test.sh` + заглушки | §10 |
 | `web/index.html`, `web/app.js` | список устройств и «Отозвать» в разделе «Безопасность» (`index.html:269-276`) |
 | `.gitignore` | `*.p8`, `*.p12`, `*.mobileprovision`, `ios/*.xcodeproj/`, `DerivedData/`, `ios/build/` |
@@ -869,6 +875,7 @@ site: {luci, bot, mtg, panels}
 ## 8. nginx, выкладка, fail2ban, откат
 
 ### 8.1 `server/nginx/conf.d/fsr-limits.conf` (контекст http)
+Регулярное выражение map — с учётом регистра (`~`), и app.php принимает только «Bearer» (§7.4 п.5): иначе «bearer fsr1_…» давал бы пустой ключ и обходил зону устройства.
 ```nginx
 limit_req_zone $binary_remote_addr zone=fsr_app_ip:1m rate=5r/s;
 map $http_authorization $fsr_app_key {
@@ -930,8 +937,8 @@ location @fsr_app_5xx { default_type application/json; return 502 '{"error":"ser
 
 ### 8.4 fail2ban
 - **Jail `[fspirat-router-app]`:** `logpath = /var/log/fspirat-router-auth.log`, maxretry 10, findtime 10m, bantime 1h.
-- **Фильтр:** `failregex = ^\S+ \S+ APP_(?:BADTOKEN|DENIED|URLTOKEN) ip=<HOST>`.
-- **Ошибки пароля** из приложения попадают в существующий jail `fspirat-router-auth`.
+- **Фильтр:** `failregex = ^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)?\s*APP_(?:BADTOKEN|DENIED|URLTOKEN) ip=<HOST>` — дата необязательная: fail2ban вырезает её из строки до сравнения, и `^\S+ \S+ …` не совпало бы ни с чем.
+- **Ошибки пароля** из приложения попадают в существующий jail `fspirat-router-auth`. **(исправлено при ревью 13.10.2026)** Его фильтр `^\S+ \S+ (FAIL|LOCKED)` по той же причине не совпадал ни с одной строкой — jail не банил никого, ни для веба, ни для приложения. Теперь `^(?:<дата>)?\s*(?:FAIL|LOCKED) ip=<HOST>`, и бан начинает работать по-настоящему (риск §5 п.32: maxretry/bantime — вопрос владельцу).
 - **Verify** шлёт только запросы без токена: `token_missing` в fail2ban не считается, `ignoreself` включён.
 - **(новое) Чем опасен бан.** Оба jail-а банят `port = http,https`, а 443 общий с Xray своего NL-сервера (§5 п.32). Поэтому бан домашнего IP провайдера на час лишает дом своего NL. Что смягчает:
   - отозванные и истёкшие токены не считаются (§7.4);
@@ -1099,6 +1106,8 @@ location @fsr_app_5xx { default_type application/json; return 502 '{"error":"ser
 | T26 | **Веб-CSRF не изменился** (`docs/audit-2026-10.md:98-100`) | GET без токена → 204; POST с токеном и Origin → 204; `X-FSR: 1` → 403; чужой Origin → 403; без Origin → 403; без сессии → 401; `op=apprevoke` без токена → 403 |
 | T27 | Строки `APP_*` и сторож | разбираются `read -r d t what ipkv` (`fspirat-watch:38`) без лишних сообщений; фильтр `fspirat-router-auth` их не ловит |
 | T28 | Rotate router token (сухой прогон на заглушках) | `router.token` обновлён; при откате возвращён прежний |
+
+**Сверх таблицы (ревью 13.10.2026):** T2 — «bearer»/«BEARER» с настоящим ключом → 401 `token_invalid`; T11 — 12 неверных паролей параллельно с одного IP (приложение и `login.php`) → ровно 5 попыток; T16, T21, T22 — отказ CGI, закрытый порт туннеля, `router_token` не идут в лимиты; T17 — места для вызова роутера (третий ждёт до 4 с, потом `429 busy`); T21 — «роутер молчит»: после 504 следующие запросы → 502 сразу, роутер не вызван; T19 — mydirect + dirdel в общем сроке запроса (`FSR_APP_BUDGET`); T28 — `router.token` новый уже на проверке нового токена.
 | T29 | Чистка: отозванный токен после 100 запросов | строка осталась; ответ `token_revoked`, не `token_invalid`; `APP_BADTOKEN` нет |
 
 ### 10.2 Verify в `deploy-server.yml` (без токенов и секретов)
@@ -1138,6 +1147,7 @@ location @fsr_app_5xx { default_type application/json; return 502 '{"error":"ser
 2. **Наложение действий на роутере.** Замка на перезапуски PassWall на роутере нет. Замок приложения не видит веб и бота. Смягчение — общая пауза PW, тихие окна, действия по одному.
 3. **php-fpm и uhttpd.**
    - Долгие задачи (до 90 с) и бот занимают воркеры php-fpm. Если `pm.max_children` мал, встанут `auth_request` веба. Смягчение — одна долгая задача сразу, проверить `pm.max_children`.
+   - **(ревью 13.10.2026)** Короткие вызовы тоже: чтение ждёт роутер до 5–20 с, действие до 25 с, а «висящий» туннель (дом без интернета, sshd ещё держит 8081) держит воркер до таймаута. На сервере `pm.max_children = 5` (проверено 13.10.2026), пул общий с check.php, входом, ботом и fspirat.ru. Смягчение в app.php — места (не больше 2 вызовов роутера сразу), «роутер молчит» на 30 с и общий срок запроса (§7.11). Роутер ждут не больше 3 воркеров приложения (2 места + задача), остальные его запросы держат воркер не дольше 4 с. Verify печатает `pm`/`pm.max_children`. Надёжнее — свой пул php-fpm для app.php (свой сокет в блоке nginx) — не в v1.
    - uhttpd по умолчанию (не проверено) — 3 параллельных CGI и 60 с.
 4. **Вход зависит от Telegram.** Если бот не работает, новых входов нет (у веба для новых браузеров тоже, §5 п.34). Выданные токены продолжают работать.
 5. **Блокировки по IP.**
