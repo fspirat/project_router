@@ -203,6 +203,8 @@ case "$action" in
     uci commit passwall2
     echo 0 > $DIR/fails
     echo "$(date '+%d.%m %H:%M') вручную -> $id" >> $DIR/switch.log
+    # выбран вручную — fspirat-ping не вернёт на свой сервер и после перезагрузки (switch.log в /tmp пропадает)
+    [ "$(cat /etc/fspirat/last_switch 2>/dev/null)" = "manual $id" ] || { echo "manual $id" > /etc/fspirat/last_switch; } 2>/dev/null
     bg "/etc/init.d/passwall2 restart"
     reply "200 OK" '{"ok":true}' ;;
   restart)

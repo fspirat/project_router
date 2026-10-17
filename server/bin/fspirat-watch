@@ -193,18 +193,20 @@ touch $S/routerlog
 jq -r '.log[]?' <<<"$J" | while IFS= read -r line; do
   grep -qxF -- "$line" $S/routerlog && continue
   echo "$line" >> $S/routerlog
-  # "06.10 17:30 авто ID -> ID 85ms"
+  # "06.10 17:30 авто ID -> ID 85ms"; возврат на свой сервер — "авто-возврат ID -> ID 58ms", неудачный — "авто-откат ID -> ID (…)"
   d=${line:0:5}; t=${line:6:5}; rest=${line:12}; ts=$NOW
   if [ $first = 1 ]; then
     ts=$(TZ=Europe/Samara date -d "$(date +%Y)-${d:3:2}-${d:0:2} $t" +%s 2>/dev/null || echo $NOW)   # время роутера — Самара
     [ "$ts" -gt "$NOW" ] && ts=$NOW
   fi
-  for id in $(grep -oE '\b[A-Za-z0-9]{8}\b' <<<"$rest"); do
+  for id in $(grep -oE '\b[A-Za-z0-9_]{6,16}\b' <<<"$rest"); do     # ID подписки — 8 символов, свои — fspiratDE / fspiratNL
     nm=$(jq -r --arg c "$id" '[.ping.nodes[]? | select(.id==$c) | .name][0] // empty' <<<"$J")
     [ -n "$nm" ] && rest=${rest//$id/$nm}
   done
   rest=${rest//_direct/Напрямую (без VPN)}
   case "$rest" in
+    авто-возврат*) kind=autoback; rest="Возврат на свой сервер: ${rest#авто-возврат }" ;;    # до «авто*»
+    авто-откат*) kind=autoback_fail; rest="Свой сервер не прошёл проверку, обратно: ${rest#авто-откат }"; rest=${rest% (*} ;;
     авто*) kind=auto; rest="Автопереключение: ${rest#авто }" ;;
     вручную*) kind=manual; rest="Сервер выбран вручную: ${rest#вручную -> }" ;;
     перезапуск*) kind=restart; rest="Перезапуск VPN" ;;
@@ -228,21 +230,39 @@ name=$(jq -r --arg c "$cur" '[.ping.nodes[]? | select(.id==$c) | .name][0] // $c
 [ "$cur" = _direct ] && name="Напрямую (без VPN)"
 prev=$(get current)
 if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then
-  last=$(jq -r '.log[-1] // ""' <<<"$J")
-  how="автоматически, текущий перестал отвечать"
-  # «вручную» — только если последняя запись журнала роутера именно о ручном выборе этого сервера
-  [[ $last == *вручную* && $last == *"-> $cur"* ]] && how="вручную"
-  send "🔁 VPN-сервер сменён ($how): $(get current_name) → $name"
+  # последняя запись журнала роутера о выборе сервера («авто…» / «вручную…»; строки MyDirect, zapret и т.п. пропускаем)
+  last=$(jq -r '[.log[]? | select(test("^\\S+ \\S+ (авто|вручную)"))][-1] // ""' <<<"$J")
+  if [[ $last == *" авто-возврат "* && $last == *"-> $cur "* ]]; then
+    send "🔁 VPN вернулся на свой сервер: $(get current_name) → $name"
+  elif [[ $last == *авто-откат* && $last == *"-> $cur "* ]]; then
+    send "↩️ Свой сервер ($(get current_name)) не прошёл проверку — VPN снова на $name"
+  else
+    how="автоматически, текущий перестал отвечать"
+    # «вручную» — только если последняя запись о выборе сервера именно о ручном выборе этого сервера
+    [[ $last == *вручную* && $last == *"-> $cur"* ]] && how="вручную"
+    send "🔁 VPN-сервер сменён ($how): $(get current_name) → $name"
+  fi
 fi
 put current "$cur"; put current_name "$name"
 
-# Память роутера: основной Xray обычно 30–40 МБ; больше 80 МБ — разросся (так было перед нехваткой памяти 11.10).
-# Только уведомление, VPN не трогаем. Снова сообщить — после того как опустится ниже 60 МБ.
-xr=$(jq -r '.sys.xray_rss // 0' <<<"$J"); ma=$(jq -r '.sys.mem_avail // 0' <<<"$J")
-if [ "$xr" -ge 81920 ] 2>/dev/null && [ "$(get xraymem)" != 1 ]; then
-  send "🧠 Xray на роутере занимает $((xr / 1024)) МБ памяти (обычно 30–40). Свободно $((ma / 1024)) МБ. Если память кончится, система завершит Xray и VPN переподключится — помогает «Перезапустить VPN» в панели."
-  event "$NOW" xraymem "Xray занимает $((xr / 1024)) МБ памяти"; put xraymem 1
-elif [ "$xr" -gt 0 ] && [ "$xr" -lt 61440 ] 2>/dev/null; then put xraymem 0; fi
+# Память роутера. Xray (RSS) обычно 55–70 МБ: ~27 МБ из них — сам файл xray, своя память — 30–40 МБ; после всплеска соединений
+# (включили ПК) бывает 80–90 МБ — это не опасно, свободно остаётся ~40 МБ. Опасно, когда свободной памяти почти нет:
+# тогда система завершает Xray (11.10: Xray ~100 МБ своих, VPN переключился). Поэтому в Telegram — только если свободно
+# меньше 25 МБ две минуты подряд или Xray ≥ 120 МБ, не чаще раза в сутки; снова — когда отпустит (свободно ≥ 40 МБ и Xray < 100 МБ).
+# Xray ≥ 80 МБ — только запись в журнал (вид mem), раз в сутки. VPN не трогаем.
+xr=$(jq -r '.sys.xray_rss // 0' <<<"$J"); ma=$(jq -r '.sys.mem_avail // 0' <<<"$J")     # кБ
+if [ "$ma" -gt 0 ] 2>/dev/null && [ "$ma" -lt 25600 ]; then put memlow $(( $(get memlow || echo 0) + 1 )); else put memlow 0; fi
+today=$(date +%F)
+if { [ "$(get memlow)" -ge 2 ] || [ "$xr" -ge 122880 ]; } 2>/dev/null && [ "$(get xraymem)" != 1 ] && [ "$(get xraymem_day)" != "$today" ]; then
+  if [ "$(get memlow)" -ge 2 ] 2>/dev/null; then why="На роутере кончается память"; else why="Xray на роутере сильно разросся"; fi
+  send "🧠 $why: свободно $((ma / 1024)) МБ, Xray занимает $((xr / 1024)) МБ. Если память кончится, система завершит Xray и VPN переподключится сам; ускорить — «Перезапустить VPN» в панели."
+  event "$NOW" xraymem "Мало памяти: свободно $((ma / 1024)) МБ, Xray $((xr / 1024)) МБ"
+  put xraymem 1; put xraymem_day "$today"
+elif [ "$xr" -ge 81920 ] 2>/dev/null && [ "$(get xrayinfo_day)" != "$today" ]; then
+  event "$NOW" mem "Xray занимает $((xr / 1024)) МБ, свободно $((ma / 1024)) МБ"
+  put xrayinfo_day "$today"
+fi
+{ [ "$ma" -ge 40960 ] && [ "$xr" -gt 0 ] && [ "$xr" -lt 102400 ]; } 2>/dev/null && put xraymem 0
 
 # Флеш-память
 pct=$(jq -r '.sys | if .disk_total > 0 then (.disk_used * 100 / .disk_total | floor) else 0 end' <<<"$J")
@@ -276,7 +296,7 @@ if { [ "$(date -u +%H%M)" = 0500 ] && [ "$(get report_day)" != "$(date +%F)" ]; 
   [ $force = 1 ] || put report_day "$(date +%F)"
   from=$((NOW - 86400))
   read -r okn avg fails offm <<<"$(awk -v t=$from '$1 >= t { if ($2 > 0) { n++; s += $2 } else if ($2 == 0) f++; else o++ } END { printf "%d %d %d %d", n, (n ? s / n : 0), f, o }' $S/history.tsv 2>/dev/null)"
-  sw=$(awk -F'\t' -v t=$from '$1 >= t && ($2 == "auto" || $2 == "manual")' $S/events.tsv 2>/dev/null | wc -l)
+  sw=$(awk -F'\t' -v t=$from '$1 >= t && ($2 == "auto" || $2 == "manual" || $2 == "autoback")' $S/events.tsv 2>/dev/null | wc -l)
   nd=$(awk -F'\t' -v t=$from '$1 >= t && $2 == "newdev"' $S/events.tsv 2>/dev/null | wc -l)
   yday=$(TZ=Europe/Samara date -d yesterday +%F)        # день трафика — по Самаре
   NAMES=/var/lib/fspirat-router-auth/names.json

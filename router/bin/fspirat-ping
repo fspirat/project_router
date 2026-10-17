@@ -1,6 +1,7 @@
 #!/bin/sh
 # FSPIRAT: TCP-пинг узлов, настоящая проверка текущего сервера через SOCKS
-# и автопереключение «По умолчанию» в Split, если текущий перестал работать.
+# и автопереключение «По умолчанию» в Split, если текущий перестал работать;
+# свои серверы (PREFER) — в приоритете: при сбое выбираются первыми, а когда свой снова доступен — возврат на него.
 
 # Узлы: серверы всех подписок PassWall2 (группа = название подписки) и свои (группа fspirat, добавлены вручную)
 GROUPS=$(/usr/bin/fspirat-subs groups 2>/dev/null | tr 'A-Z' 'a-z'); [ -n "$GROUPS" ] || GROUPS="fspirat"
@@ -15,10 +16,32 @@ HIST_MAX=288            # 288 точек * 5 минут = 24 часа
 DIR=/tmp/fspirat
 mkdir -p $DIR/res
 
+# число из файла (нет файла или там не число — $2, по умолчанию 0)
+numf() { _v=$(cat "$1" 2>/dev/null); case "$_v" in ''|*[!0-9]*) echo "${2:-0}" ;; *) echo "$_v" ;; esac; }
+num() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
+# Свои серверы в приоритете (всё можно задать в /etc/fspirat/config):
+#   PREFER        ID узлов PassWall по убыванию приоритета; по умолчанию — узлы группы fspirat в порядке PassWall (fspiratDE fspiratNL).
+#                 При сбое сначала выбирается первый живой из них, и только если все свои молчат — сервер с наименьшим пингом.
+#   PREFER_RETURN 1 — вернуться на свой сервер, когда он снова доступен (если с него ушли автоматически); 0 — не возвращаться
+#   FB_STREAK     сколько проверок подряд (по 5 минут) свой сервер должен отвечать перед возвратом (3 = 15 минут)
+#   FB_HOLD       минут после автоматического ухода со своего сервера, раньше которых на него не возвращаемся
+#   FB_GAP        минут между попытками возврата (после неудачной — вдвое больше, до 8 часов)
+#   FB_MEM_MIN    проверить свой сервер заранее через временный Xray, если свободно не меньше стольких МБ
+[ -n "$PREFER" ] || PREFER=$(uci show passwall2 2>/dev/null | sed -n "s/^passwall2\.\([^.=]*\)\.group='fspirat'$/\1/p" | tr '\n' ' ')
+PREFER_RETURN=$(num "$PREFER_RETURN" 1); FB_STREAK=$(num "$FB_STREAK" 3); FB_HOLD=$(num "$FB_HOLD" 20)
+FB_GAP=$(num "$FB_GAP" 60); FB_MEM_MIN=$(num "$FB_MEM_MIN" 70)
+LAST=/etc/fspirat/last_switch    # «auto ID» / «manual ID» — кто выбрал сервер (переживает перезагрузку; пишут fspirat-ping и CGI switch)
+
 # не запускаться дважды одновременно
-if [ -f $DIR/lock ] && kill -0 "$(cat $DIR/lock)" 2>/dev/null; then exit 0; fi
-echo $$ > $DIR/lock
-trap 'rm -f $DIR/lock' EXIT INT TERM
+# (cron и кнопка «Пинг всех» в CGI; с возвратом на свой сервер запуск может идти до ~1,5 минуты). Файл создаётся атомарно
+# (set -C), чужой файл от завершившегося процесса — перехватываем.
+if ! ( set -C; echo $$ > $DIR/lock ) 2>/dev/null; then
+  kill -0 "$(cat $DIR/lock 2>/dev/null)" 2>/dev/null && exit 0
+  echo $$ > $DIR/lock
+fi
+FX=""     # временный Xray проверки своего сервера (4а)
+trap '[ -n "$FX" ] && kill $FX 2>/dev/null; rm -f $DIR/lock $DIR/fb-xray.json' EXIT
+trap 'exit 1' INT TERM HUP    # по сигналу — выйти (и убрать временный Xray), а не продолжать с середины
 rm -f $DIR/res/*
 /usr/bin/fspirat-fw 2>/dev/null       # таблица счётчиков и блокировок (после перезагрузки её нет)
 
@@ -83,6 +106,16 @@ tail -n $HIST_MAX $DIR/history > $DIR/history.tmp && mv $DIR/history.tmp $DIR/hi
 } > $DIR/ping.json.tmp && mv $DIR/ping.json.tmp $DIR/ping.json
 
 # 4. Автопереключение
+ms_of() { numf $DIR/res/$1; }                      # TCP-пинг узла в этом запуске (0 — не ответил или не пинговался)
+away_ago() { echo $(( $(date +%s) - $(numf $DIR/fb_away_$1) )); }   # секунд с тех пор, как с этого своего сервера ушли автоматически
+rank() { _r=1; for _q in $PREFER; do [ "$_q" = "$1" ] && { echo $_r; return; }; _r=$((_r+1)); done; echo 99; }   # 99 — не свой
+remember() { [ "$(cat $LAST 2>/dev/null)" = "$1" ] || { echo "$1" > $LAST; } 2>/dev/null; }   # во флеш — только при смене
+set_node() {
+  uci set passwall2.$SHUNT.default_node=$1
+  uci commit passwall2
+  /etc/init.d/passwall2 restart >/dev/null 2>&1
+}
+
 FAILS=$(cat $DIR/fails 2>/dev/null || echo 0)
 if [ "$CUR" = _direct ]; then
   FAILS=0                           # выбран режим «Напрямую (без VPN)» — это решение пользователя, VPN сами не включаем
@@ -95,24 +128,147 @@ else
 fi
 echo $FAILS > $DIR/fails
 
+# сколько проверок подряд свой сервер отвечает на TCP-пинг (для возврата, 4а). Только запуск по cron (раз в 5 минут):
+# кнопка «Пинг всех» (CGI ping → fspirat-ping all) не должна ускорять счёт
+[ "$1" = all ] || for p in $PREFER; do
+  case "$p" in *[!A-Za-z0-9_]*) continue ;; esac
+  if [ "$(ms_of $p)" -gt 0 ]; then n=$(( $(numf $DIR/fb_ok_$p) + 1 )); else n=0; fi
+  echo $n > $DIR/fb_ok_$p
+done
+
 if [ $FAILS -ge $FAILS_TO_SWITCH ]; then
   BEST=""; BEST_MS=999999
-  for f in $DIR/res/*; do
-    id=$(basename "$f"); ms=$(cat "$f")
-    [ "$id" = "$CUR" ] && continue
-    [ "$ms" -gt 0 ] || continue
-    uci -q get passwall2.$id.remarks | grep -qE "$EXCLUDE" && continue
-    [ "$ms" -lt "$BEST_MS" ] && { BEST=$id; BEST_MS=$ms; }
+  for p in $PREFER; do              # сначала свои серверы: первый живой по порядку PREFER
+    [ "$p" = "$CUR" ] && continue
+    case "$p" in *[!A-Za-z0-9_]*) continue ;; esac
+    ms=$(ms_of $p); [ "$ms" -gt 0 ] || continue
+    # с него сами ушли меньше FB_HOLD минут назад: TCP-порт может отвечать и при сломанном VPN (443 держит nginx) —
+    # иначе при сломанных обоих своих качались бы DE ↔ NL каждые 10 минут и не дошли до подписки
+    [ "$(away_ago $p)" -lt $((FB_HOLD * 60)) ] && continue
+    BEST=$p; BEST_MS=$ms; break
   done
+  if [ -z "$BEST" ]; then           # свои молчат — сервер с наименьшим пингом
+    for f in $DIR/res/*; do
+      id=$(basename "$f"); ms=$(cat "$f")
+      [ "$id" = "$CUR" ] && continue
+      [ "$ms" -gt 0 ] || continue
+      uci -q get passwall2.$id.remarks | grep -qE "$EXCLUDE" && continue
+      [ "$ms" -lt "$BEST_MS" ] && { BEST=$id; BEST_MS=$ms; }
+    done
+  fi
+  if [ -z "$BEST" ]; then           # больше никто не отвечает — хотя бы свой, с которого недавно ушли
+    for p in $PREFER; do
+      [ "$p" = "$CUR" ] && continue
+      ms=$(ms_of $p); [ "$ms" -gt 0 ] || continue
+      BEST=$p; BEST_MS=$ms; break
+    done
+  fi
   if [ -n "$BEST" ]; then
+    if [ "$(rank "$CUR")" -lt 99 ]; then
+      date +%s > $DIR/fb_away_$CUR     # ушли со своего — раньше FB_HOLD на него не возвращаемся и при сбое не выбираем
+      # свой сервер сломался меньше чем через час после возврата на него — считаем возврат неудачным (пауза вдвое больше), чтобы не качаться
+      if [ $(( $(date +%s) - $(numf $DIR/fb_last) )) -lt 3600 ]; then
+        g=$(( $(numf $DIR/fb_gap "$FB_GAP") * 2 )); [ $g -gt 480 ] && g=480; [ $g -lt "$FB_GAP" ] && g=$FB_GAP; echo $g > $DIR/fb_gap
+      fi
+    fi
     # запись в журнал — до смены: сервер (fspirat-watch) по ней понимает, что смена автоматическая, а не ручная
     echo "$(date '+%d.%m %H:%M') авто $CUR -> $BEST ${BEST_MS}ms" >> $DIR/switch.log
     logger -t fspirat "switch $CUR -> $BEST (${BEST_MS} ms)"
-    uci set passwall2.$SHUNT.default_node=$BEST
-    uci commit passwall2
-    /etc/init.d/passwall2 restart >/dev/null 2>&1
+    remember "auto $BEST"
+    set_node $BEST
     echo 0 > $DIR/fails
   fi
+fi
+
+# 4а. Возврат на свой сервер: текущий выбран автоматически, а свой сервер выше по приоритету снова отвечает.
+# Предварительная проверка через временный Xray (если хватает памяти): PRE=1 — интернет через узел $1 есть, 0 — нет, пусто — не проверяли
+fb_precheck() {
+  PRE=""
+  [ -f $DIR/svc/lock ] && kill -0 "$(cat $DIR/svc/lock)" 2>/dev/null && return 0    # идёт fspirat-svcping — два временных Xray не держим
+  avail=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo 2>/dev/null)
+  [ "${avail:-0}" -ge "$FB_MEM_MIN" ] 2>/dev/null || return 0
+  [ -x /usr/bin/xray ] || return 0
+  lua /usr/lib/lua/luci/passwall2/util_xray.lua gen_config \
+    "{\"node\":\"$1\",\"flag\":\"fsfb\",\"local_socks_address\":\"127.0.0.1\",\"local_socks_port\":\"10802\",\"loglevel\":\"none\"}" > $DIR/fb-xray.json 2>/dev/null \
+    || { rm -f $DIR/fb-xray.json; return 0; }
+  /usr/bin/xray run -c $DIR/fb-xray.json >/dev/null 2>&1 & FX=$!
+  k=0; while [ $k -lt 6 ] && ! netstat -ltn 2>/dev/null | grep -q "127.0.0.1:10802 "; do sleep 1; k=$((k+1)); done
+  if netstat -ltn 2>/dev/null | grep -q "127.0.0.1:10802 "; then
+    [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x socks5h://127.0.0.1:10802 "$TEST_URL")" = 204 ] && PRE=1 || PRE=0
+  fi
+  kill $FX 2>/dev/null; wait $FX 2>/dev/null; FX=""; rm -f $DIR/fb-xray.json
+}
+# После переключения: интернет через основной SOCKS (3 попытки)
+fb_verify() {
+  k=0; while [ $k -lt 15 ] && ! netstat -ltn 2>/dev/null | grep -q ":${SOCKS##*:} "; do sleep 1; k=$((k+1)); done
+  for k in 1 2 3; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x "socks5h://$SOCKS" "$TEST_URL")" = 204 ] && return 0
+    sleep 3
+  done
+  return 1
+}
+failback() {
+  RC=$(rank "$CUR")
+  # на самом приоритетном своём уже больше часа после возврата — паузу между попытками снова сбросить до FB_GAP
+  [ "$RC" = 1 ] && [ $(( $(date +%s) - $(numf $DIR/fb_last) )) -ge 3600 ] && [ "$(numf $DIR/fb_gap "$FB_GAP")" != "$FB_GAP" ] && echo $FB_GAP > $DIR/fb_gap
+  [ "$RC" -gt 1 ] || return 0                                    # уже на самом приоритетном своём
+  # кто выбрал текущий сервер: последняя запись о выборе сервера (после перезагрузки журнала нет — /etc/fspirat/last_switch)
+  L=$(grep -E '^[0-9]{2}\.[0-9]{2} [0-9]{2}:[0-9]{2} (авто|вручную)' $DIR/switch.log 2>/dev/null | tail -n 1)
+  [ -n "$L" ] || L=$(cat $LAST 2>/dev/null)
+  case "$L" in
+    *вручную*|manual\ *) return 0 ;;                              # выбран вручную (страница, бот, приложение) — не трогаем
+    *"-> $CUR "*|*"-> $CUR"|"auto $CUR") ;;                         # авто, авто-возврат, авто-откат на текущий
+    *) return 0 ;;                                                 # неизвестно, кто выбрал (LuCI и т.п.) — не трогаем
+  esac
+  T=""
+  for p in $PREFER; do
+    [ "$(rank "$p")" -lt "$RC" ] || break
+    case "$p" in *[!A-Za-z0-9_]*) continue ;; esac
+    [ -n "$(uci -q get passwall2.$p.address)" ] || continue
+    [ "$(ms_of $p)" -gt 0 ] || continue                          # молчит — смотрим следующий свой
+    [ "$(numf $DIR/fb_ok_$p)" -ge "$FB_STREAK" ] && T=$p
+    break                                                        # отвечает, но недолго — ждём его, а не менее приоритетный
+  done
+  [ -n "$T" ] || return 0
+  now=$(date +%s)
+  [ "$(away_ago $T)" -lt $((FB_HOLD * 60)) ] && return 0     # недавно с него ушли — пусть постоит
+  gap=$(numf $DIR/fb_gap "$FB_GAP")
+  [ $((now - $(numf $DIR/fb_last))) -lt $((gap * 60)) ] && return 0             # прошлая попытка была недавно
+  fb_precheck $T
+  if [ "$PRE" = 0 ]; then
+    echo 0 > $DIR/fb_ok_$T
+    logger -t fspirat "failback precheck via $T failed, staying on $CUR"
+    return 0
+  fi
+  ms=$(ms_of $T); PREV=$CUR
+  echo "$(date '+%d.%m %H:%M') авто-возврат $PREV -> $T ${ms}ms" >> $DIR/switch.log    # до смены — как у «авто»
+  logger -t fspirat "failback $PREV -> $T (${ms} ms)"
+  echo "$now" > $DIR/fb_last
+  remember "auto $T"
+  set_node $T
+  if fb_verify; then
+    echo $gap > $DIR/fb_gap; echo 0 > $DIR/fails; CUR=$T     # пауза сбросится, если свой продержится час (см. начало failback)
+    return 0
+  fi
+  # свой сервер отвечает на пинг, но интернет через него не идёт — вернуть как было (если за это время не выбрали другой вручную)
+  g=$((gap * 2)); [ $g -gt 480 ] && g=480; [ $g -lt "$FB_GAP" ] && g=$FB_GAP
+  echo $g > $DIR/fb_gap; echo 0 > $DIR/fb_ok_$T
+  [ "$(uci -q get passwall2.$SHUNT.default_node)" = "$T" ] || return 0
+  # за время проверки сервер выбрали вручную (в том числе тот же DE) — не трогаем
+  case "$(grep -E '^[0-9]{2}\.[0-9]{2} [0-9]{2}:[0-9]{2} (авто|вручную)' $DIR/switch.log 2>/dev/null | tail -n 1)" in
+    *"авто-возврат $PREV -> $T "*) ;;
+    *) return 0 ;;
+  esac
+  echo "$(date '+%d.%m %H:%M') авто-откат $T -> $PREV (свой сервер не прошёл проверку)" >> $DIR/switch.log
+  logger -t fspirat "failback to $T failed, back to $PREV"
+  remember "auto $PREV"
+  set_node $PREV
+}
+# Возврат — только по cron (не по кнопке «Пинг всех»: CGI ждёт ответа, а возврат перезапускает PassWall), только когда
+# основной SOCKS отвечает (иначе PassWall, скорее всего, как раз перезапускается) и никто сейчас не перезапускает PassWall.
+if [ "$PREFER_RETURN" = 1 ] && [ "$1" != all ] && [ $FAILS -eq 0 ] && [ $SOCKS_OK -eq 1 ] && [ -n "$CUR" ] && [ "$CUR" != _direct ] \
+   && ! ps w 2>/dev/null | grep -q '[i]nit\.d/passwall2'; then
+  failback
 fi
 
 # 4б. Подписка VPN (срок и трафик) — раз в час и если ещё нет данных

@@ -59,6 +59,9 @@
 - Секреты nginx (`snippets/fspirat-router.conf`, `.htpasswd_router`) — 640, пользователю deploy не видны.
 - HSTS и `server_tokens off` — `server/nginx/conf.d/security-headers.conf`.
 - fspirat-watch раз в 5 минут проверяет сайты, страницу входа и mtg; раз в день — сертификаты (< 14 дней → Telegram).
+- Память роутера (fspirat-watch, 17.10.2026): «🧠» в Telegram — только если свободно < 25 МБ две минуты подряд или Xray ≥ 120 МБ,
+  не чаще раза в сутки (снова — когда свободно ≥ 40 МБ и Xray < 100 МБ). Xray ≥ 80 МБ (бывает при включении ПК) — только запись `mem`
+  в журнал раз в сутки. RSS Xray включает ~27 МБ самого файла xray.
 - Cookie `fsr_session` не уходит на роутер (LuCI): map в `server/nginx/conf.d/fsr-luci-cookie.conf`.
 - Пользователь `tunnel` — оболочка `/usr/sbin/nologin` (только проброс портов).
 - Ключ `deploy` — только rrsync в /var/www/fspirat.online (workflow `Restrict deploy key`); пути в rsync — от этой папки.
@@ -143,6 +146,16 @@ nginx перед каждым запросом спрашивает `check.php` 
   Если Split пересоздать, ID изменится — тогда поправить `SHUNT=` в fspirat-ping и в CGI.
 - Группа узлов подписки: `nosok`. Текущий сервер VPN = `uci get passwall2.9DxG2j8l.default_node`.
 - Исключены из списка и автопереключения: имена с `LTE|Россия|Обход` (переменная `EXCLUDE`).
+- **Свои серверы в приоритете** (fspirat-ping, 17.10.2026): `PREFER` — по умолчанию узлы группы `fspirat` в порядке PassWall
+  (`fspiratDE fspiratNL`). При сбое сначала первый живой свой (кроме того, с которого сами ушли < `FB_HOLD` мин назад — порт 443
+  отвечает и при сломанном VPN), потом — наименьший пинг. **Возврат** (только по cron, не по «Пинг всех»; только если SOCKS 1070 жив
+  и PassWall сейчас не перезапускается): если текущий выбран автоматически (не вручную, не `_direct`), а свой выше по приоритету
+  отвечает 3 проверки подряд (`FB_STREAK`), не раньше 20 мин после ухода с него (`FB_HOLD`) и раз в 60 мин (`FB_GAP`; после неудачи
+  или если свой сломался < 1 ч после возврата — ×2, до 8 ч) — переключение (перезапуск PassWall) и проверка 204 через SOCKS 1070;
+  не прошла — обратно (`авто-откат`), если за это время не выбрали сервер вручную. Заранее — через временный Xray :10802, если свободно ≥ 70 МБ (`FB_MEM_MIN`).
+  Журнал: `авто-возврат A -> B Nms` / `авто-откат B -> A (…)`; кто выбрал сервер — `/etc/fspirat/last_switch` (`auto|manual ID`,
+  пишут fspirat-ping и CGI switch). Всё задаётся в `/etc/fspirat/config`; выключить возврат — `PREFER_RETURN=0`, только DE — `PREFER="fspiratDE"`.
+  Счётчики — `/tmp/fspirat/fb_*` (`fb_ok_ID`, `fb_away_ID`, `fb_last`, `fb_gap`). Тест: `sh router/tests/failback-test.sh` (`BB=1` — busybox).
 - SOCKS-порт основного узла PassWall: **1070** (`node_socks_port`). Через него идёт
   настоящая проверка и тест скорости «через VPN». Отдельный SOCKS 1080 НЕ настроен.
 - `localhost_proxy='0'`: собственный трафик роутера идёт напрямую (не через VPN).
